@@ -361,6 +361,14 @@ class Archive:
         precies de lijst die hij zelf heeft ingevuld, dus er komt nooit een
         sensor bij die hij niet kent, en er valt er nooit een af die hij wel
         wil zien.
+
+        Sinds v0.180.0 ook de fasen van de lastbewaker (`sources.phases`): de
+        stroom als die er is, anders het vermogen en de spanning, zoals
+        `_phase_amps` in monitor.py en `phaseAmps` in data-source.js er de
+        ampères van maken. Een stroom of spanning gaat zoals hij is de opslag in
+        (`to_watts` kent A en V niet en laat ze staan). Een bewoner in een
+        klantwoning op 29-10-2026 wilde weten of een kleinere aansluiting past,
+        en dat hangt af van elke fase apart, per kwartier en niet per uur.
         """
         bronnen = settings.get("sources") or {}
         uit = {
@@ -370,6 +378,15 @@ class Archive:
             bronnen.get("solar"),
             *(bronnen.get("solar_extra") or []),
         }
+        if bronnen.get("phases_enabled"):
+            fasen = bronnen.get("phases") or {}
+            for fase in ("l1", "l2", "l3"):
+                config = fasen.get(fase) if isinstance(fasen.get(fase), dict) else {}
+                if config.get("current"):
+                    uit.add(config["current"])
+                elif config.get("power"):
+                    uit.add(config["power"])
+                    uit.add(config.get("voltage"))
         for apparaat in settings.get("devices") or []:
             uit.add(apparaat.get("entity"))
             # Een thuisbatterij meldt laden en ontladen soms op twee sensoren.

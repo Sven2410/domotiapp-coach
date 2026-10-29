@@ -210,7 +210,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 | de vaatwasser: Home Connect, Home Connect Local, een domme vaatwasser, de eindtijd, na de klaar-tijd; en de wasmachine en de droger (Miele, tellen op een energieteller) | `docs/vaatwasser.md` |
 | de boiler | `docs/boiler.md` |
 | de airco: bijverwarmen of bijkoelen op zon (of op goedkope uren als de bewoner dat kiest), geen thermostaat, Mitsubishi Electric als merk, de bewoner die wint, de cloud die een minuut doet, en het contract met de airco-kaart | `docs/airco.md` |
-| Historie en het rapport, het verbruik per apparaat (zoals het energiedashboard), batterij geladen en ontladen, de tijdlijn in Historie, meerdere omvormers, gas en water, eerdere contracten, de lekmelding, en de batterij op de kaart en in de pop-up | `docs/eerste-woning.md` |
+| Historie en het rapport, het verbruik per apparaat (zoals het energiedashboard), batterij geladen en ontladen, de tijdlijn in Historie, meerdere omvormers, gas en water, eerdere contracten, de lekmelding, de batterij op de kaart en in de pop-up, en Per fase, de datum bij een kwartier en het bestand voor Excel (v0.180.0) | `docs/eerste-woning.md` |
 | een smart plug: de lijst met apparaten en hun iconen, altijd aan (ook voor een vaatwasser, en sinds v0.177.0 een vriezer, koelkast, wasmachine en droger aan een smart plug, met meten op de stekker), de melding Apparaat staat uit, en één melding voor stekkers die samen wegvallen (v0.178.0) | `docs/smart-plug.md` |
 | de vriezer en de koelkast: uitlezen en melden (deur open, te warm, storing), niet sturen | `docs/vriezer.md` |
 | het paneel: wie wat ziet (bewoner en installateur, Instellen achter de kaart), de apparaatlijst en de ruimtes daarin, de volgorde op het overzicht, waar het schema van een apparaat staat, de vooruitblik op het overzicht en "Wat gaat hij doen" voor boiler en programma's | `docs/paneel.md` |
@@ -299,6 +299,9 @@ dan de andere in dezelfde uitgave.
   en `momentRegels` in vooruitblik.js lezen (`van`, `tot`, `prijzen`, `zon`, `huis`,
   `apparaten` met `blokken`, `voorrang_zon`, `voorrang_plan`); proef 174 in test_coach.py en de
   proef "de vooruitblik" in test_rapport.mjs (`docs/paneel.md`).
+- **De fasen in de kwartieropslag** (v0.180.0): welke sensoren `_wat_volgen` in archive.py van een fase
+  bewaart (de stroom, anders het vermogen en de spanning) en `faseBronnen` in fasen.js leest; de ampères
+  met `phaseAmps` (data-source.js), zoals `_phase_amps` in monitor.py (`docs/eerste-woning.md`).
 - **Wanneer een kaart vraagt hoe vol de auto is** (v0.117.0): `soc_ask` in coach.py
   (de number `accustand` voor DomotiApp Lovelace) en `vraagAccustand` in devices.js
   trekken dezelfde grens (`docs/laadpaal.md`).
@@ -335,6 +338,7 @@ dan de andere in dezelfde uitgave.
 | `berichten.py`, `frontend/src/berichten-sheet.js` | De berichtenbox (v0.130.0): wanneer een herinnering aan de beurt is (meterstanden, een vast contract dat afloopt, de prijscontrole die omslaat), en de pop-up achter het belletje in de kop. Bewaard in `BerichtenStore` (storage.py) (`docs/berichten.md`) |
 | `frontend/src/opbouw.js` | "Zo komt je prijs tot stand" (v0.129.0), op Contract (sinds v0.130.1 ook voor de bewoner): toont wat de coach uitrekent, in woorden en cijfers, in de volgorde van de leverancier |
 | `frontend/src/vooruitblik.js` | De vooruitblik op het overzicht (v0.133.0): per uur de prijs, de zon, het huis en wat elk apparaat doet, in de volgorde van de voorrang, uit `domotiapp_coach/forecast` (`vooruitblik` in coach.py). Rekent zelf niets bij (`docs/paneel.md`) |
+| `frontend/src/fasen.js`, `frontend/src/csv.js` | Per fase en het bestand voor Excel in Historie (v0.180.0): de ampères per kwartier uit de kwartieropslag, hoe vaak een fase boven een zekering kwam, en de tabel voor Excel per taal. Kennen Home Assistant niet (`docs/eerste-woning.md`) |
 | `frontend/src/tijdlijn.js` | De tijdlijn in Historie (v0.115.0): per dag een baan per apparaat dat de coach stuurt, uit de besluiten in Meldingen (sinds v0.115.0 met `device`, `rule`, `mode`, `charge` erbij), en de kleur zon of net uit de kwartieren van het apparaat en het net, niet uit de regel. Kent Home Assistant niet (`docs/eerste-woning.md`) |
 
 De scheiding tussen `planner.py` en `coach.py` is de kern: het denkwerk is los

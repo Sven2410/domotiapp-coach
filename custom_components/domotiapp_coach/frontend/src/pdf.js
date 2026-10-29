@@ -477,8 +477,8 @@ export function base64Van(blob) {
  *
  * @returns {Promise<"gedeeld"|"afgebroken"|"gedownload"|"geopend"|"mislukt">}
  */
-export async function afleveren(blob, bestandsnaam) {
-  const bestand = new File([blob], bestandsnaam, { type: "application/pdf" });
+export async function afleveren(blob, bestandsnaam, type = "application/pdf") {
+  const bestand = new File([blob], bestandsnaam, { type });
   const opAanraking = window.matchMedia?.("(pointer: coarse)")?.matches ?? false;
 
   if (opAanraking && navigator.canShare?.({ files: [bestand] })) {

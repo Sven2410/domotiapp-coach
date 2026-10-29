@@ -6471,6 +6471,173 @@ proef("één prijs voor elk uur: wat op een goedkoper uur wacht staat er niet (v
   assert.ok(strategie.includes('id="prijs-kleuren"') && strategie.includes("vlakkePrijs(d?.contract)"));
 });
 
+// Een bewoner in een klantwoning op 29-10-2026: een kleinere aansluiting en een thuisbatterij
+// doorrekenen. De datum bij Kwartier en Uur, de fasen per kwartier, en een bestand voor Excel.
+proef("Historie: de datum bij kwartier en uur, de fasen en het bestand voor Excel (v0.180.0)", async () => {
+  const f = await import("../custom_components/domotiapp_coach/frontend/src/format.js");
+  const i = await import("../custom_components/domotiapp_coach/frontend/src/i18n.js");
+  const hist = await import("../custom_components/domotiapp_coach/frontend/src/views/history.js");
+  const fasen = await import("../custom_components/domotiapp_coach/frontend/src/fasen.js");
+  const csv = await import("../custom_components/domotiapp_coach/frontend/src/csv.js");
+  try {
+    f.zetHuisZone("Europe/Amsterdam");
+    // De nacht van 25-10-2026: om 01:00 UTC gaat de klok van 03:00 terug naar 02:00. Van 00:00 tot
+    // 04:00 op de klok zijn dat vijf echte uren, twintig kwartieren.
+    const kwartieren = (waarde) => Array.from({ length: 20 }, (_, k) => {
+      const utc = new Date(Date.UTC(2026, 9, 24, 22, 0) + k * 900000);
+      return { start: f.alsHuis(utc), utc, laagste: waarde - 1, gemiddeld: waarde + k, piek: waarde + 2 * k, seconden: 900 };
+    });
+    const net = kwartieren(1000);
+
+    // De datum: binnen een dag kort, over een week met de dag erbij.
+    const kw = hist.korrelVakken(net, "quarter");
+    assert.equal(kw.length, 20, "elk kwartier apart, ook het uur dat twee keer komt");
+    assert.equal(hist.korrelLabel("quarter", kw[9].start, "day"), "02:15");
+    assert.equal(hist.korrelLabel("quarter", kw[9].start, "week"), "zo 25 okt 02:15");
+    assert.equal(hist.korrelLabel("hour", kw[9].start, "month"), "zo 25 okt 02:00");
+    assert.equal(hist.korrelLabel("hour", kw[9].start, "day"), "02:00");
+    const uren = hist.korrelVakken(net, "hour");
+    assert.deepEqual(uren.map((u) => u.start.getHours()), [0, 1, 2, 2, 3], "twee uren van 02:00");
+    assert.deepEqual(uren.map((u) => u.utc.toISOString().slice(11, 16)), ["22:00", "23:00", "00:00", "01:00", "02:00"]);
+    assert.equal(uren[2].piek, 1000 + 2 * 11, "de piek is de hoogste van het uur, niet van twee uren");
+
+    // De fasen: een stroom zoals hij is, een vermogen gedeeld door de spanning (of 230 V).
+    const bronnen = fasen.faseBronnen({ phases_enabled: true, phases: {
+      l1: { current: "sensor.l1_a", power: "sensor.l1_w" },
+      l2: { power: "sensor.l2_w", voltage: "sensor.l2_v" },
+      l3: { power: "sensor.l3_w" },
+    } });
+    assert.deepEqual(bronnen.map((b) => [b.label, b.current ?? b.power]), [["L1", "sensor.l1_a"], ["L2", "sensor.l2_w"], ["L3", "sensor.l3_w"]]);
+    assert.deepEqual(fasen.faseEntiteiten(bronnen), ["sensor.l1_a", "sensor.l2_w", "sensor.l2_v", "sensor.l3_w"]);
+    const rij = (utc, laagste, gemiddeld, piek) => ({ start: f.alsHuis(utc), utc, laagste, gemiddeld, piek, seconden: 900 });
+    const t0 = new Date(Date.UTC(2026, 9, 27, 18, 0));
+    const t1 = new Date(t0.getTime() + 900000);
+    const gevonden = new Map([
+      ["sensor.l1_a", [rij(t0, 10, 22, 31.5), rij(t1, 20, 26, 28)]],
+      ["sensor.l2_w", [rij(t0, 2300, 4800, 6000)]],
+      ["sensor.l2_v", [rij(t0, 238, 240, 241)]],
+      ["sensor.l3_w", [rij(t0, 0, 4600, 5750)]],
+    ]);
+    const [l1, l2, l3] = bronnen.map((b) => fasen.faseKwartieren(b, gevonden));
+    assert.equal(l1[0].piek, 31.5);
+    assert.equal(l2[0].gemiddeld, 20, "4800 W bij 240 V");
+    assert.equal(l3[0].gemiddeld, 20, "4600 W bij 230 V zonder spanning");
+    assert.equal(l3[0].piek, 25);
+    const over = fasen.overZekering(l1, 25);
+    assert.deepEqual([over.kwartieren, over.gemiddeld, over.piek, over.hoogste.amps], [2, 1, 2, 31.5]);
+    assert.equal(over.hoogste.op.getTime(), l1[0].start.getTime());
+    assert.equal(fasen.overZekering(l1, 35).piek, 0);
+    assert.equal(fasen.overZekering([{ ...l1[0], gemiddeld: -27, piek: -10, laagste: -30 }], 25).gemiddeld, 1, "teruglevering belast de zekering ook");
+    assert.deepEqual(fasen.zekeringKeuzes(50).slice(0, 3), [16, 20, 25]);
+    assert.ok(fasen.zekeringKeuzes(30).includes(30) && fasen.zekeringKeuzes(0).length === fasen.ZEKERINGEN.length);
+    // Een installatie zonder fasen: geen kaart, geen kolommen.
+    assert.deepEqual(fasen.faseBronnen({ phases_enabled: false, phases: { l1: { current: "sensor.l1_a" } } }), []);
+    assert.deepEqual(fasen.faseBronnen({ phases_enabled: true, phases: {} }), []);
+    const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/history.js", import.meta.url), "utf8");
+    assert.ok(bron.includes('card.hidden = this.onderwerp_ !== "energie" || !fasen.length;'), "zonder fasen blijft de kaart weg");
+    assert.ok(bron.includes("...faseEntiteiten(fasen)") && bron.includes("...fasen.map((fase) => ({ naam: fase.label"), "de fasen in het bestand");
+
+    // Het bestand: in het Nederlands een puntkomma en een komma, met een BOM; een uur dat twee keer
+    // komt staat er twee keer, met elk zijn eigen UTC.
+    const woorden = { datum: "Datum", tijd: "Tijd", laagste: "laagste", gemiddeld: "gemiddeld", piek: "piek" };
+    const reeksen = [
+      { naam: "Van het net", eenheid: "W", decimalen: 0, vakken: kw },
+      { naam: "L1; hoofd", eenheid: "A", decimalen: 2, vakken: hist.korrelVakken(kwartieren(20.5).slice(0, 10), "quarter") },
+    ];
+    const nl = csv.csvOpmaak("nl");
+    const tabel = csv.csvTabel(reeksen, nl, woorden);
+    assert.deepEqual(tabel.kop.slice(0, 4), ["Datum", "Tijd", "UTC", "Van het net laagste (W)"]);
+    assert.equal(tabel.kop.length, 3 + 6);
+    assert.equal(tabel.rijen.length, 20);
+    assert.deepEqual(tabel.rijen[9].slice(0, 3), ["2026-10-25", "02:15", "2026-10-25T00:15:00Z"]);
+    assert.deepEqual(tabel.rijen[13].slice(0, 3), ["2026-10-25", "02:15", "2026-10-25T01:15:00Z"]);
+    assert.deepEqual(tabel.rijen[9].slice(6), ["19,50", "29,50", "38,50"]);
+    assert.deepEqual(tabel.rijen[12].slice(6), ["", "", ""], "een vak zonder fase blijft leeg");
+    const tekst = csv.csvTekst(tabel.kop, tabel.rijen, nl);
+    assert.ok(tekst.startsWith("﻿Datum;Tijd;UTC;Van het net laagste (W);"));
+    assert.ok(tekst.includes('"L1; hoofd laagste (A)"'), "een naam met een puntkomma tussen aanhalingstekens");
+    assert.ok(tekst.split("\r\n")[10].startsWith("2026-10-25;02:15;2026-10-25T00:15:00Z;999;1009;1018;19,50;"), tekst.split("\r\n")[10]);
+    const en = csv.csvOpmaak("en");
+    const engels = csv.csvTekst(tabel.kop, csv.csvTabel(reeksen, en, woorden).rijen, en);
+    assert.ok(engels.split("\r\n")[10].startsWith("2026-10-25,02:15,2026-10-25T00:15:00Z,999,1009,1018,19.50,"), engels.split("\r\n")[10]);
+    assert.equal(csv.csvGetal(-0.2, 0, nl), "0", "geen -0");
+    assert.equal(csv.csvGetal(Number.NaN, 0, nl), "");
+
+    // En in het Engels heet een tijdvak zoals de taal het schrijft.
+    i.kiesTaal("en");
+    try {
+      assert.equal(hist.korrelLabel("quarter", kw[9].start, "week"), "Sun 25 Oct 02:15");
+    } finally {
+      i.kiesTaal("nl");
+    }
+  } finally {
+    f.zetHuisZone(null);
+  }
+});
+
+proef("Historie: de kaart Per fase en de knop CSV draaien echt (v0.180.0)", async () => {
+  const nep = () => {
+    const svg = { addEventListener() {}, querySelector: () => ({ setAttribute() {}, removeAttribute() {} }), getBoundingClientRect: () => ({ left: 0, width: 600 }) };
+    return { hidden: true, innerHTML: "", textContent: "", value: "", disabled: false, getBoundingClientRect: () => ({ width: 600 }),
+      querySelector: (k) => (k === "span" ? (this_span) : svg), setAttribute() {}, removeAttribute() {} };
+  };
+  const this_span = { textContent: "CSV" };
+  const opslag = {
+    "sensor.afname": kwartieren([{ laag: 100, gem: 500, piek: 900 }, { laag: 200, gem: 600, piek: 800 }]),
+    "sensor.l1_a": kwartieren([{ laag: 10, gem: 27, piek: 34.2 }, { laag: 5, gem: 12, piek: 20 }]),
+    "sensor.l2_a": kwartieren([{ laag: 1, gem: 8, piek: 12 }, { laag: 1, gem: 9, piek: 14 }]),
+    "sensor.l3_w": kwartieren([{ laag: 230, gem: 2300, piek: 6900 }, { laag: 0, gem: 0, piek: 0 }]),
+  };
+  const el = weergave({
+    grid_mode: "split", grid_import: "sensor.afname", phases_enabled: true,
+    phases: { l1: { current: "sensor.l1_a" }, l2: { current: "sensor.l2_a" }, l3: { power: "sensor.l3_w" } },
+  }, opslag);
+  el.settings_.installation = { fuse_amps: 25 };
+  el.onderwerp_ = "energie";
+  const delen = new Map();
+  el.$ = (k) => {
+    if (!delen.has(k)) delen.set(k, nep());
+    return delen.get(k);
+  };
+  await el.laadFasen_();
+  const kaart = el.$("#fasen-card");
+  assert.equal(kaart.hidden, false, "met fasen staat de kaart er");
+  const svg = el.$("#fasen-stage").innerHTML;
+  assert.equal((svg.match(/class="fase-lijn"/g) ?? []).length, 3, "drie lijnen");
+  assert.ok(svg.includes('class="fase-zekering"') && svg.includes(">25 A<"), "de zekering van de installatie");
+  const lijst = el.$("#fasen-lijst").innerHTML;
+  assert.ok(lijst.includes("<b>L1</b><span>Eén kwartier gemiddeld boven 25 A, in één een piek erboven. Hoogste piek 34,2 A om 00:00.</span>"), lijst);
+  assert.ok(lijst.includes("<b>L2</b><span>Nooit boven 25 A. Hoogste piek 14,0 A om 00:15.</span>"), lijst);
+  assert.ok(lijst.includes("<b>L3</b><span>Gemiddeld nooit boven 25 A, in één kwartier een piek erboven. Hoogste piek 30,0 A om 00:00.</span>"),
+    "6900 W bij 230 V is 30 A: " + lijst);
+  assert.ok(el.$("#fasen-zekering").innerHTML.includes('<option value="25">25 A (je aansluiting)</option>'));
+  assert.ok(el.$("#fasen-note").textContent.includes("Zonder stroomsensor rekent de coach de stroom uit het vermogen en de spanning."));
+  // Een andere zekering proberen.
+  el.zekering_ = 35;
+  el.paintFasen_();
+  assert.ok(el.$("#fasen-lijst").innerHTML.includes("<b>L1</b><span>Nooit boven 35 A."), el.$("#fasen-lijst").innerHTML);
+  // Zonder fasen weg.
+  el.settings_.sources = { ...el.settings_.sources, phases_enabled: false };
+  await el.laadFasen_();
+  assert.equal(kaart.hidden, true, "zonder fasen geen kaart");
+
+  // De knop CSV: het net in W en de fasen in A, langs report/store.
+  el.settings_.sources = { ...el.settings_.sources, phases_enabled: true };
+  let bezorgd = null;
+  el.bezorg_ = async (blob, naam, soort) => {
+    bezorgd = { tekst: await blob.text(), naam, soort };
+    return "gedownload";
+  };
+  await el.csv_();
+  assert.equal(bezorgd?.soort, "csv");
+  assert.ok(bezorgd.naam.endsWith(" kwartier.csv"), bezorgd.naam);
+  const regels = bezorgd.tekst.replace("\uFEFF", "").split("\r\n");
+  assert.equal(regels[0], "Datum;Tijd;UTC;Van het net laagste (W);Van het net gemiddeld (W);Van het net piek (W);"
+    + "L1 laagste (A);L1 gemiddeld (A);L1 piek (A);L2 laagste (A);L2 gemiddeld (A);L2 piek (A);L3 laagste (A);L3 gemiddeld (A);L3 piek (A)");
+  assert.ok(regels[1].endsWith(";100;500;900;10,00;27,00;34,20;1,00;8,00;12,00;1,00;10,00;30,00"), regels[1]);
+  assert.equal(this_span.textContent, "CSV", "de knop zegt daarna weer CSV");
+});
+
 for (const [naam, fn] of proeven) {
   try {
     await fn();

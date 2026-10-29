@@ -13446,6 +13446,21 @@ controle("en de dag daarna begint op de klok van de eerste, 30-10 06:25",
          str((huis220c.rij().get("growatt_dag") or {}).get("begon", "")).startswith("2026-10-30T06:25"),
          f"{huis220c.rij().get('growatt_dag')}")
 
+print("=== 221. Historie als bestand voor Excel: langs dezelfde weg als het rapport (v0.180.0) ===")
+# Een webweergave in de app van Home Assistant kan een blob: niet downloaden (zie report.py); het
+# bestand voor Excel gaat daarom langs domotiapp_coach/report/store, met soort csv. websocket.py
+# laat zich hier niet laden, dus de proef leest de bron.
+bron221 = pathlib.Path(__file__).resolve().parents[1] / "custom_components" / "domotiapp_coach"
+ws221 = (bron221 / "websocket.py").read_text(encoding="utf-8")
+rapport221 = (bron221 / "report.py").read_text(encoding="utf-8")
+controle("report/store kent soort csv, met pdf als standaard",
+         'vol.Optional("soort", default="pdf"): vol.In(["pdf", "csv"])' in ws221, "")
+controle("een csv hoeft niet met %PDF- te beginnen, maar moet wel tekst zijn",
+         'pdf.decode("utf-8")' in ws221 and 'elif not pdf.startswith(b"%PDF-")' in ws221, "")
+controle("en hij komt terug als text/csv",
+         '"text/csv" if csv else "application/pdf"' in ws221
+         and 'content_type=report.get("soort", "application/pdf")' in rapport221, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

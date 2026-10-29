@@ -741,3 +741,62 @@ staat `handelEuro` in `delen.accuNet`, en Historie toont het als "Goedkoop gelad
 alleen als er iets was. "Door de coach" staat er alleen bij een apparaat of een batterij die de coach
 stuurt. Bespaard blijft hetzelfde getal. De eigenaar: "ja bouw dat maar". Proef "goedkoop laden is
 van de coach alleen als hij de batterij stuurt" in test_rapport.mjs.
+
+## Per fase, de datum bij een kwartier, en een bestand voor Excel (v0.180.0)
+
+Een bewoner in een klantwoning onderzocht op 29-10-2026 een thuisbatterij en een kleinere aansluiting,
+van 3x50 A naar 3x25 A. Hij liep in Historie tegen drie dingen aan.
+
+**De datum.** Bij de korrel Kwartier in het rapport stond alleen de tijd ("14:15"), ook over een week.
+Bij Uur stonden de weekdag en het uur ("di 14:00"), en over een maand zeg je dan niet welke dinsdag.
+Sinds deze versie staat de dag erbij zodra de periode langer is dan een dag: "di 27 okt 14:15"
+(`metDag` in views/history.js). Binnen een dag blijft het kort.
+
+**Het uur dat twee keer komt.** Een kwartier telt nu op zijn echte moment (`utc` uit `quarters`), en
+een uur op het echte begin van dat uur. Tot nu kwamen bij het ingaan van de wintertijd de twee uren van
+02:00 in het verloop per uur samen in één regel, met de piek van allebei. Bij een huis in een andere
+tijdzone dan de browser gold dat ook voor de kwartieren.
+
+**Per fase.** Of een kleinere aansluiting past, hangt af van L1, L2 en L3 elk apart. Een zekering
+beslist op minuten, niet op een uur. De coach kende de fasen al voor de lastbewaker (`sources.phases`),
+maar bewaarde ze niet:
+
+- **De opslag.** `_wat_volgen` in archive.py volgt ze per kwartier, net als het net en de zon: de stroom
+  als die er is, anders het vermogen en de spanning. Een stroom in A en een spanning in V gaan zoals ze
+  zijn de opslag in, want `to_watts` kent die eenheden niet en laat ze staan. De inhaalslag haalt de
+  veertien dagen ervoor uit de recorder, zoals bij elke nieuwe sensor.
+- **De ampères.** `faseKwartieren` in fasen.js rekent ze uit met `phaseAmps` (data-source.js), dezelfde som
+  als `_phase_amps` in monitor.py: de stroom zoals hij is, of het vermogen gedeeld door de spanning van
+  dat kwartier, en anders door 230 V. Welke sensoren een fase heeft, bepaalt `faseBronnen` op dezelfde
+  manier als `_wat_volgen`.
+- **De kaart Per fase** in Historie (alleen met de fasen ingevuld; bij een eenfasige installatie één
+  lijn) heeft deze onderdelen:
+  - een lijn per fase in ampère: het gemiddelde per kwartier op een dag of week, per uur over een maand,
+    per dag over een jaar;
+  - een stippellijn op de zekering, met een keuzeveld om een andere te proberen (`zekeringKeuzes`);
+  - per fase hoeveel kwartieren gemiddeld boven de zekering zaten, in hoeveel er een piek boven kwam,
+    en de hoogste piek met de datum (`overZekering`).
+
+  Het tellen gebeurt altijd per kwartier. Teruglevering belast de zekering ook, dus telt de grootte en
+  niet de richting. Een tik op de lijnen geeft de stroom van dat tijdvak.
+
+**Een bestand voor Excel.** De knop CSV naast Rapport geeft de gekozen periode als bestand, zo fijn
+als het verloop in het rapport (`csv_` in views/history.js, `csvTabel` in csv.js). Per tijdvak:
+
+- de datum en de tijd op de klok van het huis, en het moment in UTC voor het uur dat twee keer komt;
+- per bron het laagste, het gemiddelde en de piek: het net, de zon, elk apparaat (in W) en de fasen
+  (in A).
+
+In het Nederlands een puntkomma en een decimale komma, in het Engels een komma en een punt, en altijd een
+BOM. Het gaat langs `domotiapp_coach/report/store` met `soort` csv, net als de pdf. Een webweergave in de
+app van Home Assistant kan een `blob:` niet downloaden.
+
+Proeven:
+
+- test_archive.py, proef 11: welke sensoren, een stroom die ampère blijft, en een herstart halverwege
+  een kwartier.
+- test_rapport.mjs, "Historie: de datum bij kwartier en uur, de fasen en het bestand voor Excel": de
+  nacht van 25-10-2026 (twintig kwartieren, twee uren van 02:00), de fasen, en een installatie zonder
+  fasen.
+- test_coach.py, proef 221: `report/store` met een csv.
+
