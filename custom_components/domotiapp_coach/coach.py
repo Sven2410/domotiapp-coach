@@ -272,9 +272,11 @@ KOELWAREN: dict[str, tuple[str, float]] = {
 ALTIJD_AAN_WACHT = timedelta(minutes=2)
 # Welke apparaten "altijd aan" kunnen hebben. Een vaatwasser sinds v0.122.0: de
 # eigenaar op 15-10-2026, "sommige vaatwassers hangen namelijk ook aan een smart
-# plug om alles te meten." De schakelaar van de stekker staat bij allebei in
-# `entities.switch`.
-ALTIJD_AAN_TYPES = ("smartplug", "vaatwasser")
+# plug om alles te meten." Een vriezer, koelkast, wasmachine en droger sinds
+# v0.177.0: de eigenaar op 29-10-2026, "De miele apparaten zitten op een smart plug
+# die altijd aan moet staan." De schakelaar van de stekker staat bij allemaal in
+# `entities.switch`; alleen `_async_altijd_aan` raakt hem aan, en alleen om aan te zetten.
+ALTIJD_AAN_TYPES = ("smartplug", "vaatwasser", "vriezer", "koelkast", "wasmachine", "droger")
 # De ingebouwde Nord Pool van Home Assistant hangt geen prijslijst aan zijn
 # sensoren; die geeft hij alleen via zijn dienst (v0.101.3). Zo vaak vraagt de
 # coach een dag die nog niet binnen is opnieuw, en vanaf dit uur morgen erbij:
@@ -4239,6 +4241,11 @@ class ChargerCoach:
             })
         vorige = sessie.get("teller_waarde")
         if waarde is None or (vorige is not None and abs(waarde - vorige) < 1e-9):
+            return
+        # Een teller die terugvalt begint een nieuw programma (Miele zet hem op nul). De teller van
+        # een smart plug telt alles wat de stekker ooit doorliet (v0.177.0); zakt die een tikje,
+        # dan is dat een hapering en geen nieuw begin, en anders telde zijn hele stand als één stap.
+        if vorige is not None and vorige / 2 <= waarde < vorige:
             return
         stap = waarde - vorige if vorige is not None and waarde >= vorige else waarde
         sessie["teller_waarde"] = waarde

@@ -12954,6 +12954,147 @@ finally:
     else:
         sys.modules["homeassistant.helpers.entity_registry"] = oud216
 
+print("=== 218. een Miele-apparaat aan een smart plug: altijd aan, en meten met de stekker (v0.177.0) ===")
+# De eigenaar op 29-10-2026: "De miele apparaten zitten op een smart plug die altijd aan moet staan.
+# De energy etc wil ik van de smart plug meten maar ik wil ook de deurstatus etc blijven behouden."
+for soort218 in ("vriezer", "koelkast", "wasmachine", "droger"):
+    controle(f"een {soort218} kan altijd aan hebben",
+             coachmod._altijd_aan({"type": soort218, "always_on": True, "entities": {"switch": "switch.s"}}) == "switch.s"
+             and coachmod._altijd_aan({"type": soort218, "always_on": False, "entities": {"switch": "switch.s"}}) is None, "")
+
+# Een Miele-vriezer, die de coach alleen uitleest, met de deur en de temperatuur van Miele en de stekker erbij.
+VRIES218 = {"id": "dev-vries", "type": "vriezer", "brand": "miele", "name": "", "entity": "sensor.vries_w",
+            "energy_entity": "sensor.vries_kwh", "always_on": True,
+            "entities": {"temperature": "sensor.vries_temp", "door": "binary_sensor.vries_deur", "switch": "switch.vries"}}
+inst218 = instellingen(devices=[LAADPAAL, VRIES218])
+inst218["notifications"] = {**inst218["notifications"], "always_on_alert": {"enabled": True}}
+hass218, _, coach218 = bouw({**huis(), "switch.vries": "off", "sensor.vries_w": "0", "sensor.vries_temp": "-19",
+                             "binary_sensor.vries_deur": "off"}, inst218)
+T218 = dt.datetime(2026, 10, 29, 18, 0)
+
+
+def wacht218(minuten):
+    hass218.services.verstuurd.clear()
+    asyncio.run(coach218._async_altijd_aan(inst218, T218 + dt.timedelta(minutes=minuten), "steer"))
+    return ([d[2]["message"] for d in hass218.services.verstuurd if d[0] == "notify"],
+            [f"{d[1]} {d[2]['entity_id']}" for d in hass218.services.verstuurd if d[0] == "switch"])
+
+
+controle("een vriezer met altijd aan gaat weer aan, ook al stuurt de coach de vriezer zelf niet",
+         wacht218(0) == ([], ["turn_on switch.vries"]), "")
+melding218 = wacht218(2)
+controle("en na twee minuten zegt de melding de vriezer",
+         melding218[0] == ["De vriezer staat al 2 minuten uit en de coach krijgt hem niet aan."], f"{melding218}")
+hass218.services.verstuurd.clear()
+asyncio.run(coach218._round(T218 + dt.timedelta(minutes=5)))
+asyncio.run(hass218.afmaken())
+controle("in een volle ronde zet hij hem aan, en luistert hij naar die stekker",
+         [f"{d[1]} {d[2]['entity_id']}" for d in hass218.services.verstuurd if d[0] == "switch"] == ["turn_on switch.vries"]
+         and "switch.vries" in coach218._watched, f"{hass218.services.verstuurd}")
+
+# Een Miele-wasmachine met het vermogen en de teller van de stekker. De teller van een stekker telt
+# alles wat er ooit doorging; een programma hoort dan uit het vermogen te komen, niet uit die stand.
+WAS218 = {
+    "id": "dev-was", "type": "wasmachine", "name": "", "brand": "miele", "controllable": True,
+    "entity": "sensor.was_w", "energy_entity": "sensor.was_kwh", "always_on": True,
+    "entities": {
+        "status": "sensor.was", "program": "sensor.was_programma", "remaining": "sensor.was_rest",
+        "remote_start": "binary_sensor.was_afstand", "door": "binary_sensor.was_deur",
+        "start": "button.was_start", "switch": "switch.was",
+    },
+}
+
+
+def bouw218(apparaat):
+    inst = instellingen(devices=[LAADPAAL, apparaat])
+    inst["contract"] = dict(inst56["contract"])
+    inst["strategy"]["schedules"].append({
+        "device": "dev-was", "enabled": True, "priority": "mid", "per_day": False,
+        "window": {"not_before": "", "start_by": "", "done_by": "07:00"}, "days": [],
+    })
+    h = huis(status="ready_to_charge", teruglevering=0.0, afname=300.0)
+    h.update({
+        "sensor.was": "programmed", "sensor.was_programma": "cottons",
+        "sensor.was_rest": {"state": "95", "attributes": {"unit_of_measurement": "min"}},
+        "binary_sensor.was_afstand": "on", "binary_sensor.was_deur": "off", "button.was_start": "unknown",
+        "sensor.was_w": "1", "switch.was": "on",
+        "sensor.was_kwh": {"state": "512.30", "attributes": {"unit_of_measurement": "kWh"}},
+        "sensor.prijs": {"state": "0.30", "attributes": {"unit_of_measurement": "€/kWh", "prices": prijzen56(7)}},
+    })
+    hass, store, coach = bouw(h, inst)
+
+    def ronde(nu):
+        hass.services.verstuurd.clear()
+        asyncio.run(hass.afmaken())
+        asyncio.run(coach._round(nu))
+        asyncio.run(hass.afmaken())
+        return list(hass.services.verstuurd)
+
+    ronde(dt.datetime(2026, 9, 7, 19, 0))
+    inst["ready_devices"] = ["dev-was"]
+    ronde(dt.datetime(2026, 9, 7, 19, 5))
+    hass.states.zet("sensor.prijs", {"state": "0.18", "attributes": {"unit_of_measurement": "€/kWh", "prices": prijzen56(7)}})
+    ronde(dt.datetime(2026, 9, 8, 1, 0, 30))
+    hass.states.zet("sensor.was", "in_use")
+    return hass, store, coach, ronde
+
+
+hass218w, store218w, coach218w, ronde218w = bouw218(WAS218)
+stekker218 = []
+for minuut218 in range(5, 95, 5):
+    nu218 = dt.datetime(2026, 9, 8, 1, 0) + dt.timedelta(minutes=minuut218)
+    hass218w.states.zet("sensor.was_w", "2000")
+    hass218w.states.zet("sensor.was_kwh", {"state": f"{512.30 + 2.0 * minuut218 / 60:.2f}",
+                                           "attributes": {"unit_of_measurement": "kWh"}})
+    hass218w.states.zet("sensor.was_rest", {"state": str(max(0, 95 - minuut218)), "attributes": {"unit_of_measurement": "min"}})
+    stekker218 += [d for d in ronde218w(nu218) if d[2].get("entity_id") == "switch.was"]
+hass218w.states.zet("sensor.was", "program_ended")
+hass218w.states.zet("sensor.was_w", "1")
+v218 = ronde218w(dt.datetime(2026, 9, 8, 2, 36))
+verslag218 = [d[2].get("message", "") for d in v218 if d[0] == "notify" and "is klaar" in d[2].get("message", "")]
+meting218 = next((r for r in store218w.instellingen.get("program_measured") or [] if r.get("device") == "dev-was"), {})
+print(f"  verslag: {verslag218}")
+print(f"  meting: {meting218}")
+controle("met het vermogen van de stekker meet hij het programma per ronde: zo'n 3 kWh, niet de stand van de teller",
+         2.5 <= float(meting218.get("kwh") or 0) <= 3.2 and meting218.get("key") == "cottons", f"{meting218}")
+controle("en dan is er ook een piek en een verloop", float(meting218.get("peak_w") or 0) >= 1900
+         and len(meting218.get("profile") or []) > 0, f"{meting218}")
+controle("het verslag noemt geen honderden kWh", len(verslag218) == 1 and "512" not in verslag218[0], f"{verslag218}")
+controle("een stekker die aan staat laat de coach met rust, ook als de planning de wasmachine laat wachten",
+         stekker218 == [], f"{stekker218}")
+
+# Alleen de teller van de stekker, zonder vermogen: die zakt een keer een tikje. Dat is een hapering, geen
+# nieuw programma; anders telde de hele stand van 512 kWh als één stap.
+hass218t, store218t, coach218t, ronde218t = bouw218({**WAS218, "entity": ""})
+standen218 = [(5, "512.30"), (15, "512.60"), (30, "512.55"), (45, "513.10"), (60, "513.40"), (80, "513.80"), (90, "514.00")]
+for minuut218, stand218 in standen218:
+    hass218t.states.zet("sensor.was_kwh", {"state": stand218, "attributes": {"unit_of_measurement": "kWh"}})
+    hass218t.states.zet("sensor.was_rest", {"state": str(max(0, 95 - minuut218)), "attributes": {"unit_of_measurement": "min"}})
+    ronde218t(dt.datetime(2026, 9, 8, 1, 0) + dt.timedelta(minutes=minuut218))
+hass218t.states.zet("sensor.was", "program_ended")
+ronde218t(dt.datetime(2026, 9, 8, 2, 36))
+meting218t = next((r for r in store218t.instellingen.get("program_measured") or [] if r.get("device") == "dev-was"), {})
+print(f"  alleen de teller: {meting218t}")
+controle("op de teller van een stekker die een tikje zakt: 1,7 kWh, van 512,30 tot 514,00",
+         abs(float(meting218t.get("kwh") or 0) - 1.7) < 0.051, f"{meting218t}")
+
+# Een Miele-teller die bij een nieuw programma op nul gaat, telt nog steeds vanaf nul.
+hass218m, store218m, coach218m, ronde218m = bouw218({**WAS218, "entity": ""})
+for minuut218, stand218 in [(5, "1.2"), (15, "0.1"), (45, "0.6"), (90, "1.1")]:
+    hass218m.states.zet("sensor.was_kwh", {"state": stand218, "attributes": {"unit_of_measurement": "kWh"}})
+    ronde218m(dt.datetime(2026, 9, 8, 1, 0) + dt.timedelta(minutes=minuut218))
+hass218m.states.zet("sensor.was", "program_ended")
+ronde218m(dt.datetime(2026, 9, 8, 2, 36))
+meting218m = next((r for r in store218m.instellingen.get("program_measured") or [] if r.get("device") == "dev-was"), {})
+controle("een Miele-teller die op nul gaat: het nieuwe programma telt vanaf nul, 1,1 kWh",
+         abs(float(meting218m.get("kwh") or 0) - 1.1) < 0.051, f"{meting218m}")
+
+# Het paneel: het veld Smart plug en het vinkje bij alle vier.
+apparaten_js218 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach"
+                   / "frontend" / "src" / "views" / "devices.js").read_text(encoding="utf-8")
+controle("in het paneel staat het stekkerblok bij elk type dat altijd aan kan",
+         "if (!canAlwaysOn(device) || isSmartPlug(device)) return \"\";" in apparaten_js218, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

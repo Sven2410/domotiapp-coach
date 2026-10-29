@@ -709,7 +709,8 @@ const WASHER_BRANDS = (wat) => [
     programField: "program",
     // De machine noemt het programma en geeft de duur; er is geen tabel vooraf.
     programOnMachine: true,
-    // Geen vermogenssensor: het verbruik komt uit de energieteller.
+    // Geen vermogenssensor: het verbruik komt uit de energieteller. Hangt hij aan een smart
+    // plug (v0.177.0), dan mag die het meten: met zijn vermogenssensor telt de coach per ronde.
     energyCounter: true,
   },
   {
@@ -1379,10 +1380,12 @@ export const isSmartPlug = (device) => device?.type === "smartplug";
  * Wat "altijd aan" kan hebben (v0.120.0): een smart plug, en sinds v0.122.0 een
  * vaatwasser. De eigenaar op 15-10-2026: "bij het apparaat vaatwasser ook de optie
  * kunnen aanzetten dat hij nooit uit mag, sommige vaatwassers hangen namelijk ook
- * aan een smart plug om alles te meten." Dezelfde lijst als `ALTIJD_AAN_TYPES` in
- * coach.py; de schakelaar staat bij allebei in `entities.switch`.
+ * aan een smart plug om alles te meten." En sinds v0.177.0 een vriezer, koelkast,
+ * wasmachine en droger: de eigenaar op 29-10-2026, "De miele apparaten zitten op een
+ * smart plug die altijd aan moet staan." Dezelfde lijst als `ALTIJD_AAN_TYPES` in
+ * coach.py; de schakelaar staat bij allemaal in `entities.switch`.
  */
-export const ALWAYS_ON_TYPES = ["smartplug", "vaatwasser"];
+export const ALWAYS_ON_TYPES = ["smartplug", "vaatwasser", "vriezer", "koelkast", "wasmachine", "droger"];
 export const canAlwaysOn = (device) => ALWAYS_ON_TYPES.includes(device?.type);
 
 /** Wat er aan deze smart plug hangt, of undefined (geen smart plug, of nog niets gekozen). */
@@ -1401,12 +1404,26 @@ export const PLUG_SWITCH_FIELD = {
   values: { on: nt("Aan"), off: nt("Uit") },
 };
 
-/** Hetzelfde veld bij een vaatwasser (v0.122.0), die er lang niet altijd een heeft. */
-export const DISHWASHER_PLUG_FIELD = {
+/** Wie er aan de stekker hangt, in de hint van het veld hieronder. */
+const STEKKER_WIE = {
+  vaatwasser: nt("de vaatwasser"),
+  wasmachine: nt("de wasmachine"),
+  droger: nt("de droger"),
+  vriezer: nt("de vriezer"),
+  koelkast: nt("de koelkast"),
+};
+
+/**
+ * Hetzelfde veld bij een apparaat dat er lang niet altijd een heeft: een vaatwasser
+ * (v0.122.0), en sinds v0.177.0 een vriezer, koelkast, wasmachine en droger. Wat het
+ * merk zelf levert (de deur, het programma, de temperatuur) blijft in zijn eigen velden.
+ */
+export const plugFieldFor = (type) => ({
   ...PLUG_SWITCH_FIELD,
   label: nt("Smart plug (optioneel)"),
-  hint: nt("Hangt de vaatwasser aan een smart plug, dan de schakelaar daarvan. Alleen nodig om hem altijd aan te houden; de coach zet hem nooit zelf uit."),
-};
+  ...metWoorden("hint", nt("Hangt {naam} aan een smart plug, dan de schakelaar daarvan. Alleen nodig om hem altijd aan te houden; de coach zet hem nooit zelf uit."),
+    { naam: STEKKER_WIE[type] }),
+});
 
 /**
  * Een rij uit een tabel hierboven (een veld, een knop, een merk, een soort) in de taal van

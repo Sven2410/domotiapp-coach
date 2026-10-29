@@ -70,8 +70,8 @@ de stekker dan nog uit, dan komt er na twee minuten één nieuwe melding.
 De eigenaar op 15-10-2026: "bij het apparaat vaatwasser ook de optie kunnen aanzetten dat
 hij nooit uit mag sommige vaatwassers hangen namelijk ook aan een smart plug om alles te
 meten." Een vaatwasser krijgt, zodra er een merk gekozen is, onder de programmatabel het
-blok Stekker: het veld "Smart plug (optioneel)" (`DISHWASHER_PLUG_FIELD`, ook in
-`entities.switch`) en hetzelfde vinkje (`dishwasherPlugHtml_` in views/devices.js).
+blok Stekker: het veld "Smart plug (optioneel)" (ook in `entities.switch`) en hetzelfde
+vinkje.
 Welke types het kunnen staat twee keer, `ALTIJD_AAN_TYPES` in coach.py en
 `ALWAYS_ON_TYPES` in devices.js; proef 158 legt ze naast elkaar.
 
@@ -81,11 +81,50 @@ zet de stekker nooit uit; proef 158 draait daarvoor een volle ronde. In de senso
 vaatwasser voor DomotiApp Lovelace staat de stekker erbij in `entiteiten` als `switch`;
 dat is iets toevoegen, het contract blijft 1.
 
+Sinds v0.177.0 heet het veld `plugFieldFor(type)` en het blok `appliancePlugHtml_`, want het
+staat niet meer alleen bij de vaatwasser.
+
+## Ook een vriezer, koelkast, wasmachine en droger (v0.177.0)
+
+De eigenaar op 29-10-2026, over een klantwoning waar de Miele-vriezer, -koelkast, -wasmachine
+en -droger elk aan een eigen stekker hangen: "De miele apparaten zitten op een smart plug die
+altijd aan moet staan. De energy etc wil ik van de smart plug meten maar ik wil ook de
+deurstatus etc blijven behouden."
+
+Dus één apparaat, geen losse smart plug ernaast:
+
+- **Het blok Stekker** krijgen nu ook deze vier, net als de vaatwasser: "Smart plug
+  (optioneel)" in `entities.switch` en het vinkje altijd aan. `ALTIJD_AAN_TYPES` en
+  `ALWAYS_ON_TYPES` zijn uitgebreid. De velden van het merk (de deur, het programma, de
+  temperatuur, de storing) blijven waar ze waren.
+- **De coach zet zo'n stekker alleen aan, nooit uit.** Alleen `_async_altijd_aan` raakt
+  `entities.switch` van deze types aan. Een vriezer stuurt de coach verder niet; de stekker
+  aanhouden is geen sturen, dus dat doet hij ook bij een merk dat hij alleen uitleest.
+- **Meten met de stekker** gaat met de gewone velden: het vermogen in Vermogenssensor, de
+  teller in Energieteller. Bij een Miele-wasmachine of -droger telt de coach een programma
+  dan uit het vermogen per ronde (`_programma_tellen`), net als bij een machine van Overig,
+  en niet meer uit de teller van Miele. Daarmee komen ook de piek en het verloop van een
+  programma erbij. Wat hij eerder met de teller van Miele mat blijft staan. Elke nieuwe beurt
+  past de meting aan. Zonder vermogenssensor blijft de energieteller de bron.
+- **Een teller die alles telt.** De teller van Miele begint bij elk programma op nul, en de
+  coach telde een teller die terugvalt daarom als een nieuw begin: de nieuwe stand was de
+  stap. De teller van een stekker telt alles wat er ooit doorging. Zakt die een tikje, dan
+  telde zijn hele stand als één stap: in proef 218 werd dat 514,3 kWh voor één wasbeurt van
+  1,7. Sinds v0.177.0 is een val tot hooguit de helft een hapering, en dan wacht de coach tot
+  de teller weer boven de vorige stand komt (`_teller_tellen`). Een val dieper dan de helft
+  blijft een nieuw programma, en dat dekt de nul van Miele.
+- De hint bij Energieteller zegt het: de sensor van de machine of de teller van de stekker.
+  Met een vermogenssensor erbij staat er "(optioneel)".
+
+In de sensor voor DomotiApp Lovelace staat de stekker in `entiteiten` als `switch`, en de
+stekker als `power` en `energy`. Dat is iets toevoegen; het contract blijft 1.
+
 ## Proeven
 
-Proef 157 en 158 in test_coach.py (de bewaking, de meldingen, de niveaus, de sensorwacht, een
-volle ronde, de vaatwasser), en zes proeven "smart plug" in test_rapport.mjs (de lijst tegen const.py,
-naam en icoon, de kaart, Apparaten en Meldingen).
+Proef 157, 158 en 218 in test_coach.py (de bewaking, de meldingen, de niveaus, de sensorwacht, een
+volle ronde, de vaatwasser; de vriezer, de wasmachine op het vermogen van de stekker en de teller die
+zakt), en zeven proeven "smart plug" in test_rapport.mjs (de lijst tegen const.py, naam en icoon, de
+kaart, Apparaten en Meldingen, het blok Stekker bij alle vijf de types).
 
 ## Nog niet in het echt gezien
 
