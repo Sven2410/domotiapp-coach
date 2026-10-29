@@ -12844,6 +12844,8 @@ try:
     sys.modules["homeassistant.helpers.entity_registry"] = register216(VIER216)
     hass216, _, coach216 = bouw(huis216(), inst216)
     coach216._restore(inst216)
+    # Eerst doen ze het: alleen wat het eerst deed telt voor het internet (v0.178.0).
+    wacht216(coach216, inst216, -1)
     for e in STIL216:
         hass216.states.zet(e, "unavailable")
     for m in (0, 5, 9, 10, 11, 12):
@@ -13094,6 +13096,177 @@ apparaten_js218 = (pathlib.Path(__file__).resolve().parent.parent / "custom_comp
                    / "frontend" / "src" / "views" / "devices.js").read_text(encoding="utf-8")
 controle("in het paneel staat het stekkerblok bij elk type dat altijd aan kan",
          "if (!canAlwaysOn(device) || isSmartPlug(device)) return \"\";" in apparaten_js218, "")
+
+print("=== 219. altijd aan: één melding voor stekkers die samen wegvallen, en niet opnieuw na een herstart (v0.178.0) ===")
+# In een klantwoning op 29-10-2026 kwamen er vijf kritieke meldingen in dezelfde seconde, een per
+# stekker, en daarna een zesde van de sensorwacht die "het internet" zei terwijl het internet er was.
+# De stekkers waren net toegevoegd en zaten nog niet in het stopcontact. De eigenaar koos "ja b": een
+# stekker die nog nooit bereikbaar was krijgt een gewone melding, kritiek pas als hij er was en wegvalt.
+def plug219(i, naam, soort="smartplug"):
+    return {"id": f"dev-p{i}", "type": soort, "brand": "overig" if soort != "smartplug" else "", "name": naam,
+            "appliance": "overig" if soort == "smartplug" else "", "entity": f"sensor.p{i}_w", "energy_entity": "",
+            "always_on": True, "entities": {"switch": f"switch.p{i}"}, "programs": []}
+
+
+PLUGS219 = [plug219(1, "Oven"), plug219(2, "Warmhoudlade"), plug219(3, "Quooker"), plug219(4, "Ledstrips"),
+            plug219(5, "", "vaatwasser")]
+T219 = dt.datetime(2026, 10, 29, 16, 30)
+
+
+def bouw219(standen, alert=True):
+    inst = instellingen(devices=[LAADPAAL, *PLUGS219])
+    inst["notifications"] = {**inst["notifications"], "always_on_alert": {"enabled": alert}}
+    waarden = {**huis()}
+    for i in range(1, 6):
+        waarden[f"switch.p{i}"] = standen
+        waarden[f"sensor.p{i}_w"] = "unavailable" if standen == "unavailable" else "5"
+    hass, _, coach = bouw(waarden, inst)
+    asyncio.run(coach._async_geheugen_laden())
+    return hass, inst, coach
+
+
+def stekkers219(hass, coach, inst, minuten, level="steer"):
+    asyncio.run(coach._async_altijd_aan(inst, T219 + dt.timedelta(minutes=minuten), level))
+
+
+def lijst219(hass, vanaf=0):
+    return [(g["kind"], g["message"]) for g in asyncio.run(coachmod.async_get_meldingen(hass).async_list())[vanaf:]]
+
+
+# 1. Vijf stekkers die het deden vallen samen weg: één kritieke melding.
+hass219, inst219, coach219 = bouw219("on")
+stekkers219(hass219, coach219, inst219, 0)
+for i in range(1, 6):
+    hass219.states.zet(f"switch.p{i}", "unavailable")
+for m in (1, 2, 3, 4):
+    stekkers219(hass219, coach219, inst219, m)
+weg219 = lijst219(hass219)
+print(f"  {weg219}")
+controle("vijf stekkers tegelijk niet bereikbaar: één melding, kritiek",
+         len(weg219) == 1 and weg219[0][0] == "kritiek", f"{weg219}")
+controle("met alle vijf de namen, de vaatwasser midden in de zin met een kleine letter",
+         weg219 and weg219[0][1] == "Oven, Warmhoudlade, Quooker, Ledstrips en de vaatwasser zijn al 2 minuten niet "
+                                    "bereikbaar; de coach weet niet of ze aan staan.", f"{weg219}")
+
+# 2. Een herstart halverwege: niets dubbel.
+coach219._meldingen_onthouden()
+coach219 = herstart213(hass219)
+asyncio.run(coach219._async_geheugen_laden())
+for m in (6, 7, 8, 12):
+    stekkers219(hass219, coach219, inst219, m)
+controle("na een herstart komt dezelfde melding niet nog eens", lijst219(hass219, 1) == [], f"{lijst219(hass219, 1)}")
+for i in range(1, 6):
+    hass219.states.zet(f"switch.p{i}", "on")
+stekkers219(hass219, coach219, inst219, 13)
+terug219 = lijst219(hass219, 1)
+controle("en als ze terug zijn staat dat in de geschiedenis, zonder telefoon",
+         len(terug219) == 5 and all("staat weer aan" in m for _k, m in terug219), f"{terug219}")
+
+# 3. Eén stekker geeft de zin van voorheen.
+hass219b, inst219b, coach219b = bouw219("on")
+stekkers219(hass219b, coach219b, inst219b, 0)
+hass219b.states.zet("switch.p3", "unavailable")
+for m in (1, 2, 3):
+    stekkers219(hass219b, coach219b, inst219b, m)
+controle("één stekker: de zin van voorheen",
+         lijst219(hass219b) == [("kritiek", "Quooker is al 2 minuten niet bereikbaar; de coach weet niet of hij aan staat.")],
+         f"{lijst219(hass219b)}")
+
+# Stekkers die een halve minuut na elkaar wegvallen, horen bij elkaar.
+hass219c, inst219c, coach219c = bouw219("on")
+stekkers219(hass219c, coach219c, inst219c, 0)
+hass219c.states.zet("switch.p1", "unavailable")
+stekkers219(hass219c, coach219c, inst219c, 1)
+hass219c.states.zet("switch.p2", "off")
+hass219c.states.zet("switch.p4", "unavailable")
+asyncio.run(coach219c._async_altijd_aan(inst219c, T219 + dt.timedelta(minutes=1, seconds=30), "steer"))
+hass219c.states.zet("switch.p2", "off")
+for m in (2, 3):
+    stekkers219(hass219c, coach219c, inst219c, m)
+stekkers219(hass219c, coach219c, inst219c, 3.5)
+samen219 = lijst219(hass219c)
+print(f"  {samen219}")
+controle("een stekker die een halve minuut later wegvalt gaat in dezelfde melding",
+         len([1 for k, _m in samen219 if k == "kritiek"]) == 1
+         and "Oven en Ledstrips zijn al 2 minuten niet bereikbaar" in samen219[-1][1]
+         and "Warmhoudlade staat al 2 minuten uit en de coach krijgt hem niet aan." in samen219[-1][1], f"{samen219}")
+
+# 4. Nieuwe stekkers die nog nooit bereikbaar waren: één gewone melding, geen kritiek.
+hass219d, inst219d, coach219d = bouw219("unavailable", alert=False)
+for m in (0, 1, 2, 3, 10):
+    stekkers219(hass219d, coach219d, inst219d, m)
+nieuw219 = lijst219(hass219d)
+print(f"  {nieuw219}")
+controle("vijf nieuwe stekkers die nog nooit bereikbaar waren: één gewone melding",
+         nieuw219 == [("melding", "Oven, Warmhoudlade, Quooker, Ledstrips en de vaatwasser zijn nog niet bereikbaar. "
+                                  "Zodra ze er zijn, houdt de coach ze aan.")], f"{nieuw219}")
+# De sensorwacht zegt over hun vermogen niets erbij, ook met de melding Apparaat staat uit uit.
+for m in (0, 5, 11, 12):
+    asyncio.run(coach219d._async_sensorwacht(inst219d, T219 + dt.timedelta(minutes=m)))
+controle("en de sensorwacht zegt niets over het vermogen van een stekker die zelf niet bereikbaar is",
+         lijst219(hass219d, 1) == [] and not any(f"sensor.p{i}_w" in coach219d._sensoren(inst219d) for i in range(1, 6)),
+         f"{lijst219(hass219d, 1)}")
+# Een herstart: niet nog eens.
+coach219d._meldingen_onthouden()
+coach219d = herstart213(hass219d)
+asyncio.run(coach219d._async_geheugen_laden())
+for m in (15, 16, 17, 18):
+    stekkers219(hass219d, coach219d, inst219d, m)
+controle("na een herstart ook de gewone melding niet nog eens", lijst219(hass219d, 1) == [], f"{lijst219(hass219d, 1)}")
+# Eén komt erbij: dat staat in de geschiedenis, en de coach houdt hem aan.
+hass219d.states.zet("switch.p1", "off")
+hass219d.services.verstuurd.clear()
+stekkers219(hass219d, coach219d, inst219d, 20)
+aan219 = [f"{d[1]} {d[2]['entity_id']}" for d in hass219d.services.verstuurd if d[0] == "switch"]
+controle("een nieuwe stekker die bereikbaar wordt en uit staat, zet hij aan; dat hij er is in de geschiedenis",
+         aan219 == ["turn_on switch.p1"] and lijst219(hass219d, 1) == [("melding", "Oven is nu bereikbaar.")],
+         f"{aan219} {lijst219(hass219d, 1)}")
+hass219d.states.zet("switch.p1", "on")
+stekkers219(hass219d, coach219d, inst219d, 21)
+# Valt hij nu weg, dan is het wel kritiek.
+hass219d.states.zet("switch.p1", "unavailable")
+for m in (22, 23, 24, 25):
+    stekkers219(hass219d, coach219d, inst219d, m)
+later219 = [g for g in lijst219(hass219d, 2) if g[0] == "kritiek"]
+controle("valt hij weg nadat hij er was, dan is dat kritiek",
+         later219 == [("kritiek", "Oven is al 2 minuten niet bereikbaar; de coach weet niet of hij aan staat.")],
+         f"{later219}")
+controle("de andere vier blijven bij hun ene gewone melding",
+         not any("Quooker" in m for _k, m in later219), f"{later219}")
+
+# 5. Het internet alleen als er iets wegvalt dat het eerst deed.
+inst219e = instellingen(devices=[LAADPAAL, *PLUGS219])
+hass219e, _, coach219e = bouw({**huis(), **{f"switch.p{i}": "on" for i in range(1, 6)},
+                               **{f"sensor.p{i}_w": "unavailable" for i in range(1, 6)}}, inst219e)
+oud219 = sys.modules.get("homeassistant.helpers.entity_registry")
+try:
+    sys.modules["homeassistant.helpers.entity_registry"] = register216({f"sensor.p{i}_w": f"entry-{i}" for i in range(1, 6)})
+    for m in (0, 5, 11, 12):
+        asyncio.run(coach219e._async_sensorwacht(inst219e, T219 + dt.timedelta(minutes=m)))
+    stil219 = [m for _k, m in lijst219(hass219e) if "niets" in m]
+    print(f"  {stil219}")
+    controle("vijf vermogens die nog nooit iets zeiden: niet het internet",
+             len(stil219) == 1 and "internet" not in stil219[0] and "hapert" in stil219[0], f"{stil219}")
+    # Wat het eerst deed en dan samen wegvalt, is wel het internet; ook na een herstart.
+    hass219f, _, coach219f = bouw({**huis(), **{f"switch.p{i}": "on" for i in range(1, 6)},
+                                   **{f"sensor.p{i}_w": "5" for i in range(1, 6)}}, inst219e)
+    asyncio.run(coach219f._async_geheugen_laden())
+    asyncio.run(coach219f._async_sensorwacht(inst219e, T219))
+    coach219f._meldingen_onthouden()
+    coach219f = herstart213(hass219f)
+    asyncio.run(coach219f._async_geheugen_laden())
+    for i in range(1, 6):
+        hass219f.states.zet(f"sensor.p{i}_w", "unavailable")
+    for m in (1, 5, 12, 13):
+        asyncio.run(coach219f._async_sensorwacht(inst219e, T219 + dt.timedelta(minutes=m)))
+    stil219f = [m for _k, m in lijst219(hass219f) if "niets" in m]
+    controle("wat het voor de herstart deed en dan samen stilvalt, is wel het internet",
+             len(stil219f) == 1 and "internet thuis weg" in stil219f[0], f"{stil219f}")
+finally:
+    if oud219 is None:
+        sys.modules.pop("homeassistant.helpers.entity_registry", None)
+    else:
+        sys.modules["homeassistant.helpers.entity_registry"] = oud219
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

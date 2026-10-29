@@ -1340,6 +1340,14 @@ gevallen:
 - een droger die de coach alleen uitleest geeft een gewone melding;
 - de oude zin blijft voor één sensor.
 
+**Sinds v0.178.0 telt voor het internet alleen wat het eerst deed** (`_sensor_ooit`). Een sensor die de coach
+nog nooit een waarde zag geven, zoals het vermogen van een stekker die net is toegevoegd, zegt niets over het
+internet. Bij een klant op 29-10-2026 zei de melding over vijf nieuwe stekkers van vier integraties "het
+internet thuis weg", terwijl de meter, de zon en de batterij het gewoon deden. Welke sensoren ooit iets zeiden
+staat in `GeheugenStore` (`meldingen`), zodat een internetstoring vlak na een herstart nog steeds het internet
+heet. Nog niet gebouwd, en voor de eigenaar om te beslissen: "internet" alleen als er ook sensoren buiten de
+bundel stil zijn. Proef 219.
+
 ## Een accustand die vastzit (v0.176.0)
 
 In een klantwoning stond de accustand van een bus op 28-10-2026 de hele dag op 25%. Er gingen in twee beurten

@@ -270,6 +270,10 @@ KOELWAREN: dict[str, tuple[str, float]] = {
 # voor er een melding komt. De eigenaar op 15-10-2026: "Lukt dat niet wil ik na
 # 2 min een melding ontvangen."
 ALTIJD_AAN_WACHT = timedelta(minutes=2)
+# Stekkers die samen wegvallen worden één melding (v0.178.0). Valt er een over
+# `ALTIJD_AAN_WACHT`, dan gaan de stekkers die al een minuut weg zijn mee: de coach
+# zet een stekker binnen een seconde aan, dus na een minuut weet hij dat het niet lukte.
+ALTIJD_AAN_BUNDEL = timedelta(minutes=1)
 # Welke apparaten "altijd aan" kunnen hebben. Een vaatwasser sinds v0.122.0: de
 # eigenaar op 15-10-2026, "sommige vaatwassers hangen namelijk ook aan een smart
 # plug om alles te meten." Een vriezer, koelkast, wasmachine en droger sinds
@@ -1650,6 +1654,9 @@ class ChargerCoach:
         self._cancel_regel = None
         # Per sensor sinds wanneer hij niets zegt, en welke daarvan al gemeld zijn.
         self._sensor_stil: dict[str, datetime] = {}
+        # Welke sensoren de coach ooit een waarde zag geven (v0.178.0): alleen die tellen
+        # mee voor "het internet thuis is weg". Zie `_async_sensoren_stil`.
+        self._sensor_ooit: set[str] = set()
         self._sensor_gemeld: set[str] = set()
         # Per integratie die niet opkwam sinds wanneer, welke gemeld is, en de volgende controle (v0.166.0).
         self._integratie_stuk: dict[str, datetime] = {}
@@ -1695,6 +1702,10 @@ class ChargerCoach:
         self._stekker_uit: dict[str, datetime] = {}
         self._stekker_gemeld: set[str] = set()
         self._stekker_gezet: set[str] = set()
+        # Sinds v0.178.0: welke stekkers de coach ooit bereikbaar zag, en welke nog nooit
+        # bereikbaar waren en dat al gemeld kregen (een gewone melding, geen kritiek).
+        self._stekker_ooit: set[str] = set()
+        self._stekker_nieuw: set[str] = set()
         self._stekker_klok: dict[str, Any] = {}
         # Welke vrijgaveschakelaars de stroom van hun eigen machine zijn, al in
         # het log gezet. Zie `_vrijgave_entiteit`.
@@ -2291,7 +2302,15 @@ class ChargerCoach:
             # Een smart plug die altijd aan moet staan heeft zijn eigen melding,
             # na twee minuten (v0.120.0). Na tien minuten nog een over zijn
             # vermogen zou twee berichten zijn over één stekker die van het net is.
-            if device.get("entity") and not (stekker_meldt and _altijd_aan(device)):
+            # Sinds v0.178.0 ook met die melding uit, zolang de stekker zelf niet
+            # bereikbaar is: die staat dan al in de geschiedenis, en het vermogen
+            # zegt niets nieuws.
+            plug = _altijd_aan(device)
+            if plug and not stekker_meldt and _text(self.hass, plug).strip() not in ("on", "off"):
+                plug_weg = True
+            else:
+                plug_weg = bool(plug and stekker_meldt)
+            if device.get("entity") and not plug_weg:
                 uit[device["entity"]] = t("het vermogen van {naam}", naam=naam)
             entities = device.get("entities") or {}
             for sleutel, wat in (
@@ -2417,6 +2436,7 @@ class ChargerCoach:
                 continue
             sinds = self._sensor_stil.get(entity_id)
             if not stil:
+                self._sensor_ooit.add(entity_id)
                 if entity_id in self._sensor_gemeld:
                     self._sensor_gemeld.discard(entity_id)
                     terug.append(naam)
@@ -2444,6 +2464,7 @@ class ChargerCoach:
 
         # Een gemelde sensor die de coach niet meer gebruikt telt niet meer.
         self._sensor_gemeld &= set(self._sensoren(settings))
+        self._sensor_ooit &= set(self._sensoren(settings))
         if self._sensor_gemeld != self._sensor_gemeld_bewaard:
             try:
                 saved = await async_get_store(self.hass).async_save({"sensor_quiet": [
@@ -2470,6 +2491,11 @@ class ChargerCoach:
 
             register = er.async_get(self.hass)
             for entity_id, _naam, _sinds, _grens in bundel:
+                # Alleen wat het eerst deed (v0.178.0): een sensor die nog nooit iets zei, zoals
+                # een stekker die net is toegevoegd en nog niet aan het net hangt, zegt niets over
+                # het internet. Bij een klant op 29-10-2026 heette vijf nieuwe stekkers zo "het internet".
+                if entity_id not in self._sensor_ooit:
+                    continue
                 rij = register.async_get(entity_id)
                 entry_id = getattr(rij, "config_entry_id", None) if rij is not None else None
                 if entry_id:
@@ -3064,7 +3090,12 @@ class ChargerCoach:
         geschiedenis.
         """
         telefoon = _altijd_aan_melden(settings)
+        mag = level not in (LEVEL_READ, LEVEL_ADVISE)
         gezien: set[str] = set()
+        # Wat er deze ronde over de wachttijd gaat, of al een minuut weg is: (sleutel, naam
+        # vooraan, naam verderop, sinds, soort). Soort: "weg" (niet bereikbaar), "nieuw" (nog
+        # nooit bereikbaar), "uit".
+        kandidaten: list[tuple[str, str, str, datetime, str]] = []
         for device in settings.get("devices") or []:
             plug = _altijd_aan(device)
             if not plug:
@@ -3072,7 +3103,19 @@ class ChargerCoach:
             sleutel = str(device.get("id") or plug)
             gezien.add(sleutel)
             naam = _stekker_naam(device)
+            # Verderop in een opsomming "de vriezer", maar een eigen naam blijft zoals hij is.
+            verder = naam if str(device.get("name") or "").strip() else naam[0].lower() + naam[1:]
             stand = _text(self.hass, plug).strip()
+            if stand in ("on", "off") and sleutel not in self._stekker_ooit:
+                # Voor het eerst bereikbaar: wat er tot nu toe gemeld was, was "nog niet
+                # bereikbaar", en de klok voor "staat uit" begint nu pas.
+                self._stekker_ooit.add(sleutel)
+                if sleutel in self._stekker_nieuw:
+                    self._stekker_nieuw.discard(sleutel)
+                    await self._async_tell(t("{naam} is nu bereikbaar.", naam=naam), telefoon=False)
+                if stand == "off":
+                    self._stekker_uit[sleutel] = now
+                    self._stekker_klok_stop(sleutel)
             if stand == "on":
                 self._stekker_uit.pop(sleutel, None)
                 self._stekker_klok_stop(sleutel)
@@ -3087,32 +3130,30 @@ class ChargerCoach:
                 continue
             if sleutel not in self._stekker_uit:
                 self._stekker_uit[sleutel] = now
+            if sleutel not in self._stekker_klok and now - self._stekker_uit[sleutel] < ALTIJD_AAN_WACHT:
                 # De ronde loopt eens per minuut; deze klok kijkt precies als
                 # de wachttijd om is, zodat de melding na twee minuten komt en
                 # niet na bijna drie.
-                self._stekker_klok_stop(sleutel)
+                wacht = ALTIJD_AAN_WACHT - (now - self._stekker_uit[sleutel])
                 self._stekker_klok[sleutel] = async_call_later(
-                    self.hass, ALTIJD_AAN_WACHT.total_seconds() + 1, self._stekker_klok_af
+                    self.hass, wacht.total_seconds() + 1, self._stekker_klok_af
                 )
             sinds = self._stekker_uit[sleutel]
-            mag = level not in (LEVEL_READ, LEVEL_ADVISE)
             if stand == "off" and mag and await self._async_schakelen(device, True, "switch"):
                 self._stekker_gezet.add(sleutel)
-            if sleutel in self._stekker_gemeld or now - sinds < ALTIJD_AAN_WACHT:
+            nooit = sleutel not in self._stekker_ooit
+            if sleutel in self._stekker_gemeld or (nooit and sleutel in self._stekker_nieuw):
                 continue
-            self._stekker_gemeld.add(sleutel)
-            minuten = int(_tussen(sinds, now).total_seconds() // 60)
+            soort = "uit" if stand == "off" else ("nieuw" if nooit else "weg")
+            kandidaten.append((sleutel, naam, verder, sinds, soort))
             # De entiteit-id in het log en niet in de melding, zoals bij de sensorwacht.
-            _LOGGER.warning("%s (%s) staat al %d minuten %s", naam, plug, minuten, stand or "nergens")
-            if stand != "off":
-                tekst = t("{naam} is al {minuten} minuten niet bereikbaar; de coach weet niet of hij aan staat.",
-                          naam=naam, minuten=minuten)
-            elif mag:
-                tekst = t("{naam} staat al {minuten} minuten uit en de coach krijgt hem niet aan.",
-                          naam=naam, minuten=minuten)
-            else:
-                tekst = t("{naam} staat al {minuten} minuten uit.", naam=naam, minuten=minuten)
-            await self._async_tell(tekst, kritiek=True, telefoon=telefoon)
+            if now - sinds >= ALTIJD_AAN_WACHT:
+                _LOGGER.warning("%s (%s) staat al %d minuten %s", naam, plug,
+                                int(_tussen(sinds, now).total_seconds() // 60), stand or "nergens")
+
+        if any(now - k[3] >= ALTIJD_AAN_WACHT for k in kandidaten):
+            bundel = [k for k in kandidaten if now - k[3] >= ALTIJD_AAN_BUNDEL]
+            await self._async_stekkers_melden(bundel, now, mag, telefoon)
 
         # Een stekker die er niet meer is, of niet meer aan hoeft, telt niet meer.
         for sleutel in set(self._stekker_uit) - gezien:
@@ -3120,6 +3161,68 @@ class ChargerCoach:
             self._stekker_klok_stop(sleutel)
         self._stekker_gemeld &= gezien
         self._stekker_gezet &= gezien
+        self._stekker_nieuw &= gezien
+        self._stekker_ooit &= gezien
+
+    async def _async_stekkers_melden(
+        self, bundel: list[tuple[str, str, str, datetime, str]], now: datetime, mag: bool, telefoon: bool
+    ) -> None:
+        """Eén melding voor de stekkers die samen wegvielen (v0.178.0).
+
+        Bij een klant op 29-10-2026 kwamen er vijf kritieke meldingen in dezelfde seconde,
+        een per stekker. Nu één, met per soort een zin: niet bereikbaar, uit en niet aan te
+        krijgen, of uit. Kritiek blijft kritiek. Een stekker die de coach nog nooit bereikbaar
+        zag krijgt een eigen gewone melding: de eigenaar koos op 29-10-2026 "ja b", want dat
+        gebeurt bij elke nieuwe stekker die nog niet in het stopcontact zit, en de bewoner kan
+        er niets aan doen. Valt hij later weg, nadat hij er was, dan is het wel kritiek.
+        """
+        def namen(rijen: list[tuple[str, str, str, datetime, str]]) -> str:
+            lijst = [rijen[0][1], *(k[2] for k in rijen[1:])]
+            if len(lijst) == 1:
+                return lijst[0]
+            return t("{voor} en {laatste}", voor=", ".join(lijst[:-1]), laatste=lijst[-1])
+
+        weg = [k for k in bundel if k[4] == "weg"]
+        uit = [k for k in bundel if k[4] == "uit"]
+        nieuw = [k for k in bundel if k[4] == "nieuw"]
+        # Eén tijd voor de hele melding: die van de stekker die over de wachttijd ging. Wat er
+        # een halve minuut later bij kwam hoort bij dezelfde storing.
+        lang = max((int(_tussen(k[3], now).total_seconds() // 60) for k in weg + uit), default=0)
+
+        def minuten(_rijen: list[tuple[str, str, str, datetime, str]]) -> int:
+            return lang
+        delen: list[str] = []
+        if weg:
+            delen.append(
+                t("{naam} is al {minuten} minuten niet bereikbaar; de coach weet niet of hij aan staat.",
+                  naam=namen(weg), minuten=minuten(weg)) if len(weg) == 1
+                else t("{namen} zijn al {minuten} minuten niet bereikbaar; de coach weet niet of ze aan staan.",
+                       namen=namen(weg), minuten=minuten(weg))
+            )
+        if uit and mag:
+            delen.append(
+                t("{naam} staat al {minuten} minuten uit en de coach krijgt hem niet aan.",
+                  naam=namen(uit), minuten=minuten(uit)) if len(uit) == 1
+                else t("{namen} staan al {minuten} minuten uit en de coach krijgt ze niet aan.",
+                       namen=namen(uit), minuten=minuten(uit))
+            )
+        elif uit:
+            delen.append(
+                t("{naam} staat al {minuten} minuten uit.", naam=namen(uit), minuten=minuten(uit)) if len(uit) == 1
+                else t("{namen} staan al {minuten} minuten uit.", namen=namen(uit), minuten=minuten(uit))
+            )
+        if delen:
+            self._stekker_gemeld |= {k[0] for k in weg + uit}
+            await self._async_tell(" ".join(delen), kritiek=True, telefoon=telefoon)
+        if nieuw:
+            self._stekker_nieuw |= {k[0] for k in nieuw}
+            await self._async_tell(
+                t("{naam} is nog niet bereikbaar. Zodra hij er is, houdt de coach hem aan.", naam=namen(nieuw))
+                if len(nieuw) == 1
+                else t("{namen} zijn nog niet bereikbaar. Zodra ze er zijn, houdt de coach ze aan.",
+                       namen=namen(nieuw)),
+                telefoon=telefoon,
+            )
 
     def _stekker_klok_stop(self, sleutel: str) -> None:
         """De klok van een stekker die uit stond opzeggen, als die er is."""
@@ -14749,6 +14852,10 @@ class ChargerCoach:
             "temp": sorted(str(k) for k in self._temp_gemeld),
             "vriezer": sorted([list(k) for k in self._vriezer_gemeld]),
             "stekker": sorted(self._stekker_gemeld),
+            "stekker_nieuw": sorted(self._stekker_nieuw),
+            "stekker_ooit": sorted(self._stekker_ooit),
+            "stekker_sinds": {k: _naar_geheugen(v) for k, v in sorted(self._stekker_uit.items())},
+            "sensor_ooit": sorted(self._sensor_ooit),
             "soc_gevraagd": sorted(self._soc_asked),
             "getipt": dict(sorted(self._getipt.items())),
             "gewaarschuwd": {k: _naar_geheugen(v) for k, v in sorted(self._warned.items())},
@@ -14775,6 +14882,11 @@ class ChargerCoach:
         self._temp_gemeld |= {str(k) for k in lijst("temp")}
         self._vriezer_gemeld |= {(str(k[0]), str(k[1])) for k in lijst("vriezer") if isinstance(k, list) and len(k) == 2}
         self._stekker_gemeld |= {str(k) for k in lijst("stekker")}
+        self._stekker_nieuw |= {str(k) for k in lijst("stekker_nieuw")}
+        self._stekker_ooit |= {str(k) for k in lijst("stekker_ooit")}
+        for k, v in momenten("stekker_sinds").items():
+            self._stekker_uit.setdefault(k, v)
+        self._sensor_ooit |= {str(k) for k in lijst("sensor_ooit")}
         self._soc_asked |= {str(k) for k in lijst("soc_gevraagd")}
         getipt = data.get("getipt")
         if isinstance(getipt, dict):
