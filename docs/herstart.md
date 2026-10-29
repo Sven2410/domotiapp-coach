@@ -73,7 +73,9 @@ Wat er per sleutel in staat:
   - een integratie die niet opkomt, met sinds wanneer;
   - een batterij die te warm is;
   - een vriezer of koelkast;
-  - een smart plug die uit staat;
+  - een smart plug die uit staat, en sinds v0.178.0 sinds wanneer, of hij ooit bereikbaar was en of hij de
+    gewone melding "nog niet bereikbaar" al kreeg;
+  - sinds v0.178.0 welke sensoren ooit iets zeiden (voor "het internet thuis weg");
   - de vraag naar de accustand;
   - een tip;
   - de waarschuwing dat de pauze de klaar-tijd kost.

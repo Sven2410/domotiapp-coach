@@ -59,11 +59,42 @@ dezelfde lijst als in het paneel, test_rapport.mjs legt ze naast elkaar.
 
 Met de melding aan valt het vermogen van zo'n stekker buiten de sensorwacht
 (`_sensoren`): anders kwam er na tien minuten nog een bericht over dezelfde stekker die
-van het netwerk is. Met de melding uit blijft de sensorwacht hem zeggen, zoals voor elk
-apparaat.
+van het netwerk is. Met de melding uit blijft de sensorwacht hem zeggen zolang de stekker
+zelf bereikbaar is; sinds v0.178.0 niet als de stekker zelf weg is, want dan staat hij al
+in de geschiedenis.
 
-Na een herstart van Home Assistant weet de coach niet meer dat hij al gemeld had; staat
-de stekker dan nog uit, dan komt er na twee minuten één nieuwe melding.
+## Eén melding voor stekkers die samen wegvallen (v0.178.0)
+
+In een klantwoning zette beheer op 29-10-2026 vijf nieuwe stekkers in de coach, met altijd
+aan. Ze zaten nog niet in het stopcontact. Twee minuten later kwamen er vijf kritieke
+meldingen in dezelfde seconde, een per stekker. Acht minuten later kwam er een zesde van de
+sensorwacht over hun vermogen: "Waarschijnlijk is het internet thuis weg." Het internet was
+er gewoon.
+
+- **Eén melding** (`_async_stekkers_melden`). Gaat een stekker over `ALTIJD_AAN_WACHT`, dan
+  neemt de melding elke stekker mee die al `ALTIJD_AAN_BUNDEL` (een minuut) weg is. De coach
+  zet een stekker binnen een seconde aan, dus na een minuut weet hij dat het niet lukte.
+  - Per soort is er een zin: niet bereikbaar, uit en niet aan te krijgen, of uit.
+  - Het getal is dat van de stekker die over de wachttijd ging.
+  - Een eigen naam blijft zoals hij is, en verderop in de zin wordt "De vaatwasser" "de
+    vaatwasser". Bijvoorbeeld: "Oven, Warmhoudlade, Quooker, Ledstrips en de vaatwasser zijn
+    al 2 minuten niet bereikbaar; de coach weet niet of ze aan staan."
+  - Eén stekker geeft de zin van voorheen.
+- **Een stekker die nog nooit bereikbaar was** krijgt een gewone melding, geen kritiek: "...
+  zijn nog niet bereikbaar. Zodra ze er zijn, houdt de coach ze aan."
+  - De eigenaar koos op 29-10-2026 "ja b", want het gebeurt bij elke nieuwe stekker en de
+    bewoner kan er niets aan doen.
+  - Komt hij er, dan staat "... is nu bereikbaar." in de geschiedenis, en houdt de coach
+    hem aan.
+  - Valt hij daarna weg, dan is dat wel kritiek.
+  - "Bereikbaar" is: de coach zag hem ooit aan of uit (`_stekker_ooit`).
+  - Een stekker die al weg was toen v0.178.0 kwam, telt ook als nieuw. Hij krijgt dus een
+    gewone melding en geen kritiek.
+- **Een herstart** maakt niets dubbel. In `GeheugenStore` (`meldingen`) staan:
+  - wat gemeld is (sinds v0.173.0);
+  - sinds wanneer elke stekker weg is;
+  - welke ooit bereikbaar waren;
+  - welke de gewone melding al kregen.
 
 ## Ook een vaatwasser (v0.122.0)
 
@@ -121,9 +152,9 @@ stekker als `power` en `energy`. Dat is iets toevoegen; het contract blijft 1.
 
 ## Proeven
 
-Proef 157, 158 en 218 in test_coach.py (de bewaking, de meldingen, de niveaus, de sensorwacht, een
+Proef 157, 158, 218 en 219 in test_coach.py (de bewaking, de meldingen, de niveaus, de sensorwacht, een
 volle ronde, de vaatwasser; de vriezer, de wasmachine op het vermogen van de stekker en de teller die
-zakt), en zeven proeven "smart plug" in test_rapport.mjs (de lijst tegen const.py, naam en icoon, de
+zakt; vijf stekkers in één melding, een herstart halverwege, nieuwe stekkers en het internet), en zeven proeven "smart plug" in test_rapport.mjs (de lijst tegen const.py, naam en icoon, de
 kaart, Apparaten en Meldingen, het blok Stekker bij alle vijf de types).
 
 ## Nog niet in het echt gezien
