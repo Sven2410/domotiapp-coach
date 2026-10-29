@@ -82,7 +82,9 @@ from .batterij import (
     growatt_besluit,
     growatt_bijstelling,
     growatt_duur,
+    growatt_laatste_nacht,
     growatt_nachten,
+    GROWATT_DAG,
     GROWATT_NACHTEN_V,
     growatt_inhoud,
     growatt_max_w,
@@ -8641,35 +8643,67 @@ class ChargerCoach:
         de coach op een dag samen langer dan `GROWATT_DAG_GAT` niet (een coach die uit
         stond), dan rekent hij die dag achteraf na uit de kwartieren (v0.174.0,
         `_async_growatt_dag_af`): half geteld is te weinig te veel.
+
+        **Een nacht zonder vak sluit ook af** (v0.179.0), een etmaal na het begin van de dag
+        (`GROWATT_DAG`), dus op het moment van het vak van de nacht ervoor. Tot dan sloot de dag
+        alleen bij een vak dat de coach schreef; in de klantwoning laadde hij in de nacht van 28
+        op 29-10-2026 terecht niet van het net, en liep de dag van 28-10 door in 29-10 en verder.
+        Juist zo'n nacht laat zien of het te weinig was: op 29-10 stond de accu van 08:00 tot
+        09:45 op zijn vloer en kwam er 2,1 kWh van het net in het dure uur. Een telling in de
+        opslag zonder begin zoekt het laatste vak in de kwartieren (`growatt_laatste_nacht`).
         """
         device_id = device.get("id", "")
         geschreven: GrowattSchema | None = sessie.get("growatt_geschreven")
         if "growatt_dag" not in sessie:
-            dag, vorige = self._growatt_dag_uit(self._batterij_rij(settings, device_id).get("growatt_dag"))
+            bewaard = self._batterij_rij(settings, device_id).get("growatt_dag")
+            dag, vorige = self._growatt_dag_uit(bewaard)
             sessie["growatt_dag"] = dag
             sessie["growatt_dag_op"] = vorige
+            # Een telling van een eerdere coach zonder begin: dat zoekt hij één keer op.
+            sessie["growatt_begin_zoeken"] = isinstance(bewaard, dict) and dag.get("begon") is None
         dag = sessie["growatt_dag"]
         dag.setdefault("gat", 0.0)
         vorige = sessie.get("growatt_dag_op")
         sessie["growatt_dag_op"] = now
-        if vorige is not None:
-            # Een ronde is een minuut; wat er langer tussen zat telde hij niet.
-            gemist = (_tussen(vorige, now) - timedelta(minutes=1)).total_seconds() / 3600.0
-            if gemist > 1.0 / 60.0:
-                dag["gat"] += gemist
         in_vak = bool(geschreven is not None and geschreven.net and self._growatt_in_vak(geschreven, now))
-        if dag["in_vak"] is False and in_vak:
-            # Een nieuw vak: de dag ervoor is klaar, en de volgende begint hier.
-            await self._async_growatt_dag_af(now, settings, device, b, dag)
-            # Wanneer dit vak begon, voor de narekening van morgen.
+        vak_begon = None
+        if in_vak:
             klok = now.strftime("%H:%M")
-            begon = next((now.replace(hour=int(a[:2]), minute=int(a[3:5]), second=0, microsecond=0)
-                          for a, e in geschreven.vakken if a <= klok < e), now)
-            dag.update(net=0.0, teveel=0.0, tekort=0.0, gat=0.0, begon=begon)
+            vak_begon = next((now.replace(hour=int(a[:2]), minute=int(a[3:5]), second=0, microsecond=0)
+                              for a, e in geschreven.vakken if a <= klok < e), now)
+        if dag["in_vak"] is None and vorige is None:
+            # De eerste ronde zonder iets in de opslag: wat er voor nu lag zag hij niet. In een vak
+            # begint de dag bij het vak, en mist hij wat er sinds het begin ervan van het net kwam.
+            if in_vak:
+                dag.update(begon=vak_begon, gat=self._growatt_gemist(vak_begon, now))
+            else:
+                dag.update(begon=now, gat=GROWATT_DAG_GAT.total_seconds() / 3600.0 + 1.0)
+        if sessie.pop("growatt_begin_zoeken", False) and dag.get("begon") is None:
+            dag["begon"] = await self._async_growatt_begin(settings, device, now)
+            if dag["begon"] is None and in_vak and dag["in_vak"]:
+                dag["begon"] = vak_begon
+        grens = None
+        if dag["in_vak"] is False and in_vak:
+            # Een nieuw vak: de dag ervoor is klaar, en de volgende begint bij het vak.
+            grens = vak_begon
+        elif not in_vak and dag.get("begon") is None:
+            # Geen begin, en ook niet in de kwartieren: zoals voor v0.179.0, de dag is hier om.
+            grens = now
+        elif not in_vak and now >= dag["begon"] + GROWATT_DAG:
+            # Een etmaal zonder vak: de dag is om op het moment van het vak ervoor.
+            dagen = (now - dag["begon"]) // GROWATT_DAG
+            grens = dag["begon"] + dagen * GROWATT_DAG
+        if grens is not None:
+            if vorige is not None:
+                # Wat hij na de grens nog bij de oude dag telde hoort er niet bij: zo lang
+                # telt als niet geteld, en is dat te veel, dan rekent hij de dag na.
+                dag["gat"] += self._growatt_gemist(vorige, grens) + max(
+                    0.0, (vorige - grens).total_seconds() / 3600.0)
+            await self._async_growatt_dag_af(grens, settings, device, b, dag)
+            dag.update(net=0.0, teveel=0.0, tekort=0.0, gat=self._growatt_gemist(grens, now), begon=grens)
             sessie["growatt_dag_bewaard"] = None
-        elif dag["in_vak"] is None and in_vak is False and vorige is None:
-            # De eerste ronde zonder iets in de opslag: wat er voor nu lag zag hij niet.
-            dag["gat"] = GROWATT_DAG_GAT.total_seconds() / 3600.0 + 1.0
+        elif vorige is not None:
+            dag["gat"] += self._growatt_gemist(vorige, now)
         dag["in_vak"] = in_vak
         bewaard = sessie.get("growatt_dag_bewaard")
         if bewaard is None or _tussen(bewaard, now) >= GROWATT_DAG_BEWAREN:
@@ -8689,6 +8723,29 @@ class ChargerCoach:
             if (net_w > 0 and b.soc <= b.soc_min + 1.0 and abs(bat_w) < GROWATT_STIL_W
                     and growatt_duur(plan_uren or [], now)):
                 dag["tekort"] += net_w / 1000.0 * uren
+
+    @staticmethod
+    def _growatt_gemist(van: datetime, tot: datetime) -> float:
+        """Hoeveel uur hij tussen twee rondes niet telde: een ronde is een minuut."""
+        if tot <= van:
+            return 0.0
+        gemist = (_tussen(van, tot) - timedelta(minutes=1)).total_seconds() / 3600.0
+        return gemist if gemist > 1.0 / 60.0 else 0.0
+
+    async def _async_growatt_begin(
+        self, settings: dict[str, Any], device: dict[str, Any], now: datetime
+    ) -> datetime | None:
+        """Waar de dag in de opslag begon, uit het laatste vak in de kwartieren (v0.179.0)."""
+        try:
+            kwartieren, _ = await self._async_growatt_kwartieren(
+                settings, device, now - GROWATT_NAREKENEN_MAX, now, accustand=False)
+        except Exception:  # noqa: BLE001 - zoeken mag de ronde niet kosten
+            _LOGGER.exception("%s: kon het laatste vak niet zoeken", device.get("id", ""))
+            return None
+        begon = growatt_laatste_nacht(kwartieren or [], GROWATT_STIL_W)
+        _LOGGER.info("%s: de telling van de nacht had geen begin; het laatste vak begon %s",
+                     device.get("id", ""), begon.isoformat() if begon else "niet in de kwartieren")
+        return begon
 
     @staticmethod
     def _growatt_begint(schema: GrowattSchema, now: datetime) -> timedelta:
@@ -8760,9 +8817,17 @@ class ChargerCoach:
         if dag["gat"] * 3600.0 <= GROWATT_DAG_GAT.total_seconds():
             tellingen, hoe = [(dag["net"], dag["teveel"], dag["tekort"])], "geteld"
         else:
-            van = max(dag.get("begon") or now - timedelta(hours=24), now - GROWATT_NAREKENEN_MAX)
+            begon = dag.get("begon")
+            if begon is None:
+                van, begin = now - timedelta(hours=24), False
+            else:
+                # Vanaf het begin van de dag, of het eerste begin van een etmaal daarna dat nog
+                # in de kwartieren en de recorder staat.
+                van, begin = begon, True
+                if van < now - GROWATT_NAREKENEN_MAX:
+                    van += -((van - (now - GROWATT_NAREKENEN_MAX)) // GROWATT_DAG) * GROWATT_DAG
             try:
-                nagerekend, waarom = await self._async_growatt_narekenen(settings, device, b, van, now)
+                nagerekend, waarom = await self._async_growatt_narekenen(settings, device, b, van, now, begin)
             except Exception:  # noqa: BLE001 - narekenen mag de ronde niet kosten
                 _LOGGER.exception("%s: kon de nacht niet narekenen", device_id)
                 return
@@ -8787,14 +8852,40 @@ class ChargerCoach:
         })
 
     async def _async_growatt_narekenen(
-        self, settings: dict[str, Any], device: dict[str, Any], b: Batterij, van: datetime, tot: datetime
+        self, settings: dict[str, Any], device: dict[str, Any], b: Batterij, van: datetime, tot: datetime,
+        begin: bool = False,
     ) -> tuple[list[tuple[float, float, float]] | None, str]:
         """Wat de telling van de dagen had moeten zijn, uit de kwartieren (v0.174.0).
 
         Het net en de batterij uit de kwartieropslag (`archive.py`, twee jaar), de accustand
         uit de recorder (tien dagen). Per kwartier hetzelfde als per ronde, zie
         `growatt_narekening`. Geeft per nacht (van het net, te veel, te weinig), of None met
-        de reden. Een nacht waarin meer dan `GROWATT_DAG_GAT` ontbreekt valt weg.
+        de reden. Een nacht waarin meer dan `GROWATT_DAG_GAT` ontbreekt valt weg. `begin`: `van`
+        is het begin van een dag die de coach kende (v0.179.0).
+        """
+        kwartieren, waarom = await self._async_growatt_kwartieren(settings, device, van, tot)
+        if kwartieren is None:
+            return None, waarom
+        prijsuren = [Uur(start=r["start"], end=r["end"], stand="", kwh=0.0, net_kwh=0.0, soc=0.0,
+                         price=float(r["price"])) for r in self._prices(settings, van) if r.get("price") is not None]
+        nachten = growatt_narekening(
+            kwartieren, b.soc_min, b.soc_max, GROWATT_STIL_W, lambda m: growatt_duur(prijsuren, m), begin)
+        goed = [n[:3] for n in nachten if n[3] * 3600.0 <= GROWATT_DAG_GAT.total_seconds()]
+        if len(goed) < len(nachten):
+            weg = ", ".join(f"{n[3]:.1f}" for n in nachten if n[3] * 3600.0 > GROWATT_DAG_GAT.total_seconds())
+            _LOGGER.info("%s: %s van %s nachten niet nagerekend: %s uur zonder kwartieren of accustand",
+                         device.get("id", ""), len(nachten) - len(goed), len(nachten), weg)
+        if not goed:
+            return None, "te veel uren zonder kwartieren of accustand" if nachten else "geen kwartieren"
+        return goed, ""
+
+    async def _async_growatt_kwartieren(
+        self, settings: dict[str, Any], device: dict[str, Any], van: datetime, tot: datetime,
+        accustand: bool = True,
+    ) -> tuple[list[dict] | None, str]:
+        """De kwartieren van `growatt_narekening`: het net, de batterij en de accustand.
+
+        Zonder `accustand` alleen het net en de batterij, genoeg om een vak te zien (v0.179.0).
         """
         sources = settings.get("sources") or {}
         entities = device.get("entities") or {}
@@ -8805,7 +8896,7 @@ class ChargerCoach:
         getekend = device.get("entity")
         accus = [getekend] if getekend else [entities.get("charge_power"), entities.get("discharge_power")]
         soc_id = entities.get("soc")
-        if not netten[0] or not any(accus) or not soc_id:
+        if not netten[0] or not any(accus) or (accustand and not soc_id):
             return None, "geen meter, batterijvermogen of accustand"
         ids = [e for e in (*netten, *accus) if e]
         rijen = await self._async_kwartieren(ids, van, tot)
@@ -8814,13 +8905,13 @@ class ChargerCoach:
         if not any(per.values()):
             return None, "geen kwartieren"
         socs: list[tuple[datetime, float | None]] = []
-        for moment, staat in await self._async_geschiedenis(soc_id, van - timedelta(hours=6), tot):
+        for moment, staat in await self._async_geschiedenis(soc_id, van - timedelta(hours=6), tot) if accustand else []:
             try:
                 socs.append((moment, float(staat)))
             except (TypeError, ValueError):
                 socs.append((moment, None))
         socs.sort(key=lambda r: r[0])
-        if not socs:
+        if accustand and not socs:
             return None, "geen accustand in de recorder"
         signed_invert = bool(sources.get("grid_signed_invert"))
         bat_invert = bool((device.get("battery") or {}).get("power_invert"))
@@ -8834,8 +8925,6 @@ class ChargerCoach:
         def verschil(plus: float | None, min_: float | None) -> float | None:
             return None if plus is None or min_ is None else plus - min_
 
-        prijsuren = [Uur(start=r["start"], end=r["end"], stand="", kwh=0.0, net_kwh=0.0, soc=0.0,
-                         price=float(r["price"])) for r in self._prices(settings, van) if r.get("price") is not None]
         kwartieren = []
         i_soc, soc_nu = 0, None
         zone = dt_util.get_default_time_zone()
@@ -8873,16 +8962,7 @@ class ChargerCoach:
                 "soc_laag": min(standen) if bekend else None, "soc_hoog": max(standen) if bekend else None,
             })
             moment += timedelta(minutes=15)
-        nachten = growatt_narekening(
-            kwartieren, b.soc_min, b.soc_max, GROWATT_STIL_W, lambda m: growatt_duur(prijsuren, m))
-        goed = [n[:3] for n in nachten if n[3] * 3600.0 <= GROWATT_DAG_GAT.total_seconds()]
-        if len(goed) < len(nachten):
-            weg = ", ".join(f"{n[3]:.1f}" for n in nachten if n[3] * 3600.0 > GROWATT_DAG_GAT.total_seconds())
-            _LOGGER.info("%s: %s van %s nachten niet nagerekend: %s uur zonder kwartieren of accustand",
-                         device.get("id", ""), len(nachten) - len(goed), len(nachten), weg)
-        if not goed:
-            return None, "te veel uren zonder kwartieren of accustand" if nachten else "geen kwartieren"
-        return goed, ""
+        return kwartieren, ""
 
     async def _async_batterij_loslaten(self, device: dict[str, Any], herstart: bool = False) -> None:
         """De batterij teruggeven: vermogen op nul, en zijn eigen stand terug.

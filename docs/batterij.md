@@ -2195,7 +2195,7 @@ Proef 215 in `test_coach.py`:
 | geval | uitkomst |
 |---|---|
 | coach weg van 06:00 tot 10:48, twee nachten gemist | −1 en −8 in `growatt_nachten` |
-| een gat van 2,5 uur in de kwartieren over het vak | niets, met de reden in het log |
+| een gat van 2,5 uur in de kwartieren over het vak | niets, met de reden in het log (sinds v0.179.0 telt de dag ervoor wel: die zag hij helemaal) |
 | een dag die hij helemaal zag | telling en narekening gelijk (5,0 en 1,0) |
 
 Proef 61 in `test_batterij.py` rekent de som zelf na.
@@ -2205,3 +2205,60 @@ herstart stond er geen `growatt_dag` in de opslag, en dat klopt. Een installatie
 bestanden neer. Home Assistant draait de nieuwe code pas na de herstart, en de versie die tot dan draaide
 kende `growatt_dag` niet. De eerste ronde na de herstart bewaarde hem meteen (11:02:26). Proef 215 kijkt
 dat na.
+
+## Growatt: een nacht zonder netladen sluit de dag ook af (v0.179.0)
+
+De dag van `growatt_dag` sloot alleen af als er een vak begon dat de coach schreef. In de klantwoning
+laadde de coach in de nacht van 28 op 29-10-2026 terecht niet van het net (het schema stond leeg sinds
+28-10 20:28). De dag van 28-10 liep daardoor door in 29-10: op 29-10 om 19:55 stond `teveel` op 13,24
+(11,05 van 28-10 plus de zon van 29-10), en `growatt_nachten` nog altijd op `[0.0]`. Juist zo'n nacht
+laat zien of het te weinig was: op 29-10 stond de accu van 08:00 tot 09:45 op 15 tot 17%, en haalde het
+huis 2,1 kWh van het net tegen het dagtarief.
+
+Sindsdien sluit de dag op twee momenten af, wat eerst komt:
+
+- **Een vak begint**, zoals tot nu.
+- **Een etmaal na het begin van de dag** (`GROWATT_DAG`), buiten een vak. Op de klok, dus op het moment
+  van het vak van de nacht ervoor, ook op de dag van 23 of 25 uur. Een nacht zonder netladen geeft dan
+  `net` 0, en dus hoogstens te weinig: meer laden. Te veel kan in zo'n nacht niet, want `growatt_nacht`
+  begrenst het op wat er van het net in ging.
+
+Het begin is niet het goedkope stuk van de prijzen, zoals de werkbon voorstelde. Met een dynamisch
+contract kan het goedkoopste uur midden op de dag liggen, en dan knipt de dag de zon in tweeën. Begint
+het volgende vak eerder, dan sluit dat de dag. Begint het later, dan sluit het etmaal hem, en het vak
+daarna een dag van een paar minuten zonder iets erin, die niet telt.
+
+Was de coach weg over de grens heen, dan sluit de dag op de grens, niet bij de eerste ronde daarna. Wat
+er na de grens ontbrak hoort bij de nieuwe dag. Telde de coach na de grens nog bij de oude dag (een
+begin dat hij net opzocht), dan geldt die tijd als niet geteld, en rekent hij de dag na bij meer dan een
+uur. Een vak dat begon terwijl de coach weg was sluit nu ook op het begin van het vak: tot nu rekende hij
+dan na tot de eerste ronde, en kwam het begin van het vak als een halve nacht in `growatt_nachten`.
+
+**Narekenen vanaf het begin van de dag.** `growatt_narekening` houdt een nacht zonder vak nu ook na een
+etmaal op. Met `begin` is het eerste kwartier het begin van een dag die de coach kende, en geen nacht die
+hij half ziet. Ligt het begin verder terug dan de recorder (`GROWATT_NAREKENEN_MAX`), dan begint hij bij
+het eerste etmaal daarna.
+
+**Een telling zonder begin.** Een coach van voor v0.174.0 bewaarde geen begin, en in de klantwoning
+stond `begon` op null. Hij rekende dan na over de laatste 24 uur, en het vak van 28-10 (06:30 tot 08:00)
+viel daarbuiten. Nu zoekt de eerste ronde het laatste vak in de kwartieren op (`growatt_laatste_nacht`,
+`_async_growatt_begin`), en begint de dag daar. Een eerste ronde zonder iets in de opslag zet het begin
+op nu, of op het begin van het vak als er een loopt, met de tijd sinds dat begin als niet geteld. Na een
+installatie zoekt hij niet in de kwartieren: die nachten stuurde de coach niet.
+
+**Een gat in een nacht blijft een gat.** De werkbon vroeg of een nacht met een gat toch mag tellen als de
+uitkomst al vaststaat. Dat staat hij niet: in een gat kan een vak zitten (meer van het net), te veel of
+te weinig, en die drie trekken de uitkomst elk een andere kant op. Proef 215 laat het zien: een gat van
+2,5 uur over het vak geeft een dag zonder `net` met 8 kWh te veel, en dat lijkt een goede nacht terwijl
+het −8 was. In de klantwoning valt de nacht van 29-10 daardoor weg (Home Assistant was weg van 11:06 tot
+14:00).
+
+Proef 220 in `test_coach.py`, elke minuut:
+
+| geval | in `growatt_nachten` |
+|---|---|
+| vak, twee nachten zonder vak, weer een vak (een uur eerder), met een herstart halverwege | −8, +2,1 en +1,2 |
+| een telling zonder begin sinds 27-10, de coach terug op 29-10 om 10:00 | −8 en +2,1 meteen, +1,2 bij het vak |
+| twee nachten zonder vak, een stroomstoring over de grens heen | +2,1 en +1,2, de dag daarna op dezelfde klok |
+
+Zonder het etmaal geeft de eerste rij −4,7: één dag die doorloopt tot het vak van 30-10.

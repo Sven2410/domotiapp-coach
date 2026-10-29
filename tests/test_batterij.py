@@ -2078,6 +2078,25 @@ controle("en de nacht die eruit komt: minder laden, hooguit wat er van het net i
 controle("één rare nacht bepaalt de bijstelling niet: de mediaan",
          bat.growatt_bijstelling([-1.0, -0.5, -12.0], 12.5) == -1.0
          and bat.growatt_bijstelling([-1.0, -0.5, -12.0, -0.8, -1.2], 12.5) == -1.0)
+# Sinds v0.179.0: een nacht zonder vak houdt een etmaal na zijn begin op, zoals per ronde. Hier na het
+# vak van 28-10 twee dagen zonder vak, elk met een tekort om 08:00 in een duur uur.
+zonder61 = [kw61(8, 15 * i, 1200.0, 0.0, 15.0) for i in range(4)]
+zonder61 = [{**k, "start": k["start"] + dt.timedelta(days=d)} for d in (1, 2) for k in zonder61]
+drie61 = bat.growatt_narekening(k61 + zonder61, 15.0, 100.0, 30.0, duur=lambda m: m.hour >= 8)
+controle("na een etmaal zonder vak begint een nieuwe nacht: drie nachten",
+         len(drie61) == 3 and drie61[1][:3] == (0.0, 0.0, 1.2) and drie61[2][:3] == (0.0, 0.0, 1.2), f"{drie61}")
+controle("en het vak van de eerste nacht blijft bij de eerste", abs(drie61[0][0] - net61) < 1e-9, f"{drie61[0]}")
+# Met begin: het eerste kwartier is het begin van een dag die de coach kende, ook zonder vak.
+met61 = bat.growatt_narekening(voor61 + k61, 15.0, 100.0, 30.0, begin=True)
+controle("met begin telt wat er voor het vak lag als een eigen nacht",
+         len(met61) == 2 and met61[0][1] == 0.125 and met61[1][0] == net61, f"{met61}")
+controle("met begin en geen vak: één nacht vanaf het begin",
+         len(bat.growatt_narekening(zonder61[:4], 15.0, 100.0, 30.0, begin=True)) == 1)
+# Waar de laatste nacht met een vak begon, voor een telling zonder begin.
+controle("het laatste vak: het begin van de laatste nacht",
+         bat.growatt_laatste_nacht(k61 + morgen61 + [{**k, "start": k["start"] + dt.timedelta(days=2)}
+                                                     for k in k61[6:]], 30.0) == dag61.replace(day=29, hour=6, minute=30))
+controle("zonder vak geen begin", bat.growatt_laatste_nacht(k61[6:], 30.0) is None)
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
