@@ -800,3 +800,38 @@ Proeven:
   fasen.
 - test_coach.py, proef 221: `report/store` met een csv.
 
+## Een piek per fase is wat tien seconden aanhield (v0.182.0)
+
+Thuis op 29-10-2026 zei de kaart Per fase bij L1: "Gemiddeld nooit boven 25 A, in één kwartier een piek
+erboven. Hoogste piek 41,0 A om 19:00." De eigenaar: "41A om 19:00 uur?" Die 41 A heeft er nooit gelopen. De
+slimme meter meldde hem om 19:05:56 één keer, twee seconden lang. In hetzelfde bericht gaf dezelfde fase
+282 W op 232 V, en de lastbewaker van de paal bleef op 1 à 2 A. De kwartieropslag zette elke melding meteen in
+de piek, hoe kort ook. Bij een kaart die de piek tegen een zekering legt, geeft zo'n meetfout een verkeerd
+antwoord op de vraag of een kleinere aansluiting past.
+
+Sindsdien is de piek van een fase de hoogste stroom waar de fase tien seconden onafgebroken op of boven zat
+(`FASE_VAST`, `_Meter.vast` en `_venster` in archive.py). Het laagste werkt andersom. Wiskundig is dat het
+hoogste van de laagste waarden in elk venster van tien seconden. Bij een trap ligt zo'n venster altijd met
+zijn eind op een melding of een kwartiergrens, en daar rekent de meter het uit. Dat werkt voor een meter die
+elke seconde een ander getal geeft net zo goed als voor een die elke dertig seconden meldt:
+
+| meter | piek |
+|---|---|
+| elke seconde 29, 30, 31, 30 A, een minuut lang | 29 A |
+| elke dertig seconden 32 A | 32 A |
+| één melding van 41 A tussen 1 en 2 A | het gemiddelde, ongeveer 1,6 A |
+
+Een venster dat over een kwartiergrens loopt, telt bij het kwartier waarin de tien seconden vol raken. Een
+kwartier waarin niets zo lang aanhield (een paar seconden gedekt), en een stroom die steeds wisselt, krijgen
+het gemiddelde als piek en als laagste. De piek komt nooit onder het gemiddelde.
+
+Dit geldt alleen voor de fasen (`_fase_sensoren`). Bij het net, de zon en een apparaat blijft de piek de
+hoogste melding, zoals de uitleg bovenaan archive.py het bedoelt. Uit de vijfminutenblokken van de recorder
+(de inhaalslag en gaten na een herstart) is de duur niet te zien. Daar is de piek van een fase het hoogste
+gemiddelde van vijf minuten (`vlak` in `kwartieren_uit_blokjes`). Een korte zware belasting komt er dan lager
+uit dan hij was, maar een losse melding telt niet (de keuze van de eigenaar, 29-10-2026).
+
+Wat er al in de opslag staat, blijft staan: thuis de 41 A van 29-10 19:00, bij de woning die de kaart
+aanvroeg de pieken sinds 19-10. Proef 12 in test_archive.py heeft de melding van thuis, een echte minuut op
+30 A, de twee meters, tien seconden tegen negen, een kwartiergrens, een herstart halverwege en de recorder.
+

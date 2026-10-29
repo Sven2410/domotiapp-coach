@@ -8,6 +8,9 @@
  * spanning. De ampères komen er hier uit met `phaseAmps` uit data-source.js, dezelfde som als
  * `_phase_amps` in monitor.py.
  *
+ * De piek van een fase in de opslag is sinds v0.182.0 de hoogste stroom die tien seconden aanhield
+ * (`FASE_VAST` in archive.py), niet één melding van de meter.
+ *
  * Kent Home Assistant niet en tekent niets; views/history.js zet het op het scherm.
  */
 

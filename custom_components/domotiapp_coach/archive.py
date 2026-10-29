@@ -33,6 +33,13 @@ komen. Een sensor die werkelijk wegvalt zegt dat zelf: Home Assistant zet hem
 op `unavailable`, en dan telt de tijd erna niet meer mee. Dat is dezelfde
 aanname als de statistiek van Home Assistant zelf maakt.
 
+**Bij de fasen van de lastbewaker is de piek wat tien seconden aanhield** (v0.182.0,
+`FASE_VAST`): de hoogste stroom waar de fase zo lang onafgebroken op of boven zat. Daar
+wordt de piek tegen een zekering gelegd, en een slimme meter meldde in een klantwoning op
+29-10-2026 één keer 41 A, twee seconden lang, terwijl hetzelfde bericht 282 W gaf. Een
+zekering slaat daar niet op af. Uit de vijfminutenblokken van de recorder is dat niet te
+zien; daar is de piek van een fase het hoogste gemiddelde van vijf minuten.
+
 Hoeveel seconden van een kwartier er werkelijk gedekt zijn staat in de regel,
 zodat een gat te zien is in plaats van weggerekend.
 
@@ -43,6 +50,7 @@ Alles gaat als watt de opslag in, ongeacht wat de sensor zichzelf noemt. Zie
 from __future__ import annotations
 
 import logging
+import math
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -100,6 +108,8 @@ CATCHUP_GIVE_UP = timedelta(hours=24)
 GATEN_VENSTER = timedelta(hours=24)
 GAT = 840.0
 GATEN_NA_START = timedelta(hours=2)
+# Hoe lang een fase op een stroom moet zitten voor die als piek of als laagste telt (v0.182.0).
+FASE_VAST = 10.0
 
 _TABEL = """
 CREATE TABLE IF NOT EXISTS kwartieren (
@@ -151,10 +161,11 @@ class _Lopend:
     gewogen: float = 0.0
     seconden: float = 0.0
 
-    def tel(self, waarde: float, seconden: float) -> None:
+    def tel(self, waarde: float, seconden: float, uitersten: bool = True) -> None:
         """Een waarde die zo lang gegolden heeft erbij optellen."""
-        self.laagste = min(self.laagste, waarde)
-        self.piek = max(self.piek, waarde)
+        if uitersten:
+            self.laagste = min(self.laagste, waarde)
+            self.piek = max(self.piek, waarde)
         self.gewogen += waarde * seconden
         self.seconden += seconden
 
@@ -177,15 +188,50 @@ class _Meter:
     klaar: list[tuple[datetime, float, float, float, float]] = field(
         default_factory=list
     )
+    # Hoeveel seconden een waarde moet aanhouden voor hij de piek of het laagste is; nul is
+    # elke melding (v0.182.0). `venster` is wat er de laatste `vast` seconden gold.
+    vast: float = 0.0
+    venster: list[tuple[datetime, datetime, float]] = field(default_factory=list)
 
     def _open(self, start: datetime, waarde: float) -> _Lopend:
+        if self.vast:
+            return _Lopend(start=start, laagste=math.inf, piek=-math.inf)
         return _Lopend(start=start, laagste=waarde, piek=waarde)
+
+    def _venster(self, van: datetime, tot: datetime, waarde: float) -> None:
+        """Wat er tot `tot` gold bijhouden, en de piek: het laagste van de laatste `vast` seconden.
+
+        De hoogste stroom waar de fase `vast` seconden onafgebroken op of boven zat, is het
+        hoogste van de laagste waarden in elk venster van die lengte. Bij een trap is dat er
+        een dat eindigt waar een waarde ophoudt, en daar komt dit elke keer langs: bij elke
+        melding en op elke kwartiergrens. Het laagste andersom.
+        """
+        if self.venster and self.venster[-1][1] == van and self.venster[-1][2] == waarde:
+            self.venster[-1] = (self.venster[-1][0], tot, waarde)
+        else:
+            self.venster.append((van, tot, waarde))
+        rand = tot - timedelta(seconds=self.vast)
+        while self.venster and self.venster[0][1] <= rand:
+            self.venster.pop(0)
+        if self.lopend is None or not self.venster or self.venster[0][0] > rand:
+            return
+        waarden = [w for _, _, w in self.venster]
+        self.lopend.piek = max(self.lopend.piek, min(waarden))
+        self.lopend.laagste = min(self.lopend.laagste, max(waarden))
 
     def _sluit(self) -> None:
         """Het lopende kwartier wegleggen om straks weg te schrijven."""
         if self.lopend is None or self.lopend.seconden <= 0:
             self.lopend = None
             return
+        if self.vast:
+            # Niets hield het venster lang aan (een kwartier waarvan maar een paar seconden
+            # gedekt is): dan het gemiddelde, en geen losse melding. En nooit een piek onder het
+            # gemiddelde: bij een stroom die elke twee seconden tussen 1 en 2 A springt hield
+            # 1 A het langst aan als hoogste, en 2 A als laagste.
+            gemiddeld = self.lopend.gemiddeld
+            self.lopend.piek = max(self.lopend.piek, gemiddeld)
+            self.lopend.laagste = min(self.lopend.laagste, gemiddeld)
         self.klaar.append(
             (
                 self.lopend.start,
@@ -213,7 +259,9 @@ class _Meter:
                 self.lopend = self._open(bucket_start(self.sinds), self.waarde)
             grens = self.lopend.start + BUCKET
             tot = min(einde, grens)
-            self.lopend.tel(self.waarde, (tot - self.sinds).total_seconds())
+            self.lopend.tel(self.waarde, (tot - self.sinds).total_seconds(), uitersten=not self.vast)
+            if self.vast:
+                self._venster(self.sinds, tot, self.waarde)
             self.sinds = tot
             if tot >= grens:
                 self._sluit()
@@ -228,7 +276,7 @@ class _Meter:
         self.sinds = moment
         if self.lopend is None:
             self.lopend = self._open(bucket_start(moment), waarde)
-        else:
+        elif not self.vast:
             self.lopend.laagste = min(self.lopend.laagste, waarde)
             self.lopend.piek = max(self.lopend.piek, waarde)
 
@@ -237,6 +285,7 @@ class _Meter:
         self.tot(moment)
         self.waarde = None
         self.sinds = None
+        self.venster = []
 
     def oogst(self) -> list[tuple[datetime, float, float, float, float]]:
         """De afgesloten kwartieren ophalen en het mandje legen."""
@@ -263,6 +312,8 @@ class Archive:
         # herstart. Zie `_async_gaten_vullen`.
         self._gestart: datetime | None = None
         self._gaten_gemeld = False
+        # De sensoren van de fasen, met een piek die moet aanhouden (v0.182.0).
+        self._fasen: set[str] = set()
 
     # --- opzetten en afbreken ---------------------------------------------
 
@@ -319,6 +370,7 @@ class Archive:
         """Opnieuw bepalen welke sensoren erbij horen en daarop luisteren."""
         settings = await async_get_store(self.hass).async_load()
         wilde = self._wat_volgen(settings)
+        self._fasen = self._fase_sensoren(settings)
 
         # Wie eraf gaat wordt eerst netjes afgesloten, anders blijft er een half
         # kwartier in het geheugen hangen dat nooit meer weggeschreven wordt.
@@ -332,6 +384,9 @@ class Archive:
         for entity_id in nieuwe:
             self._meters[entity_id] = _Meter(entity_id)
             self._lees(self._meters[entity_id], nu)
+        # Een fase houdt zijn piek pas na `FASE_VAST` seconden (v0.182.0).
+        for entity_id, meter in self._meters.items():
+            meter.vast = FASE_VAST if entity_id in self._fasen else 0.0
 
         if nieuwe:
             self._inhalen.update(nieuwe)
@@ -378,6 +433,20 @@ class Archive:
             bronnen.get("solar"),
             *(bronnen.get("solar_extra") or []),
         }
+        uit |= Archive._fase_sensoren(settings)
+        for apparaat in settings.get("devices") or []:
+            uit.add(apparaat.get("entity"))
+            # Een thuisbatterij meldt laden en ontladen soms op twee sensoren.
+            if apparaat.get("type") == "thuisbatterij":
+                for sleutel in ("charge_power", "discharge_power"):
+                    uit.add((apparaat.get("entities") or {}).get(sleutel))
+        return {e for e in uit if e}
+
+    @staticmethod
+    def _fase_sensoren(settings: dict[str, Any]) -> set[str]:
+        """De sensoren van de fasen: de stroom, anders het vermogen en de spanning (v0.180.0)."""
+        bronnen = settings.get("sources") or {}
+        uit: set[Any] = set()
         if bronnen.get("phases_enabled"):
             fasen = bronnen.get("phases") or {}
             for fase in ("l1", "l2", "l3"):
@@ -387,12 +456,6 @@ class Archive:
                 elif config.get("power"):
                     uit.add(config["power"])
                     uit.add(config.get("voltage"))
-        for apparaat in settings.get("devices") or []:
-            uit.add(apparaat.get("entity"))
-            # Een thuisbatterij meldt laden en ontladen soms op twee sensoren.
-            if apparaat.get("type") == "thuisbatterij":
-                for sleutel in ("charge_power", "discharge_power"):
-                    uit.add((apparaat.get("entities") or {}).get(sleutel))
         return {e for e in uit if e}
 
     # --- de inhaalslag bij de eerste keer -----------------------------------
@@ -595,17 +658,21 @@ class Archive:
             {"mean", "min", "max"},
         )
 
-        return self.kwartieren_uit_blokjes(gevonden or {})
+        return self.kwartieren_uit_blokjes(gevonden or {}, self._fasen)
 
     @staticmethod
     def kwartieren_uit_blokjes(
-        gevonden: dict[str, list[dict[str, Any]]]
+        gevonden: dict[str, list[dict[str, Any]]], vlak: set[str] | frozenset[str] = frozenset()
     ) -> list[tuple[str, int, float, float, float, float]]:
         """Vijfminutenblokjes samenvatten tot kwartieren.
 
         Elk blokje beslaat evenveel tijd, dus het gemiddelde van de gemiddelden
         is hier het naar tijd gewogen gemiddelde. Ontbreekt er een blokje, dan
         is dat te zien aan de seconden en niet weggerekend.
+
+        Voor de sensoren in `vlak` (de fasen, v0.182.0) gaan het laagste en de piek
+        uit het gemiddelde van elk blokje, niet uit zijn min en max: die max is één
+        melding, hoe kort ook, en dat is bij een fase geen belasting.
         """
         emmers: dict[tuple[str, datetime], list[Any]] = {}
         for entity_id, blokjes in gevonden.items():
@@ -633,8 +700,8 @@ class Archive:
                     continue
                 sleutel = (entity_id, begin)
                 emmer = emmers.setdefault(sleutel, [None, None, 0.0, 0.0])
-                laag = blokje.get("min")
-                hoog = blokje.get("max")
+                laag = None if entity_id in vlak else blokje.get("min")
+                hoog = None if entity_id in vlak else blokje.get("max")
                 laag = gem if laag is None else laag
                 hoog = gem if hoog is None else hoog
                 emmer[0] = laag if emmer[0] is None else min(emmer[0], laag)
