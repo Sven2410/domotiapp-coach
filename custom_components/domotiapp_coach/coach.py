@@ -8883,9 +8883,11 @@ class ChargerCoach:
         self, settings: dict[str, Any], device: dict[str, Any], van: datetime, tot: datetime,
         accustand: bool = True,
     ) -> tuple[list[dict] | None, str]:
-        """De kwartieren van `growatt_narekening`: het net, de batterij en de accustand.
+        """De kwartieren van `growatt_narekening`: het net, de batterij, de accustand en de zon.
 
-        Zonder `accustand` alleen het net en de batterij, genoeg om een vak te zien (v0.179.0).
+        Zonder `accustand` alleen het net, de batterij en de zon, genoeg om een vak te zien
+        (v0.179.0). De zon is er sinds v0.181.0, opgeteld over elke omvormer: zon die de accu laadt
+        is geen vak (`_growatt_vak`). Zonder zonsensor geen `zon_w`.
         """
         sources = settings.get("sources") or {}
         entities = device.get("entities") or {}
@@ -8898,11 +8900,12 @@ class ChargerCoach:
         soc_id = entities.get("soc")
         if not netten[0] or not any(accus) or (accustand and not soc_id):
             return None, "geen meter, batterijvermogen of accustand"
-        ids = [e for e in (*netten, *accus) if e]
+        zonnen = [e for e in (sources.get("solar"), *(sources.get("solar_extra") or [])) if e]
+        ids = [e for e in (*netten, *accus, *zonnen) if e]
         rijen = await self._async_kwartieren(ids, van, tot)
         # Een kwartier telt als de sensor er twee derde van gedekt is.
         per = {e: {int(r["start"]): r for r in rijen.get(e) or [] if (r.get("seconden") or 0) >= 600} for e in ids}
-        if not any(per.values()):
+        if not any(per[e] for e in (*netten, *accus) if e):
             return None, "geen kwartieren"
         socs: list[tuple[datetime, float | None]] = []
         for moment, staat in await self._async_geschiedenis(soc_id, van - timedelta(hours=6), tot) if accustand else []:
@@ -8957,10 +8960,14 @@ class ChargerCoach:
                 standen.append(soc_nu)
                 i_soc += 1
             bekend = None not in standen
-            kwartieren.append({
+            kwartier = {
                 "start": begin, "net_w": net_w, "bat_w": bat_w,
                 "soc_laag": min(standen) if bekend else None, "soc_hoog": max(standen) if bekend else None,
-            })
+            }
+            if zonnen:
+                zon = [gemiddeld(e, ts) for e in zonnen]
+                kwartier["zon_w"] = None if None in zon else max(0.0, sum(zon))
+            kwartieren.append(kwartier)
             moment += timedelta(minutes=15)
         return kwartieren, ""
 

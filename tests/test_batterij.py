@@ -2097,6 +2097,22 @@ controle("het laatste vak: het begin van de laatste nacht",
          bat.growatt_laatste_nacht(k61 + morgen61 + [{**k, "start": k["start"] + dt.timedelta(days=2)}
                                                      for k in k61[6:]], 30.0) == dag61.replace(day=29, hour=6, minute=30))
 controle("zonder vak geen begin", bat.growatt_laatste_nacht(k61[6:], 30.0) is None)
+# Sinds v0.181.0: zon die de accu laadt is geen vak. In de klantwoning op 29-10-2026 om 08:00: 2164 W zon,
+# 620 W laden, 316 W van het net in hetzelfde kwartier.
+op61 = {"start": dag61.replace(day=29, hour=8), "net_w": 316.0, "bat_w": 620.0, "zon_w": 2164.0,
+        "soc_laag": 15.0, "soc_hoog": 17.0}
+controle("de accu laadt van de zon terwijl het huis even van het net haalt: geen vak",
+         bat.growatt_laatste_nacht(k61 + [op61], 30.0) == dag61.replace(hour=6, minute=30))
+controle("zonder zon in het kwartier zoals voor v0.181.0",
+         bat.growatt_laatste_nacht(k61 + [{k: w for k, w in op61.items() if k != "zon_w"}], 30.0) == op61["start"])
+controle("een echt vak met al wat zon blijft een vak",
+         bat._growatt_vak({"net_w": 6732.0, "bat_w": 6328.0, "zon_w": 1580.0}, 30.0)
+         and not bat._growatt_vak({"net_w": 6732.0, "bat_w": 1500.0, "zon_w": 1580.0}, 30.0))
+# In de narekening begint daar een nieuwe nacht (een etmaal na het vak), maar zonder iets van het net.
+met61 = bat.growatt_narekening(k61 + [op61], 15.0, 100.0, 30.0)
+zonder61 = bat.growatt_narekening(k61 + [{k: w for k, w in op61.items() if k != "zon_w"}], 15.0, 100.0, 30.0)
+controle("en in de narekening telt dat kwartier niet als van het net geladen",
+         len(met61) == 2 and met61[1][0] == 0.0 and abs(zonder61[1][0] - 0.079) < 1e-9, f"{met61} {zonder61}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

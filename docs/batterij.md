@@ -2262,3 +2262,32 @@ Proef 220 in `test_coach.py`, elke minuut:
 | twee nachten zonder vak, een stroomstoring over de grens heen | +2,1 en +1,2, de dag daarna op dezelfde klok |
 
 Zonder het etmaal geeft de eerste rij −4,7: één dag die doorloopt tot het vak van 30-10.
+
+## Growatt: zon die de accu laadt is geen vak (v0.181.0)
+
+`growatt_narekening` en `growatt_laatste_nacht` kennen het vak niet uit het schema. Een vak was tot nu elk
+kwartier waarin de batterij laadde terwijl het huis van het net haalde (`_growatt_vak`), elk boven 30 W.
+
+In de klantwoning zocht v0.179.0 op 29-10-2026 om 22:08 het laatste vak op. Hij vond het kwartier van 29-10
+08:00, met 2164 W zon, 620 W laden en 316 W van het net. De accu laadde van de zon terwijl het huis in
+hetzelfde kwartier even van het net haalde. Dat kan bij zonsopkomst elke ochtend. Het echte vak lag een dag
+eerder, van 28-10 06:00 tot 08:00, met 6 tot 9 kW van het net en geen zon. `begon` kwam op 29-10 08:00, en de
+nacht van 28-10 (−10,3) kwam niet meer in `growatt_nachten`.
+
+Sindsdien is een kwartier alleen een vak als de batterij meer laadt dan de zon geeft. Dus `bat_w − zon_w` en
+`net_w` liggen allebei boven `GROWATT_STIL_W`. De zon komt uit de kwartieropslag, opgeteld over elke
+omvormer (`sources.solar` en `solar_extra`, `_async_growatt_kwartieren`). Zonder zonsensor, of zonder zon
+in dat kwartier, geldt de regel van voor v0.181.0. De telling per ronde verandert niet: die kent het vak uit
+het schema.
+
+De nacht van 28-10 is bij die klant bewust niet teruggehaald. Een `begon` die gezocht is, is in de opslag
+niet te onderscheiden van een echte afsluiting. Opnieuw zoeken kan dan dagen twee keer narekenen. Het kost
+één nacht van de drie die de bijstelling nodig heeft (de eigenaar, 29-10-2026).
+
+Proeven:
+
+- test_batterij.py, proef 61: het kwartier van 08:00 is geen vak, een echt vak met al wat zon wel, en in de
+  narekening telt het niet als van het net geladen (zonder de zon 0,079 kWh).
+- test_coach.py, proef 222: dezelfde zoektocht als proef 220 (b). Met de zon vindt hij het vak van 27-10, en
+  rekent hij −8 en +2,1 na. Zonder de zon vindt hij 29-10 08:00, zoals in de klantwoning.
+
