@@ -240,7 +240,7 @@ export const HISTORIE = {
   "Stroom per fase": "Current per phase",
   "Zekering {a} A": "Fuse {a} A",
   "De lijn is het gemiddelde per {korrel}; geteld wordt per kwartier.": "The line is the average per {korrel}; the counting is per quarter hour.",
-  "Gemiddeld erboven zegt hoe lang een fase zwaar belast was, een piek hoe hoog het even ging.": "Above on average says how long a phase was heavily loaded, a peak how high it briefly went.",
+  "Gemiddeld erboven zegt hoe lang een fase zwaar belast was; een piek is de hoogste stroom die minstens tien seconden aanhield.": "Above on average says how long a phase was heavily loaded; a peak is the highest current that lasted at least ten seconds.",
   "Kies een andere zekering om te zien hoe vaak je erboven zou komen.": "Choose another fuse to see how often you would go over it.",
   "Zonder stroomsensor rekent de coach de stroom uit het vermogen en de spanning.": "Without a current sensor the coach works out the current from the power and the voltage.",
   "De fasen staan er pas vanaf {wanneer}: eerder bewaarde de coach ze niet.": "The phases are only here from {wanneer}: before that the coach did not keep them.",

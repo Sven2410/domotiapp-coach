@@ -442,6 +442,77 @@ kw11 = archive._Meter("sensor.l3_w")
 archive.Archive._verwerk(kw11, staat11(5.75, "kW"), t(19, 0))
 controle("een fasevermogen in kW wordt watt", kw11.waarde == 5750.0, f"{kw11.waarde}")
 
+print("=== 12. de piek van een fase is wat tien seconden aanhield, niet één melding (v0.182.0) ===")
+# Thuis op 29-10-2026 om 19:05:56 meldde de slimme meter één keer 41 A op L1, twee seconden lang,
+# terwijl hetzelfde bericht 282 W gaf. De kaart Per fase zei "Hoogste piek 41,0 A".
+def fase12(meldingen, vast=archive.FASE_VAST, tot=None):
+    """meldingen: (seconden na 19:00, ampere); geeft de kwartieren."""
+    meter = archive._Meter("sensor.l1_a", vast=vast)
+    for sec, amps in meldingen:
+        meter.meet(t(19, 0) + dt.timedelta(seconds=sec), amps)
+    meter.tot(tot or t(19, 15))
+    return meter.oogst()
+
+
+# Elke twee seconden een melding, 1 of 2 A, en om 19:05:56 één keer 41 A.
+thuis12 = [(s, 41.0 if s == 356 else (5.0 if s == 358 else (1.0 if s % 4 else 2.0))) for s in range(0, 900, 2)]
+r12 = fase12(thuis12)
+oud12 = fase12(thuis12, vast=0.0)
+print(f"  thuis: piek {r12[0][2]}, laagste {r12[0][1]}, gemiddeld {r12[0][3]:.2f}; zonder venster piek {oud12[0][2]}")
+controle("één melding van 41 A is geen piek", r12 and r12[0][2] <= 5.0, f"{r12}")
+controle("laagste, gemiddeld en piek in die volgorde", r12[0][1] <= r12[0][3] <= r12[0][2], f"{r12}")
+controle("zonder het venster (net, zon, apparaten) blijft de secondepiek", oud12[0][2] == 41.0, f"{oud12}")
+controle("het gemiddelde verandert niet", abs(r12[0][3] - oud12[0][3]) < 1e-9, f"{r12} {oud12}")
+
+# Een echte belasting: een minuut 30 A, met een meter die elke seconde meldt.
+echt12 = [(s, 30.0 if 300 <= s < 360 else 2.0) for s in range(0, 900)]
+controle("een minuut op 30 A is een piek van 30 A", fase12(echt12)[0][2] == 30.0, f"{fase12(echt12)}")
+# Een P1 die elke seconde een ander getal meldt: de piek is het hoogste niveau van tien seconden.
+ruis12 = [(s, (29.0, 30.0, 31.0, 30.0)[s % 4] if 300 <= s < 360 else 2.0) for s in range(0, 900)]
+controle("een stroom die elke seconde wisselt rond 30 A: piek 29 A, niet 31",
+         fase12(ruis12)[0][2] == 29.0, f"{fase12(ruis12)}")
+# Een meter die elke dertig seconden meldt: elke waarde houdt dertig seconden aan.
+traag12 = [(0, 10.0), (30, 32.0), (60, 12.0)]
+controle("een meter van dertig seconden: de piek is gewoon zijn melding", fase12(traag12)[0][2] == 32.0, f"{fase12(traag12)}")
+# Precies tien seconden telt, negen niet.
+controle("tien seconden telt, negen niet",
+         fase12([(0, 2.0), (100, 30.0), (110, 2.0)])[0][2] == 30.0 and fase12([(0, 2.0), (100, 30.0), (109, 2.0)])[0][2] < 3.0)
+# Over een kwartiergrens: het venster loopt door, en de piek komt bij het kwartier waarin het vol raakte.
+grens12 = fase12([(0, 2.0), (895, 30.0), (906, 2.0)], tot=t(19, 30))
+controle("over de kwartiergrens heen: de piek in het kwartier waarin de tien seconden vol waren",
+         grens12[0][2] < 3.0 and grens12[1][2] == 30.0, f"{grens12}")
+
+# Een herstart halverwege: voor de stop een minuut 30 A, erna 12 A.
+voor12 = archive._Meter("sensor.l1_a", vast=archive.FASE_VAST)
+for s in range(0, 420):
+    voor12.meet(t(19, 0) + dt.timedelta(seconds=s), 30.0 if s >= 360 else 3.0)
+voor12.verloren(t(19, 7))
+voor12._sluit()
+voor12 = voor12.oogst()
+na12 = archive._Meter("sensor.l1_a", vast=archive.FASE_VAST)
+for s in range(540, 900):
+    na12.meet(t(19, 0) + dt.timedelta(seconds=s), 12.0 if s != 600 else 40.0)
+na12.tot(t(19, 15))
+na12 = na12.oogst()
+print(f"  herstart: voor {voor12}, na {na12}")
+controle("voor de stop: de minuut op 30 A is bewaard", voor12 and voor12[0][2] == 30.0 and voor12[0][4] == 420.0, f"{voor12}")
+controle("na de herstart: 12 A, en de losse 40 A niet", na12 and 12.0 <= na12[0][2] < 13.0, f"{na12}")
+# Een kwartier waarin maar vijf seconden gedekt is: het gemiddelde, geen losse melding.
+kort12 = archive._Meter("sensor.l1_a", vast=archive.FASE_VAST)
+kort12.meet(t(19, 14, 55), 38.0)
+kort12.verloren(t(19, 15))
+kort12._sluit()
+controle("vijf seconden gedekt: piek en laagste zijn het gemiddelde", kort12.oogst()[0][1:4] == (38.0, 38.0, 38.0))
+
+# Uit de recorder: voor een fase het hoogste vijfminutengemiddelde, voor de rest de max.
+blok12 = [{"start": t(17, 0).replace(tzinfo=dt.timezone.utc).timestamp() + 300 * i, "mean": m, "min": 1.0, "max": 41.0}
+          for i, m in enumerate((2.0, 6.0, 3.0))]
+uit12 = {r[0]: r for r in archive.Archive.kwartieren_uit_blokjes({"sensor.l1_a": blok12, "sensor.net": blok12}, {"sensor.l1_a"})}
+controle("uit de recorder: bij een fase de piek uit de gemiddelden", uit12["sensor.l1_a"][2:4] == (2.0, 6.0), f"{uit12}")
+controle("en bij een andere sensor de max zoals altijd", uit12["sensor.net"][2:4] == (1.0, 41.0), f"{uit12}")
+controle("welke sensoren een fase zijn", archive.Archive._fase_sensoren(fasen11) == {"sensor.l1_a", "sensor.l2_w", "sensor.l2_v", "sensor.l3_w"},
+         f"{archive.Archive._fase_sensoren(fasen11)}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

@@ -2374,7 +2374,7 @@ class DacViewHistory extends DacElement {
 
     const zinnen = [
       t("De lijn is het gemiddelde per {korrel}; geteld wordt per kwartier.", { korrel: t(korrel.kop).toLowerCase() }),
-      t("Gemiddeld erboven zegt hoe lang een fase zwaar belast was, een piek hoe hoog het even ging."),
+      t("Gemiddeld erboven zegt hoe lang een fase zwaar belast was; een piek is de hoogste stroom die minstens tien seconden aanhield."),
       t("Kies een andere zekering om te zien hoe vaak je erboven zou komen."),
     ];
     if (fasen.some((fase) => !fase.current)) zinnen.push(t("Zonder stroomsensor rekent de coach de stroom uit het vermogen en de spanning."));
