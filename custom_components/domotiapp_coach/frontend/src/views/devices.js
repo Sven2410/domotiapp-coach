@@ -14,10 +14,10 @@ import {
   CAR_BRANDS,
   CAR_PHASES,
   DEVICE_TYPES,
-  DISHWASHER_PLUG_FIELD,
   PLUG_APPLIANCES,
   PLUG_SWITCH_FIELD,
   canAlwaysOn,
+  plugFieldFor,
   PROGRAM_TYPES,
   hasOwnPrograms,
   defaultPrograms,
@@ -427,7 +427,7 @@ class DacViewDevices extends DacEditorElement {
       </div>`
       : "";
 
-    return uit(brandRow, `${koppelBlok}${this.buttonsHtml_(device, index)}${this.actionsHtml_(device, index)}${this.programsHtml_(device, index)}${note}${this.dishwasherPlugHtml_(device, index)}`);
+    return uit(brandRow, `${koppelBlok}${this.buttonsHtml_(device, index)}${this.actionsHtml_(device, index)}${this.programsHtml_(device, index)}${note}${this.appliancePlugHtml_(device, index)}`);
   }
 
   /**
@@ -504,11 +504,13 @@ class DacViewDevices extends DacEditorElement {
   /**
    * Een vaatwasser aan een smart plug (v0.122.0): de schakelaar van die stekker en
    * het vinkje. De eigenaar op 15-10-2026: "bij het apparaat vaatwasser ook de optie
-   * kunnen aanzetten dat hij nooit uit mag."
+   * kunnen aanzetten dat hij nooit uit mag." Sinds v0.177.0 ook bij een vriezer,
+   * koelkast, wasmachine en droger; het vermogen en de teller van de stekker gaan in
+   * de gewone velden.
    */
-  dishwasherPlugHtml_(device, index) {
-    if (device.type !== "vaatwasser") return "";
-    const stekker = inTaal(DISHWASHER_PLUG_FIELD);
+  appliancePlugHtml_(device, index) {
+    if (!canAlwaysOn(device) || isSmartPlug(device)) return "";
+    const stekker = inTaal(plugFieldFor(device.type));
     return `
         <div class="block">
           <div class="block-title">${t("Stekker")}</div>
@@ -545,7 +547,7 @@ class DacViewDevices extends DacEditorElement {
     const meet = MEET_VELDEN.find((veld) => veld.key === key);
     if (meet && device?.type !== "laadpaal" && device?.type !== "thuisbatterij") return meet;
     if (isSmartPlug(device)) return key === PLUG_SWITCH_FIELD.key ? PLUG_SWITCH_FIELD : undefined;
-    if (device?.type === "vaatwasser" && key === DISHWASHER_PLUG_FIELD.key) return DISHWASHER_PLUG_FIELD;
+    if (canAlwaysOn(device) && key === PLUG_SWITCH_FIELD.key) return plugFieldFor(device.type);
     return brandEntityFields(device).find((field) => field.key === key);
   }
 
@@ -557,7 +559,8 @@ class DacViewDevices extends DacEditorElement {
   /** De energieteller; bij een smart plug in zijn eigen blok, anders onder de naam. */
   energyHtml_(device, index) {
     const stekker = isSmartPlug(device);
-    const machine = brandMeta(device)?.energyCounter;
+    // Met een vermogenssensor (die van een smart plug, v0.177.0) telt de coach daaruit.
+    const machine = brandMeta(device)?.energyCounter && !device.entity;
     return `
             <div class="row">
               <label>${machine ? t("Energieteller") : t("Energieteller (optioneel)")}</label>
@@ -566,7 +569,7 @@ class DacViewDevices extends DacEditorElement {
                 stekker
                   ? t("De teller van de smart plug in kWh, als die er een heeft. Daarmee klopt het verbruik in je rapport tot op de komma; zonder wordt het afgeleid uit het gemiddelde vermogen.")
                   : machine
-                  ? t("De sensor Energieverbruik van de machine, in kWh. Een vermogenssensor heeft hij niet: hieruit telt de coach wat een programma verbruikt en wat het kost. Zonder plant hij alleen op de duur.")
+                  ? t("In kWh: de sensor Energieverbruik van de machine, of de teller van de smart plug waar hij aan hangt. Zonder vermogenssensor telt de coach hieruit wat een programma verbruikt en wat het kost; zonder allebei plant hij alleen op de duur.")
                   : t("De teller van dit apparaat in kWh, als die er is. Bij een laadpaal is dat de teller van alles wat hij ooit geladen heeft. Daarmee klopt het verbruik in je rapport tot op de komma en klopt het aantal kWh in het verslag na een laadbeurt; zonder wordt allebei afgeleid uit het gemiddelde vermogen.")
               }</span>
             </div>`;

@@ -4411,6 +4411,29 @@ proef("smart plug in Apparaten: eerst wat eraan hangt, dan schakelaar, vermogen,
   assert.match(el.brandHtml_({ ...plug, appliance: "vaatwasser" }, 0), /voeg hem dan toe als Vaatwasser/);
 });
 
+proef("een Miele-apparaat aan een smart plug: het blok Stekker met altijd aan, naast de velden van Miele (v0.177.0)", async () => {
+  await import("../custom_components/domotiapp_coach/frontend/src/views/devices.js");
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  for (const [type, wie] of [["vriezer", "de vriezer"], ["koelkast", "de koelkast"], ["wasmachine", "de wasmachine"],
+                             ["droger", "de droger"], ["vaatwasser", "de vaatwasser"]]) {
+    const brand = type === "vaatwasser" ? "home_connect" : "miele";
+    const device = { id: "m", type, brand, name: "", entity: "", entities: {}, controllable: false };
+    el.draft_ = { devices: [device] };
+    const html = el.brandHtml_(device, 0);
+    assert.ok(html.includes('data-entity-key="switch"') && html.includes('data-field="always_on"'), `${type}: stekker en vinkje`);
+    assert.ok(html.includes(`Hangt ${wie} aan een smart plug`), `${type}: de hint noemt ${wie}`);
+    if (brand === "miele") assert.ok(html.includes('data-entity-key="door"'), `${type}: de deur van Miele blijft`);
+    assert.equal(el.entityField_(device, "switch")?.label, "Smart plug (optioneel)");
+  }
+  const was = { id: "w", type: "wasmachine", brand: "miele", name: "", entity: "", entities: {}, controllable: false };
+  assert.match(el.energyHtml_(was, 0), /<label>Energieteller<\/label>/, "zonder vermogen is de teller nodig");
+  assert.match(el.energyHtml_({ ...was, entity: "sensor.stekker_w" }, 0), /Energieteller \(optioneel\)/,
+    "met het vermogen van de stekker niet meer");
+  const laadpaal = { id: "l", type: "laadpaal", brand: "easee", name: "", entity: "", entities: {} };
+  assert.ok(!el.brandHtml_(laadpaal, 0).includes('data-field="always_on"'), "een laadpaal niet");
+});
+
 proef("Apparaat staat uit in Meldingen: alleen met iets dat altijd aan moet, en standaard uit", () => {
   const knoop = () => ({ hidden: false, textContent: "", attrs: {}, setAttribute(n, v) { this.attrs[n] = v; },
     getAttribute(n) { return this.attrs[n]; } });
@@ -5541,7 +5564,7 @@ proef("Miele: de velden, de vrijgave, het programma op de machine en geen tabel 
   let html = el.brandHtml_(was, 0);
   // De energieteller staat bij elk apparaat bovenaan; bij Miele zonder "(optioneel)".
   const teller = el.energyHtml_(was, 0);
-  assert.ok(teller.includes("Energieteller</label>") && teller.includes("Een vermogenssensor heeft hij niet"),
+  assert.ok(teller.includes("Energieteller</label>") && teller.includes("Zonder vermogenssensor telt de coach hieruit"),
             "bij Miele is de energieteller waar hij het verbruik uit telt");
   assert.ok(el.energyHtml_({ ...was, brand: "overig" }, 0).includes("Energieteller (optioneel)"));
   assert.ok(!html.includes("data-energy"), "niet nog een keer bij het merk");

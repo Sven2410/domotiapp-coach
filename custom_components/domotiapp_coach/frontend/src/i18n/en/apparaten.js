@@ -221,6 +221,9 @@ export const APPARATEN = {
   "droger": "dryer",
 
   // devices.js: vriezer en koelkast
+  "de vaatwasser": "the dishwasher",
+  "de wasmachine": "the washing machine",
+  "de droger": "the dryer",
   "de vriezer": "the freezer",
   "de koelkast": "the fridge",
   "De coach stuurt {naam} niet. Hij houdt hem in de gaten en stuurt een melding als de deur 3 minuten openstaat, als hij een half uur warmer is dan {grens} °C, of als {naam} een storing meldt.":
@@ -337,8 +340,8 @@ export const APPARATEN = {
   "De schakelaar van de smart plug zelf. Die heeft de coach alleen nodig om hem aan te houden; voor meten is het vermogen genoeg.":
     "The switch of the smart plug itself. The coach only needs it to keep it on; for measuring the power is enough.",
   "Smart plug (optioneel)": "Smart plug (optional)",
-  "Hangt de vaatwasser aan een smart plug, dan de schakelaar daarvan. Alleen nodig om hem altijd aan te houden; de coach zet hem nooit zelf uit.":
-    "If the dishwasher is on a smart plug, its switch. Only needed to keep it always on; the coach never turns it off itself.",
+  "Hangt {naam} aan een smart plug, dan de schakelaar daarvan. Alleen nodig om hem altijd aan te houden; de coach zet hem nooit zelf uit.":
+    "If {naam} is on a smart plug, its switch. Only needed to keep it always on; the coach never turns it off itself.",
 
   // devices.js: de auto
   "Handmatig opvragen": "Request manually",
@@ -445,8 +448,8 @@ export const APPARATEN = {
   "Gekozen bij Groepen, onder Installatie: daar staat dit apparaat bij deze groep.": "Chosen under Circuits, in Installation: this device is listed with that circuit there.",
   "De teller van de smart plug in kWh, als die er een heeft. Daarmee klopt het verbruik in je rapport tot op de komma; zonder wordt het afgeleid uit het gemiddelde vermogen.":
     "The smart plug's counter in kWh, if it has one. With it the consumption in your report is exact; without it, it is derived from the average power.",
-  "De sensor Energieverbruik van de machine, in kWh. Een vermogenssensor heeft hij niet: hieruit telt de coach wat een programma verbruikt en wat het kost. Zonder plant hij alleen op de duur.":
-    "The machine's Energy consumption sensor, in kWh. It has no power sensor: from this the coach counts what a programme uses and what it costs. Without it, it plans on the duration only.",
+  "In kWh: de sensor Energieverbruik van de machine, of de teller van de smart plug waar hij aan hangt. Zonder vermogenssensor telt de coach hieruit wat een programma verbruikt en wat het kost; zonder allebei plant hij alleen op de duur.":
+    "In kWh: the machine's Energy consumption sensor, or the meter of the smart plug it is on. Without a power sensor the coach counts from this what a programme uses and what it costs; without either it plans on the duration only.",
   "De teller van dit apparaat in kWh, als die er is. Bij een laadpaal is dat de teller van alles wat hij ooit geladen heeft. Daarmee klopt het verbruik in je rapport tot op de komma en klopt het aantal kWh in het verslag na een laadbeurt; zonder wordt allebei afgeleid uit het gemiddelde vermogen.":
     "This device's counter in kWh, if there is one. For a charger that is the counter of everything it has ever charged. With it the consumption in your report is exact, and so is the number of kWh in the summary after a charging session; without it, both are derived from the average power.",
   "Bediening": "Controls",
