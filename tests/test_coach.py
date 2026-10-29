@@ -12590,8 +12590,10 @@ for tijd in (dag215.replace(day=28, hour=10, minute=48), dag215.replace(day=29, 
              dag215.replace(day=29, hour=6, minute=30)):
     stap215b(tijd)
 print(f"  met een gat: {rij215(inst215b).get('growatt_nachten')}; {[r for r in log215.regels if 'nagere' in r or 'nagek' in r]}")
+# Sinds v0.179.0 sluit de dag van 27-10 om 06:30 op 28-10 af, een etmaal na zijn vak: die telde de
+# coach zelf, en telt dus mee. Alleen de nacht van 28-10, met het gat over zijn vak, valt weg.
 controle("een gat van tweeënhalf uur in de kwartieren: die nacht telt niet",
-         not rij215(inst215b).get("growatt_nachten"), f"{rij215(inst215b).get('growatt_nachten')}")
+         rij215(inst215b).get("growatt_nachten") == [-1.0], f"{rij215(inst215b).get('growatt_nachten')}")
 controle("en het log zegt waarom", any("zonder kwartieren of accustand" in r for r in log215.regels),
          f"{log215.regels[-3:]}")
 
@@ -13267,6 +13269,182 @@ finally:
         sys.modules.pop("homeassistant.helpers.entity_registry", None)
     else:
         sys.modules["homeassistant.helpers.entity_registry"] = oud219
+
+print("=== 220. Growatt: een nacht zonder netladen sluit de dag ook af (v0.179.0) ===")
+# In de klantwoning laadde de coach in de nacht van 28 op 29-10-2026 terecht niet van het net. De dag
+# sloot alleen bij een vak, dus liep die van 28-10 door in 29-10, en kwam de 2,1 kWh die het huis op
+# 29-10 van 08:00 tot 09:45 bij een lege accu in het dure uur haalde nooit in growatt_nachten. Hier:
+# op 27-10 een vak van 10 kWh en 8 kWh te veel (-8), op 28-10 en 29-10 geen vak en een tekort van
+# 2,1 en 1,2 kWh, en op 30-10 weer een vak, om 05:30 in plaats van 06:30.
+dag220 = dt.datetime(2026, 10, 27)
+VAK220 = coachmod.GrowattSchema(net=True, vermogen_pct=90, stop_soc=100, vakken=[("06:30", "08:00")])
+VAK220_30 = coachmod.GrowattSchema(net=True, vermogen_pct=60, stop_soc=60, vakken=[("05:30", "07:00")])
+
+
+def profiel220(moment):
+    """(afname in W, laden in W, accustand) op dit lokale moment."""
+    dag, klok = (moment.date() - dag220.date()).days, moment.strftime("%H:%M")
+    if dag == 0:
+        if "06:30" <= klok < "08:00":
+            return 7000.0, 20000.0 / 3, 20.0 + (moment.hour * 60 + moment.minute - 390) / 90 * 80
+        if "08:00" <= klok < "13:00":
+            return (-4000.0 if klok >= "11:00" else 0.0), 0.0, 100.0
+        return 300.0, 0.0, 15.0 if klok >= "22:00" else 60.0
+    if dag in (1, 2):
+        tot = {1: "09:45", 2: "09:00"}[dag]
+        if klok < "08:00":
+            return 300.0, 0.0, 15.0
+        if klok < tot:
+            return 1200.0, 0.0, 15.0
+        return 0.0, 0.0, 50.0 if klok < "20:00" else 15.0
+    if dag == 3 and "05:30" <= klok < "07:00":
+        return 4500.0, 4000.0, 15.0 + (moment.hour * 60 + moment.minute - 330) / 90 * 45
+    return 300.0, 0.0, 60.0 if dag >= 3 and klok >= "07:00" else 15.0
+
+
+def prijs220(moment):
+    return 0.10 if moment.hour >= 22 or moment.hour < 8 else 0.25
+
+
+uren220 = [coachmod.Uur(start=dag220 + dt.timedelta(hours=h - 24), end=dag220 + dt.timedelta(hours=h - 23), stand="",
+                        kwh=0.0, net_kwh=0.0, soc=0.0, price=prijs220(dag220 + dt.timedelta(hours=h - 24)))
+           for h in range(24 * 7)]
+
+
+def kwartieren220(ids, start, einde):
+    uit = {e: [] for e in ids}
+    moment = start.replace(tzinfo=zone215).astimezone(dt.timezone.utc)
+    moment = moment.replace(minute=moment.minute - moment.minute % 15, second=0, microsecond=0)
+    while moment < einde.replace(tzinfo=zone215).astimezone(dt.timezone.utc):
+        lokaal = moment.astimezone(zone215).replace(tzinfo=None)
+        if lokaal >= dag220 - dt.timedelta(days=2):
+            afname, laden, _ = profiel220(lokaal)
+            for e, w in (("sensor.afname", max(0.0, afname)), ("sensor.teruglevering", max(0.0, -afname)),
+                         ("sensor.growatt_laden", laden), ("sensor.growatt_ontladen", 0.0)):
+                if e in uit:
+                    uit[e].append({"start": int(moment.timestamp()), "gemiddeld": w, "seconden": 900})
+        moment += dt.timedelta(minutes=15)
+    return uit
+
+
+async def lees220(ids, start, einde):
+    return kwartieren220(ids, start, einde)
+
+
+async def socs220(entity_id, start, einde):
+    uit, moment = [], start.replace(second=0, microsecond=0)
+    while moment < einde:
+        uit.append((moment, f"{profiel220(moment)[2]:.0f}"))
+        moment += dt.timedelta(minutes=5)
+    return uit
+
+
+def schema220(moment):
+    if moment < dag220.replace(hour=8):
+        return VAK220
+    return VAK220_30 if moment >= dag220.replace(day=30) else coachmod.GrowattSchema()
+
+
+class Huis220:
+    def __init__(self, rij, schema=schema220):
+        self.schema = schema
+        self.inst = instellingen(devices=[GROWATT192], battery_state=[{"device": "dev-growatt", **rij}])
+        self.b = coachmod.Batterij(soc=60.0, capacity_kwh=12.5, soc_min=15.0, soc_max=100.0)
+        self.bouw()
+
+    def bouw(self):
+        self.hass, _, self.coach = bouw(waarden192, self.inst)
+        self.coach._batterij["dev-growatt"] = {"growatt_stuurt": True}
+        self.coach._async_kwartieren = lees220
+        self.coach._async_geschiedenis = socs220
+        self.coach._prices = lambda settings, now=None: [
+            {"start": u.start, "end": u.end, "price": u.price} for u in uren220]
+
+    def stap(self, tijd):
+        afname, laden, soc = profiel220(tijd)
+        self.hass.states.zet("sensor.afname", str(max(0.0, afname)))
+        self.hass.states.zet("sensor.teruglevering", str(max(0.0, -afname)))
+        self.hass.states.zet("sensor.growatt_laden", {"state": str(laden / 1000.0),
+                                                      "attributes": {"unit_of_measurement": "kW"}})
+        self.hass.states.zet("sensor.growatt_ontladen", {"state": "0", "attributes": {"unit_of_measurement": "kW"}})
+        self.b.soc = soc
+        sessie = self.coach._batterij["dev-growatt"]
+        sessie["growatt_geschreven"] = self.schema(tijd)
+        asyncio.run(self.coach._async_growatt_nacht(tijd, self.inst, GROWATT192, self.b, sessie, uren220))
+
+    def rij(self):
+        return rij215(self.inst)
+
+
+def verwacht220(nachten, *waarden):
+    return (nachten is not None and len(nachten) == len(waarden)
+            and all(abs(n - w) < 0.15 for n, w in zip(nachten, waarden)))
+
+
+# (a) Elke minuut van 27-10 06:25 tot 30-10 07:05, met een herstart op 28-10 om 15:00.
+huis220a = Huis220({})
+moment220 = dag220.replace(hour=6, minute=25)
+while moment220 <= dag220.replace(day=30, hour=7, minute=5):
+    if moment220 == dag220.replace(day=28, hour=15):
+        asyncio.run(huis220a.coach._async_batterijen_los(herstart=True))
+        huis220a.bouw()
+    huis220a.stap(moment220)
+    moment220 += dt.timedelta(minutes=1)
+nachten220a = huis220a.rij().get("growatt_nachten")
+dag220a = huis220a.rij().get("growatt_dag") or {}
+print(f"  elke minuut: {nachten220a}, daarna {dag220a}")
+controle("een vak, twee nachten zonder vak en weer een vak: drie nachten, -8, +2,1 en +1,2",
+         verwacht220(nachten220a, -8.0, 2.1, 1.2), f"{nachten220a}")
+controle("de dag loopt niet over dagen door: de telling begon bij het vak van 30-10 om 05:30",
+         str(dag220a.get("begon", "")).startswith("2026-10-30T05:30"), f"{dag220a}")
+
+# (b) Wat er in de klantwoning in de opslag stond: een telling zonder begin, die sinds het vak van
+# 27-10 doorliep. Na een herstart op 29-10 om 10:00 zoekt de coach het vak in de kwartieren op, en
+# rekent hij beide dagen na.
+log215.regels.clear()
+coachmod._LOGGER.addHandler(log215)
+coachmod._LOGGER.setLevel(logging.INFO)
+logging.disable(logging.NOTSET)
+oud220 = {"growatt_dag": {"net": 10.0, "teveel": 8.0, "tekort": 2.1, "gat": 6.3, "in_vak": False,
+                          "op": utc215(dag220.replace(day=29, hour=9, minute=50) - dt.timedelta(hours=1)),
+                          "begon": None}}
+huis220b = Huis220(oud220)
+moment220 = dag220.replace(day=29, hour=10)
+eerste220b = None
+while moment220 <= dag220.replace(day=30, hour=7, minute=5):
+    huis220b.stap(moment220)
+    if eerste220b is None:
+        eerste220b = list(huis220b.rij().get("growatt_nachten") or [])
+    moment220 += dt.timedelta(minutes=1)
+nachten220b = huis220b.rij().get("growatt_nachten")
+print(f"  zonder begin: na de eerste ronde {eerste220b}, daarna {nachten220b}")
+print(f"  log: {[r for r in log215.regels if 'begin' in r or 'nagek' in r]}")
+controle("zonder begin in de opslag: het vak van 27-10 gevonden, en 27-10 en 28-10 meteen nagerekend",
+         verwacht220(eerste220b, -8.0, 2.1), f"{eerste220b}")
+controle("en de nacht van 29-10 bij het vak van 30-10, ook al begon de coach die dag pas om 10:00",
+         verwacht220(nachten220b, -8.0, 2.1, 1.2), f"{nachten220b}")
+controle("in het log staat waar het laatste vak begon", any("het laatste vak begon 2026-10-27T06:30" in r
+                                                             for r in log215.regels), f"{log215.regels[-4:]}")
+coachmod._LOGGER.removeHandler(log215)
+logging.disable(logging.WARNING)
+
+# (c) Twee nachten zonder vak achter elkaar, en een stroomstoring zonder stop van 06:00 tot 06:50 over
+# de grens heen: twee boekingen, elk een etmaal na het begin van de dag (hier 06:25, de installatie).
+huis220c = Huis220({}, schema=lambda m: coachmod.GrowattSchema())
+moment220 = dag220.replace(day=28, hour=6, minute=25)
+while moment220 <= dag220.replace(day=30, hour=6, minute=40):
+    if moment220 == dag220.replace(day=29, hour=6):
+        huis220c.bouw()
+        moment220 = dag220.replace(day=29, hour=6, minute=50)
+    huis220c.stap(moment220)
+    moment220 += dt.timedelta(minutes=1)
+nachten220c = huis220c.rij().get("growatt_nachten")
+print(f"  twee nachten zonder vak: {nachten220c}, daarna {huis220c.rij().get('growatt_dag')}")
+controle("twee nachten zonder vak: twee boekingen, +2,1 en +1,2", verwacht220(nachten220c, 2.1, 1.2),
+         f"{nachten220c}")
+controle("en de dag daarna begint op de klok van de eerste, 30-10 06:25",
+         str((huis220c.rij().get("growatt_dag") or {}).get("begon", "")).startswith("2026-10-30T06:25"),
+         f"{huis220c.rij().get('growatt_dag')}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

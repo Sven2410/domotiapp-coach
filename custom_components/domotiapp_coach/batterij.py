@@ -2620,6 +2620,9 @@ GROWATT_ZAK_SOC = 10
 GROWATT_VOORAF = timedelta(minutes=30)
 # Hoe lang er geen vak mag zijn geweest voor een vak een nieuwe nacht begint, achteraf (v0.174.0).
 GROWATT_NIEUWE_NACHT = timedelta(hours=3)
+# Hoe lang een nacht hooguit duurt als er geen vak komt (v0.179.0): een etmaal op de klok, zodat
+# een nacht zonder netladen op hetzelfde moment afsluit als het vak van de nacht ervoor.
+GROWATT_DAG = timedelta(days=1)
 # Over hoeveel nachten de coach zijn schema bijstelt, en vanaf hoeveel (v0.151.0).
 GROWATT_NACHTEN = 7
 GROWATT_MIN_NACHTEN = 3
@@ -3053,7 +3056,7 @@ def growatt_duur(uren: list[Uur], now: datetime) -> bool:
 
 def growatt_narekening(
     kwartieren: list[dict], soc_min: float, soc_max: float, stil_w: float,
-    duur: Callable[[datetime], bool] | None = None,
+    duur: Callable[[datetime], bool] | None = None, begin: bool = False,
 ) -> list[tuple[float, float, float, float]]:
     """De telling van `growatt_nacht` achteraf, uit de kwartieren (v0.174.0).
 
@@ -3073,21 +3076,30 @@ def growatt_narekening(
 
     Geeft per nacht (van het net, te veel, te weinig, uren zonder gegevens). Zonder één vak
     is het alles samen één nacht, zonder iets van het net.
-    """
-    def vak(k: dict) -> bool:
-        return (k.get("net_w") is not None and k.get("bat_w") is not None
-                and k["bat_w"] > stil_w and k["net_w"] > stil_w)
 
+    Sinds v0.179.0 houdt een nacht zonder vak na `GROWATT_DAG` op, zoals per ronde, en begint
+    met `begin` de eerste nacht bij het eerste kwartier: dat is dan het begin van een dag die
+    de coach al kende, geen nacht die hij half ziet.
+    """
     nachten: list[list[float]] = []
     laatste_vak: datetime | None = None
-    alle_vak = any(vak(k) for k in kwartieren)
-    for k in kwartieren:
-        if vak(k):
-            if laatste_vak is None or k["start"] - laatste_vak > GROWATT_NIEUWE_NACHT:
-                nachten.append([0.0, 0.0, 0.0, 0.0])
+    nacht_begon: datetime | None = None
+    alle_vak = any(_growatt_vak(k, stil_w) for k in kwartieren)
+    for i, k in enumerate(kwartieren):
+        is_vak = _growatt_vak(k, stil_w)
+        if begin and i == 0:
+            nieuw = True
+        elif is_vak:
+            nieuw = laatste_vak is None or k["start"] - laatste_vak > GROWATT_NIEUWE_NACHT
+        elif nachten and nacht_begon is not None:
+            nieuw = k["start"] >= nacht_begon + GROWATT_DAG
+        else:
+            nieuw = not nachten and not alle_vak
+        if is_vak:
             laatste_vak = k["start"]
-        elif not nachten and not alle_vak:
+        if nieuw:
             nachten.append([0.0, 0.0, 0.0, 0.0])
+            nacht_begon = k["start"]
         if not nachten:
             continue
         nacht = nachten[-1]
@@ -3095,7 +3107,7 @@ def growatt_narekening(
         if net_w is None or bat_w is None or laag is None or hoog is None:
             nacht[3] += 0.25
             continue
-        if vak(k):
+        if is_vak:
             nacht[0] += min(bat_w, net_w) / 1000.0 * 0.25
             continue
         if net_w < 0 and laag >= soc_max - VOL_MARGE:
@@ -3103,6 +3115,29 @@ def growatt_narekening(
         if net_w > 0 and hoog <= soc_min + 1.0 and abs(bat_w) < stil_w and duur is not None and duur(k["start"]):
             nacht[2] += net_w / 1000.0 * 0.25
     return [tuple(n) for n in nachten]
+
+
+def _growatt_vak(k: dict, stil_w: float) -> bool:
+    """Een kwartier in een vak: de batterij laadt terwijl het huis van het net haalt."""
+    return (k.get("net_w") is not None and k.get("bat_w") is not None
+            and k["bat_w"] > stil_w and k["net_w"] > stil_w)
+
+
+def growatt_laatste_nacht(kwartieren: list[dict], stil_w: float) -> datetime | None:
+    """Waar de laatste nacht met een vak begon, in de kwartieren (v0.179.0).
+
+    Voor een telling in de opslag zonder begin: die van een coach van voor v0.174.0, of een die
+    over dagen doorliep omdat er geen vak kwam. Een nacht begint zoals in `growatt_narekening`.
+    """
+    begon: datetime | None = None
+    laatste_vak: datetime | None = None
+    for k in kwartieren:
+        if not _growatt_vak(k, stil_w):
+            continue
+        if laatste_vak is None or k["start"] - laatste_vak > GROWATT_NIEUWE_NACHT:
+            begon = k["start"]
+        laatste_vak = k["start"]
+    return begon
 
 
 def growatt_nachten(rij: dict | None) -> list:

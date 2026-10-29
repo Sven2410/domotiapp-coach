@@ -106,6 +106,9 @@ het vak uit, en schrijft de coach het volgende vak pas een half uur vooraf. En e
 de nachttelling kostte, rekent hij achteraf na uit de kwartieropslag en de recorder, in plaats van hem
 weg te laten (`docs/batterij.md`, v0.174.0).
 
+Sinds v0.179.0 bewaart `growatt_dag` altijd een begin, ook na een nacht zonder vak. Een telling van een
+eerdere coach zonder begin zoekt het laatste vak in de kwartieren op (`docs/batterij.md`, v0.179.0).
+
 ## Wat er nog open staat
 
 Zie de werkbon van 28-10-2026 in de privénotities:
