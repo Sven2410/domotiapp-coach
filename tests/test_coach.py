@@ -13461,6 +13461,42 @@ controle("en hij komt terug als text/csv",
          '"text/csv" if csv else "application/pdf"' in ws221
          and 'content_type=report.get("soort", "application/pdf")' in rapport221, "")
 
+print("=== 222. Growatt: zon die de accu laadt is geen vak, ook niet bij het zoeken (v0.181.0) ===")
+# In de klantwoning zocht v0.179.0 op 29-10-2026 het laatste vak, en vond het kwartier van 29-10 08:00:
+# 2164 W zon, 620 W laden en 316 W van het net. Het echte vak lag een dag eerder. Hier hetzelfde
+# huis als proef 220 (b), met een zonsensor, en op 29-10 08:00 zo'n kwartier.
+def lees222(zon):
+    async def lees(ids, start, einde):
+        uit = kwartieren220([e for e in ids if e != "sensor.zon"], start, einde)
+        for e, rijen in uit.items():
+            for r in rijen:
+                lokaal = coachmod.dt_util.utc_from_timestamp(r["start"]).astimezone(zone215).replace(tzinfo=None)
+                if lokaal == dag220.replace(day=29, hour=8):
+                    r["gemiddeld"] = {"sensor.afname": 316.0, "sensor.growatt_laden": 620.0}.get(e, r["gemiddeld"])
+        if zon and "sensor.zon" in ids:
+            uit["sensor.zon"] = [{**r, "gemiddeld": 2164.0 if coachmod.dt_util.utc_from_timestamp(r["start"]).astimezone(
+                zone215).replace(tzinfo=None) == dag220.replace(day=29, hour=8) else 0.0} for r in uit["sensor.afname"]]
+        return uit
+    return lees
+
+
+def zoek222(zon):
+    huis = Huis220(oud220)
+    huis.inst["sources"]["solar"] = "sensor.zon"
+    huis.coach._async_kwartieren = lees222(zon)
+    huis.stap(dag220.replace(day=29, hour=10))
+    return huis.rij().get("growatt_nachten"), (huis.rij().get("growatt_dag") or {}).get("begon", "")
+
+
+met222, begon222 = zoek222(True)
+zonder222, begon222b = zoek222(False)
+print(f"  met de zon: {met222}, begon {begon222}; zonder de zon in de kwartieren: {zonder222}, begon {begon222b}")
+controle("met de zon: het vak van 27-10 gevonden, en 27-10 en 28-10 nagerekend",
+         verwacht220(met222, -8.0, 2.1), f"{met222}")
+controle("en de dag begint op 29-10 06:30, een etmaal na het vak", begon222.startswith("2026-10-29T06:30"), begon222)
+controle("zonder de zon was 29-10 08:00 het laatste vak, zoals in de klantwoning",
+         not zonder222 and begon222b.startswith("2026-10-29T08:00"), f"{zonder222} {begon222b}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

@@ -3062,12 +3062,13 @@ def growatt_narekening(
 
     Voor dagen die de coach niet helemaal zag: een installatie, een stroomstoring, een
     Home Assistant die uren weg was. Per kwartier `start`, `net_w` (afname positief), `bat_w`
-    (laden positief), en de laagste en hoogste accustand (`soc_laag`, `soc_hoog`); None
-    waar het niet bekend is. Hetzelfde als per ronde, met drie verschillen:
+    (laden positief), de laagste en hoogste accustand (`soc_laag`, `soc_hoog`), en sinds
+    v0.181.0 de zon (`zon_w`); None waar het niet bekend is. Hetzelfde als per ronde, met drie
+    verschillen:
 
     - Het vak kent hij niet uit het schema, dus een vak is een kwartier waarin de batterij
-      laadt terwijl het huis van het net haalt. Buiten een vak doet een Growatt nul op de
-      meter, en dan gebeurt dat niet.
+      laadt terwijl het huis van het net haalt, en meer laadt dan de zon geeft
+      (`_growatt_vak`). Buiten een vak doet een Growatt nul op de meter, en dan gebeurt dat niet.
     - Een nacht begint bij een vak waar `GROWATT_NIEUWE_NACHT` geen vak voor lag, zodat een
       reeks van twee dagen twee nachten geeft, zoals per ronde. Wat er voor het eerste vak
       ligt hoort bij een nacht die hij maar half ziet, en telt niet.
@@ -3118,9 +3119,18 @@ def growatt_narekening(
 
 
 def _growatt_vak(k: dict, stil_w: float) -> bool:
-    """Een kwartier in een vak: de batterij laadt terwijl het huis van het net haalt."""
-    return (k.get("net_w") is not None and k.get("bat_w") is not None
-            and k["bat_w"] > stil_w and k["net_w"] > stil_w)
+    """Een kwartier in een vak: de batterij laadt terwijl het huis van het net haalt.
+
+    Met de zon erbij (`zon_w`, v0.181.0) alleen als de batterij meer laadt dan de zon geeft. In de
+    klantwoning telde het kwartier van 29-10-2026 08:00 als vak: 2164 W zon, 620 W laden, 316 W van
+    het net. De accu laadde van de zon terwijl het huis even van het net haalde, en dat kan bij
+    zonsopkomst elke ochtend. `growatt_laatste_nacht` vond daardoor dat kwartier in plaats van het
+    vak van 28-10 06:00. Zonder zonsensor of zonder zon in dat kwartier zoals voor v0.181.0.
+    """
+    if k.get("net_w") is None or k.get("bat_w") is None or k["net_w"] <= stil_w:
+        return False
+    zon = k.get("zon_w")
+    return k["bat_w"] - (zon if zon is not None and zon > 0 else 0.0) > stil_w
 
 
 def growatt_laatste_nacht(kwartieren: list[dict], stil_w: float) -> datetime | None:
