@@ -1433,8 +1433,10 @@ doorgeven. gewoon vol vermogen laden in de goedkope uren. Dat moet een instellin
 en blijft de coach om de accustand vragen.
 
 **Staat het vinkje aan** (`_goedkoop_blok` in planner.py):
-- **Wat voor alles gaat.** De pauze, een volle aansluiting, Snel, een gast, een laadmodus zonder planning en
-  de begintijd gaan voor, zoals altijd.
+- **Wat voor alles gaat.** De pauze, een volle aansluiting, Snel, een gast en een laadmodus zonder planning
+  gaan voor, zoals altijd. Sinds v0.186.0 telt een schema hier niet. Het paneel laat het weg, ook op de kaart.
+  Een schema dat nog aan staat zet de modus dus niet meer opzij: met Zon of Continu doet hij dat, met
+  Goedkoopst het blok. Tot dan won een schema dat aan stond van Zon en Continu, onzichtbaar.
 - **Zon** gaat er altijd in.
 - **Van het net** laadt hij alleen in het goedkoopste blok van het komende etmaal (`blok_van`), op het
   plafond, tot de auto zelf stopt. Het blok is de laagste prijs, en minstens een uur:

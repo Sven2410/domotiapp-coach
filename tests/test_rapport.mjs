@@ -875,12 +875,14 @@ proef("Thuisbatterij te warm in Meldingen: alleen met een batterij, en de hint z
   const accu = { type: "thuisbatterij", name: "Accu", entities: {} };
   el.settings_ = { devices: [accu], notifications: { temp_alert: { enabled: false, max_c: null } } };
   el.paintWarmte_();
+  // Sinds v0.186.0 weg zonder temperatuursensor: de eigenaar op 30-10-2026 bij een Growatt zonder.
+  assert.equal(knopen.get("#warmte").hidden, true, "zonder temperatuursensor geen blok");
+
+  accu.entities.temperature = "sensor.accu_temp";
+  el.paintWarmte_();
   assert.equal(knopen.get("#warmte").hidden, false);
   assert.equal(knopen.get("#warmte-aan").attrs["aria-checked"], "false");
   assert.equal(knopen.get("#warmte-velden").hidden, true, "uit: geen grens te zien");
-  assert.match(knopen.get("#warmte-grens-hint").textContent, /^Vul eerst de temperatuur van de batterij in onder Apparaten/);
-
-  accu.entities.temperature = "sensor.accu_temp";
   el.settings_.notifications.temp_alert.enabled = true;
   el.paintWarmte_();
   assert.equal(knopen.get("#warmte-velden").hidden, false);
@@ -1675,7 +1677,12 @@ proef("de rij apparaten: het knopje van Indeling aanpassen, zonder tekst, en dan
 
 proef("de laadlimiet per planning: het veld, de samenvatting en de zin op de kaart (v0.96.0)", async () => {
   const { planSummary, kentDoel, doelUit } = await import("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js");
-  assert.ok(kentDoel({ type: "laadpaal" }) && !kentDoel({ type: "boiler" }) && !kentDoel({ type: "vaatwasser" }));
+  const metAuto = { type: "laadpaal", cars: [{ id: "a", capacity_kwh: 58 }] };
+  assert.ok(kentDoel(metAuto) && !kentDoel({ type: "boiler" }) && !kentDoel({ type: "vaatwasser" }));
+  // Sinds v0.186.0 alleen met een auto die de coach kent, en niet met het goedkope blok.
+  assert.ok(!kentDoel({ type: "laadpaal", cars: [] }), "zonder auto geen accustand om op te stoppen");
+  assert.ok(!kentDoel({ type: "laadpaal", cars: [{ id: "g", guest: true, capacity_kwh: 58 }] }), "een gast telt niet");
+  assert.ok(!kentDoel({ ...metAuto, goedkoop_blok: true }), "met het goedkope blok telt de klaar-tijd niet");
   assert.equal(doelUit(""), null);
   assert.equal(doelUit("50"), 50);
   assert.equal(doelUit("5"), 10, "nooit onder de 10");
@@ -3811,10 +3818,12 @@ proef("op de kaart heet het Instellen, en de batterij krijgt een eigen knop", ()
   const sheet = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js", import.meta.url), "utf8");
   assert.ok(sheet.includes('"domotiapp_coach/device/preferences"'), "de pop-up slaat op via het commando van de bewoner");
   // Nooit een entiteit in Instellen.
-  const accu = voorkeurHtml({ id: "b", type: "thuisbatterij", entities: { fan: "switch.fan" }, battery: {} });
+  const accu = voorkeurHtml({ id: "b", type: "thuisbatterij", entities: { fan: "switch.fan", temperature: "sensor.t" }, battery: {} });
   const paal = voorkeurHtml({ id: "p", type: "laadpaal", cars: [{ id: "a", name: "Bus", brand: "tesla", wake_entity: "button.w" }] });
   for (const html of [accu, paal]) assert.ok(!html.includes("dac-entity-picker"), "geen entiteit te kiezen");
   assert.ok(accu.includes('data-vk-accu="fan_above_c"'), "de ventilator alleen met een ventilator");
+  assert.ok(!voorkeurHtml({ id: "b", type: "thuisbatterij", entities: { fan: "switch.fan" }, battery: {} }).includes("fan_above_c"),
+    "en met een temperatuur erbij, anders meet de coach niets om hem op aan te zetten (v0.186.0)");
   assert.ok(!voorkeurHtml({ id: "b", type: "thuisbatterij", entities: {}, battery: {} }).includes("fan_above_c"));
 });
 
@@ -6639,6 +6648,164 @@ proef("Historie: de kaart Per fase en de knop CSV draaien echt (v0.180.0)", asyn
     + "L1 laagste (A);L1 gemiddeld (A);L1 piek (A);L2 laagste (A);L2 gemiddeld (A);L2 piek (A);L3 laagste (A);L3 gemiddeld (A);L3 piek (A)");
   assert.ok(regels[1].endsWith(";100;500;900;10,00;27,00;34,20;1,00;8,00;12,00;1,00;10,00;30,00"), regels[1]);
   assert.equal(this_span.textContent, "CSV", "de knop zegt daarna weer CSV");
+});
+
+// De eigenaar op 30-10-2026, bij "Thuisbatterij te warm" bij een batterij zonder temperatuursensor:
+// "Check dus de hele coach en maak dat zo dat klanten alleen instellingen zien waar het van toepassing
+// is." Per installatievorm welke blokken er staan, zodat een nieuwe instelling zonder voorwaarde opvalt.
+// Zonder browser: wat de browser toont is weg met `hidden` (elk zo'n element heeft een [hidden]-regel,
+// zie onderaan) of met display none (`inBeeld`).
+proef("alleen wat van toepassing is: per installatievorm welke blokken er staan (v0.186.0)", async () => {
+  const tp = await import("../custom_components/domotiapp_coach/frontend/src/toepassing.js");
+  const { canHaveDeadline } = await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+  const { kentDoel } = await import("../custom_components/domotiapp_coach/frontend/src/schedule-sheet.js");
+  await import("../custom_components/domotiapp_coach/frontend/src/views/strategy.js");
+  const Voorkeuren = geregistreerd.get("dac-view-strategy");
+  const inBeeld = (el) => Boolean(el) && el.hidden !== true && el.style?.display !== "none";
+  const knoop = () => ({ hidden: false, style: {}, textContent: "", value: "", checked: false, attrs: {},
+    setAttribute(n, v) { this.attrs[n] = v; }, classList: { toggle() {} } });
+  const scherm = (Soort, ids, settings) => {
+    const knopen = new Map(ids.map((id) => [id, knoop()]));
+    const el = Object.create(Soort.prototype);
+    el.$ = (id) => knopen.get(id) ?? null;
+    el.settings_ = settings;
+    el.draft_ = settings;
+    el.rendered_ = true;
+    el.hass_ = { user: { is_admin: true }, states: {} };
+    return { el, knopen, zie: (id) => inBeeld(knopen.get(id)) };
+  };
+  const lees0 = (pad) => readFileSync(new URL(`../custom_components/domotiapp_coach/frontend/src/${pad}`, import.meta.url), "utf8");
+  const blokken = (html) => [...html.matchAll(/<div class="block-title">([^<]+)<\/div>/g)].map(([, kop]) => kop);
+
+  const paal = { id: "p", type: "laadpaal", controllable: true, cars: [{ id: "a", name: "Auto", capacity_kwh: 58 }] };
+  const growatt = { id: "g", type: "thuisbatterij", brand: "growatt", controllable: true, entities: {}, battery: {} };
+  const anker = { id: "b", type: "thuisbatterij", brand: "anker", controllable: true,
+    entities: { temperature: "sensor.t", fan: "switch.f" }, battery: {} };
+  const ptNenhum = { country: "PT", pt: { tarifa: "bi", excedente: { modo: "nenhum" } } };
+  const nlDynamisch = { type: "dynamic", dynamic: { source: "market", market_entity: "sensor.markt" } };
+
+  const vormen = {
+    // Geen zon, geen batterij: een laadpaal, een vast contract, één fase, alleen een slimme meter.
+    kaal: { devices: [paal], sources: {}, installation: { phases: 1, fuse_amps: 25 }, contract: { type: "fixed" } },
+    // Zoals de woning van 30-10-2026: een Growatt zonder temperatuur, Portugal zonder teruglevering,
+    // de paal met Zonder accustand, geen gas en geen water.
+    growatt: { devices: [{ ...paal, cars: [], goedkoop_blok: true }, growatt], sources: { solar: "sensor.pv" },
+      installation: { phases: 3, fuse_amps: 25 }, contract: ptNenhum },
+    // Dynamisch in Nederland met alles erop en eraan.
+    alles: { devices: [paal, anker, { id: "v", type: "vaatwasser", controllable: true }, { id: "w", type: "boiler", controllable: true }],
+      sources: { solar: "sensor.pv", phases_enabled: true, meters: { gas_enabled: true, gas: "sensor.gas",
+        water_enabled: true, water: "sensor.water", water_flow: "sensor.debiet" } },
+      installation: { phases: 3, fuse_amps: 25 }, contract: nlDynamisch },
+  };
+
+  // Voorkeuren.
+  const ids = ["#niveau-kaart", "#zon-kaart", "#plan-kaart", "#nacht-kaart", "#zelf-kleuren"];
+  const voorkeuren = (s) => { const v = scherm(Voorkeuren, ids, { ...s, strategy: {} }); v.el.paintToepassing_(); return v; };
+  const kaal = voorkeuren(vormen.kaal);
+  assert.deepEqual(ids.map(kaal.zie), [true, false, false, false, false],
+    "kaal: alleen hoeveel de coach zelf doet; geen zon, één regel, geen batterij");
+  const g = voorkeuren(vormen.growatt);
+  assert.deepEqual(ids.map(g.zie), [true, true, true, true, true], "Growatt met zon: paal en accu, dus twee regels");
+  const leeg = voorkeuren({ devices: [{ ...paal, controllable: false }], sources: {}, installation: {} });
+  assert.equal(leeg.zie("#niveau-kaart"), false, "niets dat de coach stuurt: hoe ver hij mag gaan doet niets");
+
+  // Instellen van de thuisbatterij: de vier blokken van de eigenaar weg bij de Growatt, niet bij een Anker.
+  const vier = ["Noodstroom", "Balanceren", "Vakantiestand", "De auto"];
+  const gHtml = voorkeurHtml(growatt);
+  assert.deepEqual(vier.filter((kop) => blokken(gHtml).includes(kop)), [], "Growatt: geen Noodstroom, Balanceren, Vakantiestand, De auto");
+  assert.ok(blokken(gHtml).includes("Handelen") && blokken(gHtml).includes("Afschrijving"), "laden van het net en de afschrijving blijven");
+  assert.ok(!gHtml.includes("fan_above_c"), "geen ventilator");
+  const aHtml = voorkeurHtml(anker);
+  assert.deepEqual(vier.filter((kop) => blokken(aHtml).includes(kop)), vier, "een Anker houdt alle vier");
+  assert.ok(aHtml.includes("fan_above_c"), "met ventilator en temperatuur de ventilator");
+  const aVelden = nepVelden(aHtml);
+  vulVoorkeuren(aVelden, { ...anker, battery: { car_above: null } }, null, nlDynamisch);
+  assert.equal(aVelden.rijen.find((r) => r.sleutel === "car_above").hidden, true, "bij een Anker blijft De auto zonder grens uit");
+  assert.equal(aVelden.rijen.find((r) => r.sleutel === "trade").hidden, false, "Anker in NL dynamisch: ontladen naar het net staat er");
+  // Ontladen naar het net: niet bij de Growatt, en niet als teruglevering niets oplevert.
+  const gVelden = nepVelden(gHtml);
+  vulVoorkeuren(gVelden, { ...growatt, battery: { trade: true } }, null, nlDynamisch);
+  assert.equal(gVelden.rijen.find((r) => r.sleutel === "trade").hidden, true, "Growatt: geen ontladen naar het net, ook als het aan stond");
+  assert.equal(gVelden.rijen.find((r) => r.sleutel === "grid_charge_min_gain").hidden, false, "laden uit het net staat standaard aan");
+  vulVoorkeuren(aVelden, anker, null, ptNenhum);
+  assert.equal(aVelden.rijen.find((r) => r.sleutel === "trade").hidden, true, "Anker in Portugal zonder teruglevering: ook niet");
+  assert.equal(tp.terugleveringBrengtOp({ country: "PT", pt: { excedente: { modo: "fixo", preco: 0 } } }), false, "een vaste prijs van nul");
+  assert.equal(tp.terugleveringBrengtOp({ country: "PT", pt: { excedente: { modo: "fixo", preco: 0.05 } } }), true);
+  assert.equal(tp.terugleveringBrengtOp({ country: "PT", pt: { excedente: { modo: "omie" } } }), true);
+  assert.equal(tp.terugleveringBrengtOp(nlDynamisch), true);
+
+  // De laadpaal: zonder zon geen modus Zon en geen "Zon: beginnen vanaf", tenzij Zon al gekozen was.
+  const zonder = voorkeurHtml(paal, { zon: false });
+  assert.ok(!zonder.includes('value="zon"') && !zonder.includes("solar_start_percent"), "zonder zon geen Zon");
+  assert.ok(voorkeurHtml({ ...paal, charge_mode: "zon" }, { zon: false }).includes('value="zon"'), "wat gekozen is blijft te zien");
+  assert.ok(voorkeurHtml(paal).includes("solar_start_percent"), "met zon (of onbekend) staat het er");
+  // Het goedkope blok: geen schema en geen Laden tot; Goedkoopst heet het blok.
+  const blok = { ...paal, goedkoop_blok: true };
+  assert.equal(canHaveDeadline(paal), true);
+  assert.equal(canHaveDeadline(blok), false, "met het goedkope blok geen schema, ook niet op de kaart");
+  assert.equal(kentDoel(blok), false);
+  assert.equal(kentDoel({ ...paal, cars: [] }), false, "zonder auto geen Laden tot in het schema");
+  const bVelden = nepVelden(voorkeurHtml(blok));
+  const optie = { textContent: "" };
+  const zoek = bVelden.querySelector.bind(bVelden);
+  bVelden.querySelector = (k) => (k === "[data-vk-goedkoopst]" ? optie : zoek(k));
+  vulVoorkeuren(bVelden, blok, null, ptNenhum);
+  assert.equal(optie.textContent, "Goedkoopst: het goedkoopste blok van het etmaal");
+  assert.ok(!voorkeurHtml(blok).includes("Staat het schema aan"), "geen zin over een schema dat er niet is");
+
+  // Meldingen.
+  const meldingIds = ["#verbruik", "#verbruik-aan", "#verbruik-velden", "#verbruik-water", "#verbruik-factor", "#verbruik-water-rij",
+    "#warmte", "#warmte-aan", "#warmte-velden", "#warmte-grens", "#warmte-grens-hint",
+    "#belasting", "#belasting-aan", "#belasting-velden", "#belasting-grens", "#belasting-wacht", "#belasting-tussen", "#belasting-grens-hint"];
+  const meldingen = (s) => {
+    const m = scherm(Meldingen, meldingIds, { ...s, notifications: {} });
+    m.el.paintVerbruik_();
+    m.el.paintWarmte_();
+    m.el.paintBelasting_();
+    return m;
+  };
+  const mKaal = meldingen(vormen.kaal);
+  assert.deepEqual(["#verbruik", "#warmte", "#belasting"].map(mKaal.zie), [false, false, false],
+    "kaal: geen gas of water, geen batterij, en een fase zonder meting en zonder plafond");
+  const mG = meldingen(vormen.growatt);
+  assert.deepEqual(["#verbruik", "#warmte", "#belasting"].map(mG.zie), [false, false, false],
+    "Growatt zonder temperatuur: geen Thuisbatterij te warm (wat de eigenaar zag)");
+  const mAlles = meldingen(vormen.alles);
+  assert.deepEqual(["#verbruik", "#verbruik-water-rij", "#warmte", "#belasting"].map(mAlles.zie), [true, true, true, true]);
+  const alleenGas = meldingen({ ...vormen.alles, sources: { ...vormen.alles.sources, meters: { gas_enabled: true, gas: "sensor.gas" } } });
+  assert.deepEqual(["#verbruik", "#verbruik-water-rij"].map(alleenGas.zie), [true, false], "gas zonder water: geen lopend water");
+  const alleenDebiet = meldingen({ ...vormen.alles, sources: { meters: { water_enabled: true, water_flow: "sensor.debiet" } } });
+  assert.deepEqual(["#verbruik", "#verbruik-water-rij"].map(alleenDebiet.zie), [true, true], "alleen het debiet: wel lopend water");
+  assert.ok(lees0("voorkeur-velden.js").includes('<div data-vk-rij="trade" style="display: contents">'),
+    "de rij om Ontladen naar het net houdt de tussenruimte van het blok");
+  assert.equal(tp.belastingTeMeten({ installation: { max_grid_watts: 5750 } }), true, "of tegen een plafond");
+  assert.equal(tp.belastingTeMeten({ installation: { circuits: [{ fuse_amps: 16 }] } }), true, "of een groep met een zekering");
+
+  // Installatie, Apparaten en Contract.
+  const inst = (s) => { const v = scherm(Installatie, ["#zonverwachting", "#terug-bewoner-rij"], s); v.el.paintToepassing_(); return v; };
+  assert.deepEqual(["#zonverwachting", "#terug-bewoner-rij"].map(inst(vormen.kaal).zie), [false, false]);
+  assert.deepEqual(["#zonverwachting", "#terug-bewoner-rij"].map(inst(vormen.growatt).zie), [true, true]);
+  assert.equal(tp.drieFasen(vormen.kaal), false, "één fase: geen Hangt op fase");
+  assert.equal(tp.drieFasen({ installation: {} }), true, "standaard drie, zoals de coach");
+  assert.equal(tp.herrekenenKan(vormen.alles), false, "dynamisch in Nederland rekent elke beurt al met zijn kwartier");
+  assert.equal(tp.herrekenenKan(vormen.kaal), true);
+  assert.equal(tp.herrekenenKan({ ...vormen.kaal, devices: [anker] }), false, "zonder beurten niets uit te rekenen");
+  assert.equal(tp.salderenTelt({ type: "fixed" }, "2026-10-30"), true);
+  assert.equal(tp.salderenTelt({ type: "fixed", start: "2027-02-01" }, "2027-03-01"), false, "na 2027 met een contract van na 2027");
+  assert.equal(tp.salderenTelt({ type: "fixed", start: "2026-02-01" }, "2027-03-01"), true, "Historie rekent 2026 nog met het vinkje");
+  assert.equal(tp.salderenTelt(ptNenhum, "2026-10-30"), false);
+
+  // De bron: elk scherm vraagt het aan toepassing.js, en een element met hidden heeft een [hidden]-regel.
+  const lees = (pad) => readFileSync(new URL(`../custom_components/domotiapp_coach/frontend/src/${pad}`, import.meta.url), "utf8");
+  const contract = lees("views/contract.js");
+  assert.ok(contract.includes('this.$("#gas").style.display = meters.gas_enabled') && contract.includes('this.$("#water").style.display = meters.water_enabled'),
+    "geen gas of water: de hele kaart weg");
+  assert.ok(contract.includes("salderenTelt(contract") && contract.includes("herrekenenKan(this.draft_)"));
+  assert.ok(lees("views/devices.js").includes("if (!drieFasen(this.draft_)) return \"\";"));
+  assert.ok(lees("views/notifications.js").includes(".veld[hidden] { display: none; }"), "het waterveld is een .veld met display grid");
+  assert.ok(lees("views/notifications.js").includes('if (soort.id === "belasting" && !belastingTeMeten(this.settings_)) continue;'),
+    "en geen schuif Zware belasting per persoon");
+  assert.ok(lees("schedule-sheet.js").includes("[hidden] { display: none !important; }"), "Instellen: elke rij met hidden is weg");
 });
 
 for (const [naam, fn] of proeven) {

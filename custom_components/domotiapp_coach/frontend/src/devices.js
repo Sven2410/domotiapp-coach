@@ -1972,7 +1972,10 @@ export const DEADLINE_ONLY_TYPES = ["laadpaal", "boiler"];
 
 /** Whether "must be finished by" means anything for this device. */
 export const canHaveDeadline = (device) =>
-  Boolean(device?.controllable) && SCHEDULABLE_TYPES.includes(device?.type);
+  Boolean(device?.controllable) && SCHEDULABLE_TYPES.includes(device?.type)
+  // Met Zonder accustand, in de goedkope uren telt de klaar-tijd niet (v0.185.0), en is er geen
+  // schema (v0.186.0); `klaarTijdTelt` in toepassing.js.
+  && !(device.type === "laadpaal" && device.goedkoop_blok);
 
 const BY_ID = new Map(DEVICE_TYPES.map((soort) => [soort.id, soort]));
 

@@ -60,6 +60,7 @@ import {
   typeMeta,
 } from "../devices.js";
 import { duration } from "../format.js";
+import { drieFasen } from "../toepassing.js";
 import { datum, getal, locale, t } from "../i18n.js";
 import {
   DacEditorElement,
@@ -903,6 +904,8 @@ class DacViewDevices extends DacEditorElement {
    */
   faseHtml_(device, index) {
     if (device.type === "laadpaal") return "";
+    // In een huis met één fase is er niets te kiezen (v0.186.0, `drieFasen` in toepassing.js).
+    if (!drieFasen(this.draft_)) return "";
     const fase = apparaatFase(device);
     return `
       <div class="row">

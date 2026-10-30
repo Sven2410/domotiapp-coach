@@ -374,6 +374,7 @@ class BatterijCoachSensor(CoachEntiteit, SensorEntity):
         except (TypeError, ValueError):
             temperatuur = None
         override = "vol" if st.get("boost") else ("leeg" if st.get("drain_to") is not None else None)
+        schema = self._device.get("brand") in BATTERIJ_SCHEMA
         fabrikant, model = accu_apparaat(self.hass, self._device) if self.hass is not None else ("", "")
         return {
             "contract": CONTRACT,
@@ -404,11 +405,12 @@ class BatterijCoachSensor(CoachEntiteit, SensorEntity):
             "leeg_tot": st.get("drain_to"),
             # Tot waar "Nu vol laden" gaat, als er een doel gekozen is (v0.141.0).
             "vol_tot": st.get("boost_to"),
-            "vakantie": bool(eigen.get("holiday")),
+            # Bij een batterij met een laadschema telt de coach vakantiestand en reserve niet (v0.186.0).
+            "vakantie": bool(eigen.get("holiday")) and not schema,
             # Ook als hij uit staat, en met de grens waarmee de coach rekent als
             # de installateur er geen invulde (v0.112.1).
             "vakantie_max": vakantie_max(eigen),
-            "reserve": eigen.get("reserve_percent") if eigen.get("reserve_enabled") else None,
+            "reserve": eigen.get("reserve_percent") if eigen.get("reserve_enabled") and not schema else None,
             "ondergrens": st.get("floor"),
             "entiteiten": entiteiten_van(self._device),
         }

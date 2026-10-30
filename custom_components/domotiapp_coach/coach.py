@@ -7054,9 +7054,17 @@ class ChargerCoach:
     def _batterij_van(
         self, now: datetime, settings: dict[str, Any], device: dict[str, Any], rij: dict[str, Any]
     ) -> Batterij:
-        """De batterij zoals hij er nu bij staat: sensoren eerst, dan wat er is ingevuld."""
+        """De batterij zoals hij er nu bij staat: sensoren eerst, dan wat er is ingevuld.
+
+        Bij een batterij met een laadschema (`BATTERIJ_SCHEMA`) tellen noodstroom, balanceren en
+        de vakantiestand niet, ook niet als er nog iets van in de opslag staat, en helpt hij de
+        auto tot zijn eigen ondergrens (v0.186.0). De eigenaar op 30-10-2026: "growatt moet geen
+        noodstroom hebben. geen balanceren geen vakantiestand accu helpen ook niet. Dus de accu
+        mag gewoon standaard de auto helpen bij growat." Het paneel laat die blokken daar weg.
+        """
         entities = device.get("entities") or {}
         eigen = device.get("battery") or {}
+        schema = device.get("brand") in BATTERIJ_SCHEMA
 
         def getal(sleutel: str) -> float | None:
             try:
@@ -7093,7 +7101,7 @@ class ChargerCoach:
                 _number(self.hass, entities.get("charge_limit")) or 100.0,
                 self._vakantie(device) or 100.0,
             ),
-            reserve=float(eigen.get("reserve_percent") or 0) if eigen.get("reserve_enabled") else None,
+            reserve=float(eigen.get("reserve_percent") or 0) if eigen.get("reserve_enabled") and not schema else None,
             rte=rte,
             rendement=rendement,
             handelen=bool(eigen.get("trade")),
@@ -7104,11 +7112,12 @@ class ChargerCoach:
             slijtage=self._slijtage(eigen, capaciteit),
             # De ondergrens aan wat bijladen van het net oplevert (v0.160.0); leeg is de standaard.
             min_winst=BIJLADEN_MIN_WINST if getal("grid_charge_min_gain") is None else getal("grid_charge_min_gain"),
-            auto_boven=getal("car_above"),
+            # Nul is de eigen ondergrens: `auto_grens` neemt de hoogste van de twee.
+            auto_boven=0.0 if schema else getal("car_above"),
             nacht=bool((settings.get("strategy") or {}).get("night_strategy", True)),
             power_w=self._batterij_w(device),
             vol_voor=vol_voor(
-                now, bool(eigen.get("weekly_full")) and self._vakantie(device) is None,
+                now, bool(eigen.get("weekly_full")) and not schema and self._vakantie(device) is None,
                 eigen.get("weekly_full_day"),
                 laatst_vol.replace(tzinfo=None) if laatst_vol is not None else None,
             ),
@@ -7127,10 +7136,10 @@ class ChargerCoach:
         blijven staan." De coach houdt hem dan onder deze grens: wat erboven
         zit gaat naar het huis of, met handelen, naar het net, en er komt pas
         weer zon in als hij eronder zit. De wekelijkse volle beurt vervalt
-        zolang de stand aanstaat.
+        zolang de stand aanstaat. Niet bij een batterij met een laadschema (v0.186.0).
         """
         eigen = device.get("battery") or {}
-        if not eigen.get("holiday"):
+        if not eigen.get("holiday") or device.get("brand") in BATTERIJ_SCHEMA:
             return None
         try:
             return float(eigen.get("holiday_max_percent") or HOLIDAY_MAX_DEFAULT)
