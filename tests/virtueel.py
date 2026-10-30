@@ -1135,6 +1135,8 @@ class Scenario:
     # Of de coach een Alfen van fasen mag laten wisselen (v0.104.0); de paal heeft
     # daarvoor `fasen_keuze` nodig.
     fasen_wisselen: bool = False
+    # Zonder accustand, in de goedkope uren (v0.185.0): het vinkje bij de paal.
+    goedkoop_blok: bool = False
     net: str = "split"                  # split | signed | signed-omgekeerd
     aansluiting_fasen: int = 3
     zekering: float = 25.0
@@ -1706,6 +1708,7 @@ def instellingen(s: Scenario) -> dict:
             "charge_mode": s.laadmodus,
             "continuous_amps": s.continu_amps,
             "phase_switching": s.fasen_wisselen,
+            "goedkoop_blok": s.goedkoop_blok,
             "solar_start_percent": s.zon_start,
             "device_id": "" if s.paal.merk == "alfen" else "virtueel",
             "entity": E["vermogen"],

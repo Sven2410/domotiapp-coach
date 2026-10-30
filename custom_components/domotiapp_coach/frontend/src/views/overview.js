@@ -3145,7 +3145,7 @@ class DacViewOverview extends DacElement {
       const gekozen = cars.find((car) => car.id === (this.activeCar_(device.id) ?? cars[0]?.id));
       const oordeel = this.coach_?.[device.id];
       const hangt = Boolean(oordeel) && oordeel.rule !== "disconnected";
-      socPick.hidden = !(hangt && vraagAccustand(gekozen, this.feed_));
+      socPick.hidden = !(hangt && vraagAccustand(gekozen, this.feed_, device));
       if (!socPick.hidden) {
         const opgave = (this.settings_?.car_soc ?? []).find((row) => row?.device === device.id);
         const field = this.$(`[data-soc-input="${slot}"]`);

@@ -13739,6 +13739,60 @@ for m in range(16, 30):
 controle("met een auto eraan en geen vermogen: de melding over het vermogen van de paal",
          len([m for m in met224 if "vermogen van je laadpaal" in m]) == 1, f"{met224}")
 
+print("=== 225. zonder accustand, in de goedkope uren: het vinkje bij de paal (v0.185.0) ===")
+# De eigenaar op 30-10-2026, over een klant met een auto die zijn accustand niet doorgeeft: "gewoon vol
+# vermogen laden in de goedkope uren. Dat moet een instelling worden in de coach." En: "het zou kunnen
+# dat de auto niet vol is in de ochtend maar dat is dan aan de klant." Het denkwerk staat in
+# test_planner.py en het virtuele huis (`pt-bi-zonder-accustand`); hier de bedrading.
+BLOK225 = dict(LAADPAAL, goedkoop_blok=True, cars=[dict(LAADPAAL["cars"][0], soc_entity="")])
+inst225 = instellingen(devices=[BLOK225])
+hass225, _, coach225 = bouw(huis(teruglevering=0.0, afname=1200.0), inst225)
+b225 = asyncio.run(ronde(coach225, inst225, paal=BLOK225))[0]
+print(f"  {b225['rule']}: {b225['reason']} soc_ask {b225['soc_ask']}")
+controle("de coach vraagt niet om de accustand, ook niet op de kaarten (soc_ask)",
+         b225["soc_ask"] is False and not b225.get("needs_soc"), f"{b225}")
+controle("en het vinkje komt bij de planner aan", b225["rule"] in ("blok", "blok-wacht"), f"{b225['rule']}")
+kaal225 = dict(BLOK225, goedkoop_blok=False)
+inst225b = instellingen(devices=[kaal225])
+hass225b, _, coach225b = bouw(huis(teruglevering=0.0, afname=1200.0), inst225b)
+b225b = asyncio.run(ronde(coach225b, inst225b, paal=kaal225))[0]
+controle("met het vinkje uit vraagt hij wel, zoals altijd", b225b["soc_ask"] is True, f"{b225b['soc_ask']}")
+
+# De klaar-tijd voorbij en niet vol: geen melding. Dezelfde avond als proef 16, met een pauze van de bewoner.
+def laat225(blok):
+    inst = instellingen(devices=[dict(LAADPAAL, goedkoop_blok=blok)])
+    inst["strategy"]["schedules"][0]["window"]["done_by"] = "19:00"
+    inst["car_soc"] = [{"device": "dev-laadpaal", "car": "car-1", "percent": 90.0, "meter": 100.0}]
+    hass, _, coach = bouw(huis(status="charging", stroom=13.5, vermogen=3070.0, teruglevering=0.0, afname=1800.0), inst)
+    paal = inst["devices"][0]
+    coach.async_pause("dev-laadpaal", True)
+    for minuut in range(30, 51):
+        asyncio.run(ronde(coach, inst, dt.datetime(2026, 8, 18, 18, minuut), paal=paal))
+    coach.async_pause("dev-laadpaal", False)
+    _, verstuurd = asyncio.run(ronde(coach, inst, dt.datetime(2026, 8, 18, 19, 9), paal=paal))
+    return coach, [d[2]["message"] for d in verstuurd if d[0] == "notify" and "niet vol" in d[2].get("message", "")]
+
+
+_, uit225 = laat225(False)
+coach225c, aan225 = laat225(True)
+print(f"  vinkje uit: {uit225}; aan: {aan225}")
+controle("de klaar-tijd voorbij en niet vol: met het vinkje uit de melding, aan niet (de keuze van de klant)",
+         len(uit225) == 1 and aan225 == [], f"{uit225} {aan225}")
+controle("en het besluit is niet doorladen tot hij vol is",
+         coach225c.state["dev-laadpaal"]["rule"] not in ("overdue", "deadline"), f"{coach225c.state['dev-laadpaal']['rule']}")
+
+# Een herstart: het vinkje staat in de instellingen, en de coach leest het elke ronde opnieuw.
+coach225 = herstart213(hass225)
+b225d = asyncio.run(ronde(coach225, inst225, paal=BLOK225))[0]
+controle("na een herstart hetzelfde besluit, en nog steeds geen vraag", b225d["rule"] == b225["rule"]
+         and b225d["soc_ask"] is False, f"{b225d['rule']} {b225d['soc_ask']}")
+
+# Het paneel slaat het op: de websocket kent het veld, standaard uit (de proeven hier bouwen
+# voluptuous na, dus dit leest de bron).
+ws225 = bron49
+controle("de websocket bewaart het vinkje, standaard uit",
+         'vol.Optional("goedkoop_blok", default=False): bool' in ws225, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

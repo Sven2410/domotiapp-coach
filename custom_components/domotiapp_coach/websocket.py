@@ -360,6 +360,10 @@ _DEVICE = _schema(
         # met de keuzelijst `phases` bij de entiteiten. Standaard uit. De eigenaar
         # op 30-09-2026: "Easee houden we zo en alfen passen we aan."
         vol.Optional("phase_switching", default=False): bool,
+        # Zonder accustand, in de goedkope uren (v0.185.0): van het net alleen in het goedkoopste
+        # blok van het etmaal, en nooit om de accustand vragen. Standaard uit. Zie `_goedkoop_blok`
+        # in planner.py.
+        vol.Optional("goedkoop_blok", default=False): bool,
         # In welke eigen ruimte het apparaat staat (v0.105.0), het id uit `rooms`,
         # of "" voor geen. Alleen voor de indeling van de lijst Apparaten.
         vol.Optional("room", default=""): vol.All(str, vol.Length(max=40)),

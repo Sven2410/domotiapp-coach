@@ -9345,6 +9345,7 @@ class ChargerCoach:
             "soc_ask": (
                 decision.rule != "disconnected" and not car.guest
                 and car.capacity_kwh > 0 and device_id not in self._soc_ruw
+                and not device.get("goedkoop_blok")
             ),
             "soc_sensor": not car.guest and bool(
                 (self._chosen_car(settings, device)[1] or {}).get("soc_entity")
@@ -11389,6 +11390,7 @@ class ChargerCoach:
             continu_amps=int(device.get("continuous_amps") or MIN_AMPS),
             zon_start=float(device.get("solar_start_percent") or 90) / 100.0,
             paused_by_user=device.get("id", "") in self._paused,
+            goedkoop_blok=bool(device.get("goedkoop_blok")),
             paused_by_balancer="equalizer" in status or "load_balancing" in status,
             no_current_reason=_text(self.hass, entities.get("no_current_reason")),
             # Wat er op de paal staat, zodat de klaar-tijdsom kan zien of de
@@ -11526,7 +11528,8 @@ class ChargerCoach:
         bezonken = self._soc_bezonken(
             now, self._klaar_sinds.get(device_id), self._soc_op.get(device_id), car
         )
-        if charger.complete and gedaan is None and bezonken and self._niet_vol(car):
+        # Zonder accustand, in de goedkope uren (v0.185.0): niet opnieuw starten voor "niet vol".
+        if charger.complete and gedaan is None and bezonken and self._niet_vol(car) and not charger.goedkoop_blok:
             charger.complete = False
             self._herstart_open.add(device_id)
             # De herstart is een nieuw aanbod (v0.99.0): de auto krijgt weer een
@@ -12554,6 +12557,7 @@ class ChargerCoach:
         "wait-for-sun-today": nt("wachten op je eigen zon"),
         "zon-wacht": nt("wachten op genoeg zon"),
         "wait-for-price": nt("wachten op een goedkoper uur"),
+        "blok-wacht": nt("wachten op het goedkope blok"),
         "too-early": nt("de tijden die je hebt ingesteld"),
     }
 
@@ -14255,6 +14259,10 @@ class ChargerCoach:
         # gemiste afspraak. Gevonden in het virtuele huis op 04-09-2026, in elk
         # scenario waarin de kabel na het vol laden bleef zitten.
         if decision.rule == "complete" or "vol" in gemeld:
+            return
+        # Zonder accustand, in de goedkope uren (v0.185.0) telt de klaar-tijd niet: dat de auto
+        # dan niet vol is, is de keuze van de klant.
+        if charger.goedkoop_blok:
             return
 
         gemeld.add("laat")

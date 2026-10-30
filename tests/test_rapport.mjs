@@ -1596,10 +1596,13 @@ proef("'hoe vol is de auto nu' staat er ook als de sensor van de auto niets zegt
   assert.equal(vraagAccustand(auto({ soc_entity: "sensor.goed" }), feed), false, "de auto zegt het zelf");
   assert.equal(vraagAccustand(auto({ soc_entity: "sensor.nul" }), feed), false, "0% is ook een stand");
   assert.equal(vraagAccustand(auto({ soc_entity: "sensor.auto_soc", guest: true }), feed), false, "een gast niet");
+  // Zonder accustand, in de goedkope uren (v0.185.0): het vinkje bij de paal, zoals `soc_ask` in coach.py.
+  assert.equal(vraagAccustand(auto({}), feed, { goedkoop_blok: true }), false, "een paal met het vinkje niet");
+  assert.equal(vraagAccustand(auto({}), feed, { goedkoop_blok: false }), true, "met het vinkje uit wel");
   assert.equal(vraagAccustand(auto({ capacity_kwh: 0 }), feed), false, "zonder accu zegt een percentage niets");
   assert.equal(vraagAccustand(undefined, feed), false);
   const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
-  assert.ok(kaart.includes("socPick.hidden = !(hangt && vraagAccustand(gekozen, this.feed_));"),
+  assert.ok(kaart.includes("socPick.hidden = !(hangt && vraagAccustand(gekozen, this.feed_, device));"),
     "de kaart vraagt het met dezelfde grens");
   assert.ok(kaart.includes('"De auto geeft zijn accustand nu niet door. "'), "en zegt waarom");
 });

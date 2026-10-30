@@ -1615,8 +1615,11 @@ export function socVeld(opgave, socNu) {
  * zegt de sensor weer iets, dan gaat die voor en verdwijnt het veld.
  * Dezelfde grens als `_number` in coach.py. Een gast en een auto zonder
  * accu in zijn profiel krijgen geen veld, want daar zegt een percentage niets.
+ * Een paal met Zonder accustand, in de goedkope uren (`goedkoop_blok`, v0.185.0) ook niet,
+ * zoals `soc_ask` in coach.py.
  */
-export function vraagAccustand(car, feed) {
+export function vraagAccustand(car, feed, device) {
+  if (device?.goedkoop_blok) return false;
   if (!car || car.guest || !(Number(car.capacity_kwh) > 0)) return false;
   if (!car.soc_entity) return true;
   const stand = feed?.get(car.soc_entity)?.state;
