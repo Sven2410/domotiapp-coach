@@ -13161,8 +13161,10 @@ for i in range(1, 6):
     hass219.states.zet(f"switch.p{i}", "on")
 stekkers219(hass219, coach219, inst219, 13)
 terug219 = lijst219(hass219, 1)
+# Sinds v0.183.0 in één regel (proef 223).
 controle("en als ze terug zijn staat dat in de geschiedenis, zonder telefoon",
-         len(terug219) == 5 and all("staat weer aan" in m for _k, m in terug219), f"{terug219}")
+         terug219 == [("melding", "Oven, Warmhoudlade, Quooker, Ledstrips en de vaatwasser staan weer aan.")],
+         f"{terug219}")
 
 # 3. Eén stekker geeft de zin van voorheen.
 hass219b, inst219b, coach219b = bouw219("on")
@@ -13496,6 +13498,123 @@ controle("met de zon: het vak van 27-10 gevonden, en 27-10 en 28-10 nagerekend",
 controle("en de dag begint op 29-10 06:30, een etmaal na het vak", begon222.startswith("2026-10-29T06:30"), begon222)
 controle("zonder de zon was 29-10 08:00 het laatste vak, zoals in de klantwoning",
          not zonder222 and begon222b.startswith("2026-10-29T08:00"), f"{zonder222} {begon222b}")
+
+print("=== 223. altijd aan: wat samen wegvalt telt vanaf het wegvallen zelf, en komt in één regel terug (v0.183.0) ===")
+# In een klantwoning op 30-10-2026 om 07:42 vielen negen stekkers weg, in twee groepjes 13 seconden na
+# elkaar. De coach zag de tweede groep pas bij de volgende minuutronde: de wisseling kwam binnen terwijl
+# er al een ronde liep. Hij telde vanaf wat hij zag, de tweede groep was bij de melding 51 seconden weg,
+# en de bewoner kreeg twee kritieke meldingen. Om 15:18 gebeurde het opnieuw, met twee stekkers uit
+# dezelfde seconde in twee meldingen. Bij het terugkomen kwamen er negen losse regels.
+T223 = dt.datetime(2026, 10, 30, 7, 42, 23)
+NAMEN223 = ["Wasmachine", "Droger", "Vriezer", "Oven", "Combi-oven", "Quooker", "Vaatwasser",
+            "Koelkast", "Warmhoudlade", "Haard", "Ledstrips"]
+PLUGS223 = [plug219(i, naam) for i, naam in enumerate(NAMEN223, 1)]
+
+
+def bouw223():
+    inst = instellingen(devices=[LAADPAAL, *PLUGS223])
+    inst["notifications"] = {**inst["notifications"], "always_on_alert": {"enabled": True}}
+    waarden = {**huis(), **{f"switch.p{i}": "on" for i in range(1, 12)}, **{f"sensor.p{i}_w": "5" for i in range(1, 12)}}
+    hass, _, coach = bouw(waarden, inst)
+    asyncio.run(coach._async_geheugen_laden())
+    asyncio.run(coach._async_altijd_aan(inst, T223 - dt.timedelta(minutes=5), "steer"))
+    return hass, inst, coach
+
+
+def ronde223(coach, inst, seconden):
+    asyncio.run(coach._async_altijd_aan(inst, T223 + dt.timedelta(seconds=seconden), "steer"))
+
+
+def valt223(hass, nummers, seconden, stand="unavailable"):
+    """De schakelaars wisselen op dat moment, met `last_changed` zoals Home Assistant die zet."""
+    moment = (T223 + dt.timedelta(seconds=seconden)).replace(tzinfo=dt.timezone.utc)
+    for i in nummers:
+        hass.states.zet(f"switch.p{i}", stand, last_updated=moment)
+
+
+# a. Zeven vallen weg en wekken de coach; drie vallen 13 seconden later weg en wekken hem niet. De
+# elfde valt anderhalve minuut later weg: die hoort niet bij deze storing.
+hass223, inst223, coach223 = bouw223()
+valt223(hass223, range(1, 8), 0)
+ronde223(coach223, inst223, 0)
+valt223(hass223, (8, 9, 10), 13)
+ronde223(coach223, inst223, 70)
+valt223(hass223, (11,), 90)
+ronde223(coach223, inst223, 90)
+ronde223(coach223, inst223, 121)
+ronde223(coach223, inst223, 130)
+weg223 = [m for k, m in lijst219(hass223) if k == "kritiek"]
+print(f"  {weg223}")
+controle("tien stekkers in twee groepjes: één kritieke melding met alle tien",
+         weg223 == ["Wasmachine, Droger, Vriezer, Oven, Combi-oven, Quooker, Vaatwasser, Koelkast, Warmhoudlade en "
+                    "Haard zijn al 2 minuten niet bereikbaar; de coach weet niet of ze aan staan."], f"{weg223}")
+controle("de elfde, anderhalve minuut later, valt erbuiten", all("Ledstrips" not in m for m in weg223), f"{weg223}")
+for s223 in (150, 190, 211, 240):
+    ronde223(coach223, inst223, s223)
+weg223b = [m for k, m in lijst219(hass223) if k == "kritiek"]
+controle("en krijgt zijn eigen melding na twee minuten",
+         len(weg223b) == 2 and weg223b[1].startswith("Ledstrips is al 2 minuten niet bereikbaar"), f"{weg223b}")
+
+# b. Ze komen terug, één per seconde, elk met een eigen ronde, en halverwege een herstart: één regel.
+for i in range(1, 6):
+    valt223(hass223, (i,), 999 + i, "on")
+    ronde223(coach223, inst223, 999 + i)
+controle("zolang er nog stekkers weg zijn en het geen minuut is, nog geen regel",
+         [m for _k, m in lijst219(hass223, 2)] == [], f"{lijst219(hass223, 2)}")
+coach223._meldingen_onthouden()
+coach223 = herstart213(hass223)
+asyncio.run(coach223._async_geheugen_laden())
+for i in range(6, 12):
+    valt223(hass223, (i,), 999 + i, "on")
+    ronde223(coach223, inst223, 999 + i)
+terug223 = lijst219(hass223, 2)
+print(f"  {terug223}")
+controle("alle elf terug, ook over een herstart heen: één regel in de geschiedenis",
+         terug223 == [("melding", "Wasmachine, Droger, Vriezer, Oven, Combi-oven, Quooker, Vaatwasser, Koelkast, "
+                                  "Warmhoudlade, Haard en Ledstrips staan weer aan.")], f"{terug223}")
+
+# c. Eén blijft weg: wat terug is staat er na een minuut, en wat even terugkwam en weer wegviel niet.
+hass223c, inst223c, coach223c = bouw223()
+valt223(hass223c, (1, 2, 3), 0)
+for s223 in (0, 60, 121):
+    ronde223(coach223c, inst223c, s223)
+valt223(hass223c, (1, 2), 300, "on")
+ronde223(coach223c, inst223c, 300)
+valt223(hass223c, (2,), 320)
+ronde223(coach223c, inst223c, 320)
+ronde223(coach223c, inst223c, 360)
+terug223c = lijst219(hass223c, 1)
+controle("na een minuut: alleen wat terug is en terug bleef",
+         terug223c == [("melding", "Wasmachine staat weer aan.")], f"{terug223c}")
+for s223 in (420, 480, 600):
+    ronde223(coach223c, inst223c, s223)
+controle("de stekker die weer wegviel krijgt geen tweede kritieke melding",
+         [k for k, _m in lijst219(hass223c, 2) if k == "kritiek"] == [], f"{lijst219(hass223c, 2)}")
+valt223(hass223c, (2, 3), 700, "on")
+ronde223(coach223c, inst223c, 700)
+controle("en als alles terug is, meteen één regel",
+         [m for _k, m in lijst219(hass223c, 2)] == ["Droger en Vriezer staan weer aan."], f"{lijst219(hass223c, 2)}")
+
+# d. Een stekker die wegviel terwijl de coach herstartte telt vanaf het wegvallen, niet vanaf de eerste ronde.
+hass223d, inst223d, coach223d = bouw223()
+coach223d._meldingen_onthouden()
+coach223d = herstart213(hass223d)
+asyncio.run(coach223d._async_geheugen_laden())
+valt223(hass223d, (4,), -90)
+for s223 in (0, 31):
+    ronde223(coach223d, inst223d, s223)
+herstart223 = [m for k, m in lijst219(hass223d) if k == "kritiek"]
+controle("weggevallen tijdens de herstart: de melding komt twee minuten na het wegvallen",
+         len(herstart223) == 1 and herstart223[0].startswith("Oven is al 2 minuten niet bereikbaar"), f"{herstart223}")
+
+# e. Een stekker die twee seconden weg is blijft erbuiten, zoals voorheen.
+hass223e, inst223e, coach223e = bouw223()
+valt223(hass223e, (5,), 0)
+ronde223(coach223e, inst223e, 1)
+valt223(hass223e, (5,), 2, "on")
+for s223 in (2, 60, 121, 180):
+    ronde223(coach223e, inst223e, s223)
+controle("twee seconden weg: geen melding en geen regel", lijst219(hass223e) == [], f"{lijst219(hass223e)}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
