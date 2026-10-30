@@ -1,4 +1,11 @@
 {
+  "wachten op het goedkope blok": "waiting for the cheap block",
+  "Dit is het goedkoopste blok van het komende etmaal, dus hij laadt op vol vermogen tot {klok}, of tot de auto zelf stopt.": "This is the cheapest block of the coming 24 hours, so it charges at full power until {klok}, or until the car stops by itself.",
+  "Hij laadt alleen in het goedkoopste blok van het etmaal, en dat begint om {wanneer}.": "It only charges in the cheapest block of the day, and that starts at {wanneer}.",
+  "In de avondpiek laadt hij niet van het net, dus hij begint om {klok}.": "It does not charge from the grid in the evening peak, so it starts at {klok}.",
+  "Je stroom kost elk uur hetzelfde, dus hij laadt nu op vol vermogen tot de auto zelf stopt.": "Your electricity costs the same every hour, so it charges now at full power until the car stops by itself.",
+  "Laadt daarna op vol vermogen tot de auto zelf stopt.": "Then charges at full power until the car stops by itself.",
+  "Laadt dan op vol vermogen tot de auto zelf stopt.": "Then charges at full power until the car stops by itself.",
   "De laadpaal": "The charger",
   "de laadpaal": "the charger",
   "Laadpaal": "Charger",

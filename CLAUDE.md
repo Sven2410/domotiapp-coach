@@ -114,6 +114,9 @@ virtuele huis (`tests/test_virtueel.py`) meet ze na.
    in zodra er minder dan dat uur over is bovenop wat er nog nodig is, en een
    lopende beurt stopt niet voor een goedkoper uur als er daarna geen uur
    reserve overblijft (`cheap-hour+reserve`).
+   **Behalve met het vinkje Zonder accustand, in de goedkope uren** bij de paal (v0.185.0, standaard uit):
+   dan telt de klaar-tijd niet, en eis 7 ook niet. De eigenaar op 30-10-2026: "het zou kunnen dat de auto
+   niet vol is in de ochtend maar dat is dan aan de klant." (`docs/laadpaal.md`)
 3. **Geen fasewissel, behalve bij een Alfen die het mag.** Een auto laadt op
    één fase of op drie, zoals het autoprofiel zegt, en aan een Easee wisselt
    de coach dat nooit: dat beschadigt het relais. Hij moduleert van 6 A tot
@@ -203,7 +206,7 @@ bestand leest Claude Code elke sessie helemaal in, en boven 150.000 tekens
 
 | werk je aan | lees eerst |
 |---|---|
-| de laadpaal: proefladen bij het inpluggen en een auto in storing, de zonverwachting per voorspeller (Forecast.Solar telt op het eind van het uur), de zon zonder paneelgegevens (eigen opwek en het weer, zon.py), een herstart midden in een beurt en de zekering van de groep als vast plafond, de modus zonder planning (Snel, Continu, Zon), "laden tot" en de laadlimiet van de planning, het verslag, de zon en de meter, wekken en fasen, het laadtempo, de accustand, de sensorwacht (één melding als het internet weg is, v0.175.0; alleen wat het eerst deed, v0.178.0; geen kritiek voor wat nog nooit iets meldde en een paal zonder auto, v0.184.0), een accustand die vastzit (v0.176.0), de tijdlijn, het gemeten plafond, een slapende omvormer, het merk van de auto en een slapende Tesla, de laadbeurt en de actieradius op de kaart | `docs/laadpaal.md` |
+| de laadpaal: proefladen bij het inpluggen en een auto in storing, de zonverwachting per voorspeller (Forecast.Solar telt op het eind van het uur), de zon zonder paneelgegevens (eigen opwek en het weer, zon.py), een herstart midden in een beurt en de zekering van de groep als vast plafond, de modus zonder planning (Snel, Continu, Zon), "laden tot" en de laadlimiet van de planning, het verslag, de zon en de meter, wekken en fasen, het laadtempo, de accustand, de sensorwacht (één melding als het internet weg is, v0.175.0; alleen wat het eerst deed, v0.178.0; geen kritiek voor wat nog nooit iets meldde en een paal zonder auto, v0.184.0), een accustand die vastzit (v0.176.0), zonder accustand in de goedkope uren (v0.185.0), de tijdlijn, het gemeten plafond, een slapende omvormer, het merk van de auto en een slapende Tesla, de laadbeurt en de actieradius op de kaart | `docs/laadpaal.md` |
 | een Alfen, of iets aan de paalsturing | `docs/alfen.md` |
 | onderverdeelkasten en groepen met een eigen zekering, de kaart Belastingen in je huis (v0.168.0), en de fase per apparaat (v0.169.0) | `docs/groepen.md` |
 | de thuisbatterij: de standen, de regelaar en zijn geduld, de batterij die zelf nul op de meter doet, de sensor, de volle beurt, de auto helpen, voorrang bij zon en bij planningen, het laadrendement van de auto, een herstart, hoe de coach prijslijsten leest, de temperatuur met de melding en de ventilator, en Growatt (uitlezen, en sinds v0.150.0 sturen met een laadschema), en een integratie die na een storing niet opkomt (v0.166.0, elke integratie) of om opnieuw inloggen vraagt (v0.176.0), en het huisverbruik na een nieuwe netmeter (v0.170.0, `_net_afname`), en de nachttelling van een Growatt die een herstart overleeft (v0.171.0), het schema dat na het vak eruit gaat en een dag die hij achteraf narekent (v0.174.0), en een nacht zonder netladen die de dag ook afsluit (v0.179.0) en zon die de accu laadt die geen vak is (v0.181.0) | `docs/batterij.md` |

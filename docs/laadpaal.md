@@ -1422,3 +1422,45 @@ Proef 217 in test_coach.py controleert de volgende gevallen:
 - 85% met 14 kWh erin telt nog, met 20 kWh niet meer;
 - een gast aan dezelfde paal telt niet mee.
 
+
+## Zonder accustand, in de goedkope uren (v0.185.0)
+
+Een vinkje bij de laadpaal (`goedkoop_blok`), onder Sturen, standaard uit. Het is er voor een auto die zijn
+accustand niet doorgeeft, bij een klant die die stand ook niet telkens wil intypen. De eigenaar op 30-10-2026,
+over een klant in Portugal met bi-horário (vazio van 22:00 tot 08:00): "De klant wilt niet telkens de accustand
+doorgeven. gewoon vol vermogen laden in de goedkope uren. Dat moet een instelling worden in de coach." En:
+"Dit is dus een nieuw scenario snap je? niet het standaard als in NL." Met het vinkje uit verandert er niets,
+en blijft de coach om de accustand vragen.
+
+**Staat het vinkje aan** (`_goedkoop_blok` in planner.py):
+- **Wat voor alles gaat.** De pauze, een volle aansluiting, Snel, een gast, een laadmodus zonder planning en
+  de begintijd gaan voor, zoals altijd.
+- **Zon** gaat er altijd in.
+- **Van het net** laadt hij alleen in het goedkoopste blok van het komende etmaal (`blok_van`), op het
+  plafond, tot de auto zelf stopt. Het blok is de laagste prijs, en minstens een uur:
+  - bij bi- en tri-horário het hele goedkope tijdvak;
+  - bij een dynamisch contract het goedkoopste uur. Dat is minder precies dan met een accustand. In het
+    virtuele huis is het zonder panelen één uur op een dag, en dus 3,6 kWh voor een bus op één fase.
+- **Wachten** heet `blok-wacht`. De paal krijgt een pauze tot het begin van het blok mee (`hold_minutes`):
+  valt de coach weg, dan begint de paal op tijd. Na het blok laadt hij niet nog even door (`NEVER_HOLD`).
+  Het proefladen bij het inpluggen blijft wel, want dat ziet een auto in storing.
+- **De klaar-tijd telt niet.** Er is geen `deadline` en geen `overdue` van het net in een duur uur. De coach
+  stuurt ook geen melding dat de auto om de klaar-tijd niet vol was, en start de paal niet opnieuw voor "niet
+  vol" (`_niet_vol`). Eis 2 en 7 gelden hier dus niet. De eigenaar: "het zou kunnen dat de auto niet vol is
+  in de ochtend maar dat is dan aan de klant."
+- **Nooit om de accustand vragen.** Er is geen `needs_soc` en geen `soc_ask`, dus ook geen vraag op de kaarten
+  van DomotiApp Lovelace. `vraagAccustand` in devices.js krijgt de paal mee en trekt dezelfde grens.
+- **De accu-inhoud** uit het autoprofiel is alleen om te laten zien. De coach plant er niet mee.
+
+**Zonder prijslijst:**
+- Bij een vast Nederlands contract kost elk uur hetzelfde. De coach kent daar geen dag- en nachttarief, dus
+  laadt hij meteen, behalve in de avondpiek (eis 4).
+- Bij een dynamisch contract zonder prijzen wacht hij (`no-prices`, eis 6).
+
+Proeven:
+- test_planner.py, "zonder accustand, in de goedkope uren";
+- proef 225 in test_coach.py: de bedrading, de melding over de klaar-tijd met het vinkje uit en aan, en een
+  herstart;
+- het virtuele huis: `pt-bi-zonder-accustand` (een herstart om 23:30), `pt-bi-zonder-accustand-groot` ('s
+  ochtends niet vol, de volgende nacht verder), `dynamisch-zonder-accustand` en `-donker`. `pt-bihorario` is
+  dezelfde avond zonder het vinkje.

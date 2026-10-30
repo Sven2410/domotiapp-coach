@@ -285,8 +285,19 @@ WAKE_AMPS = 16
 # goedkope uur hadden de coach en de bewoner het geweten.
 PROEF_REGELS = frozenset({
     "too-early", "no-soc", "no-prices", "wait-for-prices", "wait-for-price",
-    "wait-for-sun", "fixed-tariff", "zon-wacht",
+    "wait-for-sun", "fixed-tariff", "zon-wacht", "blok-wacht",
 })
+
+# Zonder accustand, in de goedkope uren (v0.185.0): een instelling van de laadpaal. Van het net
+# laadt hij dan alleen in het goedkoopste blok van het komende etmaal, op het plafond, tot de auto
+# zelf stopt. De eigenaar op 30-10-2026, over een klant met twee tarieven: "De klant wilt niet
+# telkens de accustand doorgeven. gewoon vol vermogen laden in de goedkope uren. Dat moet een
+# instelling worden in de coach." En: "het zou kunnen dat de auto niet vol is in de ochtend maar dat
+# is dan aan de klant." Het blok is de laagste prijs van het etmaal, en minstens een uur: bij twee of
+# drie tarieven het hele goedkope tijdvak, bij een dynamisch contract het goedkoopste uur. Zie
+# `_goedkoop_blok`.
+BLOK_ETMAAL = timedelta(hours=24)
+BLOK_MINIMUM = timedelta(hours=1)
 
 # Hoe lang een auto de tijd krijgt voordat de kaart zegt dat hij niets afneemt.
 # In seconden en niet in ronden, want een ronde is niet altijd een minuut: een
@@ -551,6 +562,8 @@ class Charger:
     # advies maar een opdracht, dus de coach houdt zijn handen thuis tot het
     # weer uit gaat of de kabel eruit komt.
     paused_by_user: bool = False
+    # Zonder accustand, in de goedkope uren (v0.185.0): zie `BLOK_ETMAAL` en `_goedkoop_blok`.
+    goedkoop_blok: bool = False
     # A load balancer has put the session on hold. Asking again changes nothing;
     # only waiting does.
     paused_by_balancer: bool = False
@@ -3134,6 +3147,122 @@ def _evening_before(end: datetime | None) -> datetime | None:
     return avond
 
 
+def blok_van(now: datetime, prices: list[dict], tot: datetime) -> list[dict]:
+    """Het goedkoopste blok tussen `now` en `tot` (v0.185.0): de rijen op de laagste prijs, en
+    minstens `BLOK_MINIMUM`, aangevuld met de goedkoopste rijen daarboven. Op volgorde van tijd.
+
+    Bij twee of drie tarieven staat het hele goedkope tijdvak op één prijs, en dan is dat het
+    blok. Bij een dynamisch contract is de laagste prijs een enkel uur of kwartier, en dan is
+    het het goedkoopste uur. Leeg als er geen prijzen zijn.
+    """
+    rijen = sorted(
+        (r for r in prices if r["end"] > now and r["start"] < tot and r.get("price") is not None),
+        key=lambda r: (r["price"], r["start"]),
+    )
+    if not rijen:
+        return []
+    laagste = rijen[0]["price"]
+    blok: list[dict] = []
+    duur = timedelta(0)
+    for rij in rijen:
+        if rij["price"] > laagste + PRICE_MARGIN and duur >= BLOK_MINIMUM:
+            break
+        blok.append(rij)
+        duur += echte_duur(max(rij["start"], now), min(rij["end"], tot))
+    return sorted(blok, key=lambda r: r["start"])
+
+
+def _goedkoop_blok(
+    now: datetime,
+    prices: list[dict],
+    grid: Grid,
+    car: Car,
+    tariff: Tariff,
+    ceiling: int,
+) -> Decision:
+    """Zonder accustand, in de goedkope uren (v0.185.0); zie `BLOK_ETMAAL`.
+
+    Zon gaat er altijd in. Van het net alleen in het goedkoopste blok van het komende etmaal
+    (`blok_van`), op het plafond, tot de auto zelf stopt. Een klaar-tijd telt niet: is de auto
+    dan niet vol, dan is dat de keuze van de klant. Het etmaal is een etmaal en niet de tijd
+    tot de klaar-tijd, want het goedkope blok komt elke dag; met de klaar-tijd erbij zou een
+    klaar-tijd vlak voor het blok een duurder uur het goedkoopste maken.
+
+    Zonder prijslijst: bij een vast contract kost elk uur hetzelfde, dus laadt hij meteen,
+    behalve in de avondpiek (eis 4). Bij een dynamisch contract zonder prijzen wacht hij (eis 6).
+    """
+    if grid.surplus_w >= watts_for(MIN_AMPS, car.phases) * SURPLUS_SLACK:
+        return Decision(
+            True,
+            max(MIN_AMPS, min(ceiling, int(amps_for(grid.surplus_w, car.phases)))),
+            t("Er is {hoeveel} kW zon over, dus die gaat nu in de auto.", hoeveel=getal(grid.surplus_w / 1000, 1)),
+            plan=t("Loopt mee met wat de zon geeft."),
+            rule="surplus",
+        )
+    if not prices:
+        if tariff.buy is None:
+            return Decision(
+                False,
+                0,
+                t("Er komen geen prijzen binnen, dus hij wacht met laden uit het net. "
+                  "Controleer de prijssensor bij Installatie."),
+                rule="no-prices",
+            )
+        if in_evening_peak(now):
+            open_om = datetime.combine(now.date(), EVENING_START)
+            return Decision(
+                False,
+                0,
+                t("In de avondpiek laadt hij niet van het net, dus hij begint om {klok}.", klok=_clock(open_om)),
+                plan=t("Laadt daarna op vol vermogen tot de auto zelf stopt."),
+                rule="blok-wacht",
+                hold_minutes=max(1, int(echte_duur(now, open_om).total_seconds() // 60)),
+                starts_at=open_om.isoformat(),
+            )
+        return Decision(
+            True,
+            ceiling,
+            t("Je stroom kost elk uur hetzelfde, dus hij laadt nu op vol vermogen tot de auto zelf stopt."),
+            plan=t("Laadt tot de auto zelf stopt."),
+            rule="blok",
+        )
+    blok = blok_van(now, prices, echt_verder(now, BLOK_ETMAAL))
+    nu = next((r for r in blok if r["start"] <= now < r["end"]), None)
+    if nu is not None:
+        # Tot waar het blok aaneengesloten doorloopt.
+        tot = nu["end"]
+        for rij in blok:
+            if rij["start"] == tot:
+                tot = rij["end"]
+        return Decision(
+            True,
+            ceiling,
+            t("Dit is het goedkoopste blok van het komende etmaal, dus hij laadt op vol vermogen tot {klok}, "
+              "of tot de auto zelf stopt.", klok=_clock(tot)),
+            plan=t("Laadt tot de auto zelf stopt."),
+            rule="blok",
+        )
+    straks = next((r["start"] for r in blok if r["start"] > now), None)
+    if straks is None:
+        return Decision(
+            False,
+            0,
+            t("Er komen geen prijzen binnen, dus hij wacht met laden uit het net. "
+              "Controleer de prijssensor bij Installatie."),
+            rule="no-prices",
+        )
+    return Decision(
+        False,
+        0,
+        t("Hij laadt alleen in het goedkoopste blok van het etmaal, en dat begint om {wanneer}.",
+          wanneer=_wanneer(straks, now)),
+        plan=t("Laadt dan op vol vermogen tot de auto zelf stopt."),
+        rule="blok-wacht",
+        hold_minutes=max(1, int(echte_duur(now, straks).total_seconds() // 60)),
+        starts_at=straks.isoformat(),
+    )
+
+
 def _hold_until_start(now: datetime, end: datetime | None, needed: float | None) -> int:
     """Hoe lang een pauze mag staan als de coach zelf zou wegvallen.
 
@@ -3603,6 +3732,12 @@ def _decide(
             plan=t("Laadt door tot de auto vol is."),
             rule="start-by",
         )
+
+    # Zonder accustand, in de goedkope uren (v0.185.0). Hierboven staat wat de bewoner zelf
+    # kiest en wat de aansluiting beschermt; hieronder de klaar-tijd en de som, en die tellen
+    # met deze instelling niet. Dat is de keuze van de klant.
+    if charger.goedkoop_blok:
+        return _goedkoop_blok(now, prices, grid, car, tariff, ceiling)
 
     # --- the deadline outranks everything ---------------------------------
     # Reckoned with what the charger really manages, not with what it is about
@@ -4493,7 +4628,7 @@ def kies_fasen(drie: Decision, een: Decision, surplus_w: float, nu_fasen: int) -
 
 
 NEVER_HOLD = frozenset(
-    {"disconnected", "complete", "user-hold", "no-room", "tight", "no-prices", "no-soc"}
+    {"disconnected", "complete", "user-hold", "no-room", "tight", "no-prices", "no-soc", "blok-wacht"}
 )
 
 

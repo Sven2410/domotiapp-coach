@@ -385,6 +385,46 @@ if (vp := v("pt-bihorario")):
     controle("portugal: alles tegen het daltarief", abs(vp.kosten - vp.geladen_kwh * dal) < 0.02,
              f"€{vp.kosten:.2f} tegen €{vp.geladen_kwh * dal:.2f}")
 
+# Zonder accustand, in de goedkope uren (v0.185.0): een vinkje bij de paal, standaard uit. Van het net
+# alleen in het goedkoopste blok, op vol vermogen; de klaar-tijd telt niet, en de coach vraagt nooit om
+# de accustand. `pt-bihorario` is dezelfde avond zonder het vinkje.
+if (vz := v("pt-bi-zonder-accustand")):
+    dal = round((0.1340 + 0.001) * 1.23, 6)
+    print(f"  zonder accustand: €{vz.kosten:.2f} voor {vz.geladen_kwh:.1f} kWh, vol om {vz.klaar_op}")
+    controle("zonder accustand: niets van het net voor de daluren", not laadt_tussen(vz, "18:30", "23:00"), "")
+    controle("zonder accustand: om 23:00 op vol vermogen",
+             any(r.regel == "blok" and r.amps == 16 for r in regels_in(vz, "23:00", "23:05")), "")
+    controle("zonder accustand: na de herstart van 23:30 laadt hij door",
+             all(r.paal_w > 0 for r in regels_in(vz, "23:35", "23:59")), "")
+    controle("zonder accustand: alles tegen het daltarief", abs(vz.kosten - vz.geladen_kwh * dal) < 0.02,
+             f"€{vz.kosten:.2f} tegen €{vz.geladen_kwh * dal:.2f}")
+    controle("zonder accustand: nooit gevraagd om de accustand, en niets kritieks",
+             not meldingen(vz, "accustand") and not [g for g in vz.geschiedenis if g.get('kind') == 'kritiek'], f"{vz.meldingen}")
+if (vg := v("pt-bi-zonder-accustand-groot")):
+    # Op het besluit, niet op het vermogen: in de minuut van een wissel meet de paal nog wat ervoor kwam.
+    buiten = [r for r in vg.regels if r.amps > 0 and not (r.tijd.hour >= 23 or r.tijd.hour < 9)]
+    print(f"  groot: {vg.geladen_kwh:.1f} kWh, net {vg.uit_net_kwh:.1f}, buiten de daluren {len(buiten)} minuten, "
+          f"allemaal {sorted({r.regel for r in buiten})}")
+    controle("grote auto zonder accustand: buiten de daluren alleen op zon",
+             buiten and all(r.regel == "surplus" for r in buiten), f"{sorted({r.regel for r in buiten})}")
+    controle("grote auto zonder accustand: om 09:00 niet vol, en daar geen melding over",
+             all(r.soc < 100 for r in vg.regels if r.tijd.hour == 8) and not meldingen(vg, "niet vol")
+             and not [g for g in vg.geschiedenis if g.get('kind') == 'kritiek'], f"{vg.meldingen}")
+    controle("grote auto zonder accustand: de volgende nacht verder, tot hij vol is",
+             any(r.regel == "blok" and r.tijd.day == vg.regels[0].tijd.day + 1 and r.tijd.hour == 23 for r in vg.regels)
+             and vg.klaar_op is not None, f"{vg.klaar_op}")
+if (vd := v("dynamisch-zonder-accustand-donker")):
+    net = [r for r in vd.regels if r.amps > 0]
+    uren = sorted({r.tijd.replace(minute=0) for r in net})
+    print(f"  dynamisch zonder accustand, donker: {vd.uit_net_kwh:.1f} kWh in {[f'{u:%a %H}' for u in uren]}")
+    controle("dynamisch zonder accustand: van het net in één uur, het goedkoopste dat hij kende",
+             len(uren) == 1 and all(r.regel.startswith("blok") for r in net)
+             and all(r.prijs <= min(q.prijs for q in vd.regels if q.prijs is not None) + 1e-6 for r in net),
+             f"{uren}")
+    controle("dynamisch zonder accustand: de klaar-tijd telt niet, en geen melding dat hij niet vol is",
+             not any(r.regel in ("deadline", "overdue") for r in vd.regels) and not meldingen(vd, "niet vol"),
+             f"{vd.meldingen}")
+
 # Na 1-1-2027 de terugleverprijs van na salderen, ook met het vinkje aan (v0.134.0).
 if (vn := v("vast-na-salderen")) and (vl := v("vast-na-salderen-leeg")):
     print(f"  na salderen: €{vn.kosten:.2f}, zonder bedragen €{vl.kosten:.2f}, zon {vn.uit_zon_kwh:.1f} kWh")

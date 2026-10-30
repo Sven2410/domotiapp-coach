@@ -132,6 +132,17 @@ dyn_kwartier_later = dyn_zonnig.kopie(
     naam="dynamisch-prijzen-laat", uitleg="dynamisch, de prijzen van morgen komen pas om 15:00",
     prijzen=Prijzen(bekend_om="15:00"),
 )
+# Zonder accustand, in de goedkope uren (v0.185.0), bij een dynamisch contract: het goedkoopste uur.
+dyn_zonder_accustand = dyn_avond.kopie(
+    naam="dynamisch-zonder-accustand",
+    uitleg="dynamisch, een bus zonder accustand en het vinkje aan: alleen in het goedkoopste uur van het etmaal",
+    auto=Auto(meldt_soc=False), goedkoop_blok=True, duur_uren=36,
+)
+dyn_zonder_accustand_donker = dyn_zonder_accustand.kopie(
+    naam="dynamisch-zonder-accustand-donker",
+    uitleg="hetzelfde zonder panelen: van het net, en alleen in het goedkoopste uur",
+    zon=dyn_geen_zon.zon, voorspeller=dyn_geen_zon.voorspeller,
+)
 dyn_geen_klaar_tijd = dyn_zonnig.kopie(
     naam="dynamisch-geen-klaar-tijd", uitleg="dynamisch, schema uit",
     schema_aan=False, duur_uren=36,
@@ -1606,6 +1617,25 @@ pt_bihorario = vast_avond.kopie(
     uitleg="Portugal, bi-horário ciclo diário, kabel om 18:30 erin, klaar om 06:00: in de daluren laden",
     pt=PT_EDP,
 )
+# Zonder accustand, in de goedkope uren (v0.185.0). De eigenaar op 30-10-2026, over een klant in
+# Portugal met een auto die zijn accustand niet doorgeeft: "gewoon vol vermogen laden in de goedkope
+# uren. Dat moet een instelling worden in de coach." En: "het zou kunnen dat de auto niet vol is in de
+# ochtend maar dat is dan aan de klant." Een eigen vinkje bij de paal, standaard uit; `pt-bihorario`
+# hierboven is dezelfde avond zonder.
+pt_zonder_accustand = pt_bihorario.kopie(
+    naam="pt-bi-zonder-accustand",
+    uitleg="Portugal, bi-horário, een bus zonder accustand en het vinkje aan: vanaf 23:00 op vol vermogen, "
+           "en een herstart om 23:30",
+    auto=Auto(meldt_soc=False), goedkoop_blok=True,
+    gebeurtenissen=[("23:30", "herstart", None)],
+)
+pt_zonder_accustand_groot = pt_zonder_accustand.kopie(
+    naam="pt-bi-zonder-accustand-groot",
+    uitleg="hetzelfde vinkje, een auto van 77 kWh op één fase, geen klaar-tijd, kabel om 20:30: alleen in de "
+           "daluren, 's ochtends niet vol, en de volgende nacht verder",
+    auto=Auto(naam="Grote", capaciteit_kwh=77.0, soc=20.0, fasen=1, max_amps=16.0, meldt_soc=False),
+    schema_aan=False, begin="2026-09-07 20:25", kabel_erin="20:30", duur_uren=31, gebeurtenissen=[],
+)
 
 
 # Een Growatt (v0.150.0). De eigenaar op 22-10-2026: de Growatt sturen vanuit de coach, voor
@@ -1795,6 +1825,7 @@ ALLE = [
     vast_zon_modus, bewolkt_zon_modus, half_zon_modus, dyn_continu,
     batterij_helpt_auto, batterij_helpt_auto_nacht, batterij_helpt_auto_zonder_nacht,
     voorrang_auto_eerst, voorrang_accu_eerst, vast_kruimelzon, vast_na_salderen, vast_na_salderen_leeg, pt_bihorario,
+    pt_zonder_accustand, pt_zonder_accustand_groot, dyn_zonder_accustand, dyn_zonder_accustand_donker,
     vast_kosten_kwh, vast_kosten_schalen, vast_kosten_overschot, vast_kosten_overschot_netto, dyn_salderen_vol,
     planning_auto_eerst, planning_accu_eerst,
     *HERSTART,

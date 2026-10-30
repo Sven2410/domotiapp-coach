@@ -3823,6 +3823,87 @@ controle("twee apparaten met elk een andere fase: onbekend, en allebei genoemd",
 controle("een apparaat op drie fasen zegt niets over de fase van de groep",
          planner.groep_fase(anker, [{"id": "p", "circuit": "anker", "phase": "drie"}], GROEPEN) == ("", []))
 
+print("=== zonder accustand, in de goedkope uren: het vinkje bij de paal (v0.185.0) ===")
+# De eigenaar op 30-10-2026: "gewoon vol vermogen laden in de goedkope uren. Dat moet een instelling
+# worden in de coach." Een klant in Portugal, bi-horário: vazio van 22:00 tot 08:00.
+VAZIO80 = 0.166
+FORA80 = 0.272
+
+
+def pt80(begin, uren=48, kwartier=True):
+    """Bi-horário per kwartier, zoals `_pt_rijen` in coach.py."""
+    stap = dt.timedelta(minutes=15 if kwartier else 60)
+    rijen, t0 = [], begin.replace(minute=0, second=0, microsecond=0)
+    for i in range(int(uren * dt.timedelta(hours=1) / stap)):
+        s0 = t0 + i * stap
+        rijen.append({"start": s0, "end": s0 + stap,
+                      "price": VAZIO80 if (s0.hour >= 22 or s0.hour < 8) else FORA80})
+    return rijen
+
+
+def blokpaal80(**kw):
+    return Charger(max_amps=16.0, connected=True, charging=False, actual_amps=0.0, goedkoop_blok=True, **kw)
+
+
+ZONDER80 = Car(capacity_kwh=60.0, phases=1, soc_percent=None)
+avond80 = dt.datetime(2026, 10, 30, 20, 30)
+d80 = decide(avond80, pt80(avond80), NET_LEEG, ZONDER80, blokpaal80(), Window(enabled=False))
+print(f"  20:30: {d80.rule} {d80.amps} A {d80.hold_minutes} min: {d80.reason}")
+controle("om 20:30 wacht hij op het goedkope blok, en de paal houdt dat tot 22:00 vast",
+         d80.rule == "blok-wacht" and not d80.charge and d80.hold_minutes == 90 and "22:00" in d80.reason,
+         f"{d80}")
+controle("zonder te vragen om de accustand", not d80.needs_soc, "")
+nacht80 = dt.datetime(2026, 10, 30, 22, 0)
+d80b = decide(nacht80, pt80(nacht80), NET_LEEG, ZONDER80, blokpaal80(), Window(enabled=False))
+print(f"  22:00: {d80b.rule} {d80b.amps} A: {d80b.reason}")
+controle("om 22:00 op vol vermogen, tot 08:00", d80b.rule == "blok" and d80b.amps == 16 and "08:00" in d80b.reason,
+         f"{d80b}")
+# Ook met een klaar-tijd van 06:00 en een lege accu: de klaar-tijd telt niet (de keuze van de klant).
+klaar80 = Window(enabled=True, opens=None, deadline=dt.datetime(2026, 10, 31, 6, 0))
+middag80 = dt.datetime(2026, 10, 30, 15, 0)
+d80c = decide(middag80, pt80(middag80), NET_LEEG, ZONDER80, blokpaal80(), klaar80, must_finish=True)
+controle("om 15:00 met een klaar-tijd en een accu van 60 kWh: toch wachten, geen klaar-tijdregel",
+         d80c.rule == "blok-wacht" and not d80c.charge, f"{d80c.rule}")
+d80d = decide(dt.datetime(2026, 10, 31, 9, 0), pt80(dt.datetime(2026, 10, 31, 9, 0)), NET_LEEG, ZONDER80,
+              blokpaal80(), klaar80, overdue=True)
+controle("de klaar-tijd voorbij en niet vol: geen doorladen in een duur uur",
+         d80d.rule == "blok-wacht" and not d80d.charge, f"{d80d.rule}")
+# Zon gaat er altijd in, en Snel gaat voor.
+d80e = decide(middag80, pt80(middag80), zon_net(2500.0), ZONDER80, blokpaal80(), Window(enabled=False))
+controle("zon gaat er altijd in", d80e.rule == "surplus" and d80e.charge and d80e.amps == 10, f"{d80e.rule} {d80e.amps}")
+d80f = decide(middag80, pt80(middag80), NET_LEEG, ZONDER80, blokpaal80(boost=True), Window(enabled=False))
+controle("Snel gaat voor", d80f.rule == "boost" and d80f.charge, f"{d80f.rule}")
+# Het vinkje uit: zoals altijd (geen accustand, geen klaar-tijd: laden binnen je tijden).
+d80g = decide(avond80, pt80(avond80), NET_LEEG, ZONDER80,
+              Charger(max_amps=16.0, connected=True, charging=False, actual_amps=0.0), Window(enabled=False))
+controle("met het vinkje uit verandert er niets", d80g.rule == "fixed-tariff" and d80g.charge, f"{d80g.rule}")
+
+# Het blok: bij twee tarieven het hele goedkope tijdvak, bij een dynamisch contract het goedkoopste uur.
+blok80 = planner.blok_van(nacht80, pt80(nacht80), nacht80 + dt.timedelta(hours=24))
+controle("bi-horário: het blok is vazio, van 22:00 tot 08:00",
+         blok80[0]["start"] == nacht80 and blok80[-1]["end"] == dt.datetime(2026, 10, 31, 8, 0) and len(blok80) == 40,
+         f"{blok80[0]['start']} {blok80[-1]['end']} {len(blok80)}")
+dyn80 = [{"start": nacht80 + dt.timedelta(minutes=15 * i), "end": nacht80 + dt.timedelta(minutes=15 * (i + 1)),
+          "price": 0.30 - 0.001 * i if i < 20 else 0.20 + 0.001 * i} for i in range(96)]
+blok80d = planner.blok_van(nacht80, dyn80, nacht80 + dt.timedelta(hours=24))
+controle("dynamisch per kwartier: de vier goedkoopste kwartieren, een uur",
+         [r["start"].strftime("%H:%M") for r in blok80d] == ["03:00", "03:15", "03:30", "03:45"], f"{[(r['start'].strftime('%H:%M'), r['price']) for r in blok80d]}")
+# Zonder prijzen: bij een vast contract kost elk uur hetzelfde, maar niet in de avondpiek; bij een
+# dynamisch contract wacht hij.
+d80h = decide(middag80, [], NET_LEEG, ZONDER80, blokpaal80(), Window(enabled=False), tariff=VAST)
+controle("vast contract zonder prijslijst: meteen op vol vermogen", d80h.rule == "blok" and d80h.amps == 16, f"{d80h}")
+d80i = decide(dt.datetime(2026, 10, 30, 18, 30), [], NET_LEEG, ZONDER80, blokpaal80(), Window(enabled=False), tariff=VAST)
+controle("vast contract in de avondpiek: wachten tot 20:00",
+         d80i.rule == "blok-wacht" and not d80i.charge and d80i.hold_minutes == 90, f"{d80i}")
+d80j = decide(middag80, [], NET_LEEG, ZONDER80, blokpaal80(), Window(enabled=False))
+controle("dynamisch zonder prijzen: wachten", d80j.rule == "no-prices" and not d80j.charge, f"{d80j.rule}")
+# Een sessie die loopt als het blok voorbij is, stopt meteen: geen paar minuten doorladen in een duur uur.
+loopt80 = blokpaal80()
+loopt80.charging, loopt80.actual_amps, loopt80.started_at = True, 16.0, dt.datetime(2026, 10, 31, 7, 58)
+d80k = decide(dt.datetime(2026, 10, 31, 8, 0), pt80(dt.datetime(2026, 10, 31, 8, 0)), NET_LEEG, ZONDER80, loopt80,
+              Window(enabled=False))
+controle("om 08:00 stopt hij, ook als hij net begonnen was", not d80k.charge and d80k.rule == "blok-wacht", f"{d80k.rule}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

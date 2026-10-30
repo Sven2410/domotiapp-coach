@@ -1006,9 +1006,23 @@ class DacViewDevices extends DacEditorElement {
         </span>
       </label>`
       : "";
+    // Zonder accustand, in de goedkope uren (v0.185.0). De eigenaar op 30-10-2026: "De klant wilt
+    // niet telkens de accustand doorgeven. gewoon vol vermogen laden in de goedkope uren. Dat moet
+    // een instelling worden in de coach." Standaard uit.
+    const blokHtml = device.type === "laadpaal" && stuurbaar
+      ? `
+      <label class="check" for="blok-${index}">
+        <input type="checkbox" id="blok-${index}" data-field="goedkoop_blok" data-index="${index}"
+               ${device.goedkoop_blok ? "checked" : ""}>
+        <span>
+          <strong>${t("Zonder accustand, in de goedkope uren")}</strong>
+          ${t("Voor een auto die zijn accustand niet doorgeeft. De coach vraagt er nooit om, en laadt van het net alleen in het goedkoopste blok van het komende etmaal, op vol vermogen tot de auto zelf stopt. Zon gaat er altijd in, en Snel ook. De klaar-tijd telt dan niet: is de auto 's ochtends niet vol, dan is dat zo gekozen. Bij een dynamisch contract is het blok het goedkoopste uur, en dat is minder precies dan met een accustand.")}
+        </span>
+      </label>`
+      : "";
     return `
       <div class="block">
-      <div class="block-title">${t("Sturen")}</div>${groepHtml}${this.faseHtml_(device, index)}${faseHtml}
+      <div class="block-title">${t("Sturen")}</div>${groepHtml}${this.faseHtml_(device, index)}${faseHtml}${blokHtml}
       <label class="check" for="control-${index}">
         <input type="checkbox" id="control-${index}" data-field="controllable" data-index="${index}"
                ${device.controllable ? "checked" : ""}>
@@ -1797,6 +1811,8 @@ class DacViewDevices extends DacEditorElement {
           device.always_on = el.checked;
         } else if (field === "phase_switching") {
           device.phase_switching = el.checked;
+        } else if (field === "goedkoop_blok") {
+          device.goedkoop_blok = el.checked;
         } else {
           device[field] = el.value;
         }
