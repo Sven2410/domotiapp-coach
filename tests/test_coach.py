@@ -5758,9 +5758,12 @@ try:
 
     # De sensorwacht onthoudt wat hij al meldde.
     inst107e = instellingen()
-    hass107e, _, coach107e = bouw({**huis(), "sensor.l3": "unavailable"}, inst107e)
+    hass107e, _, coach107e = bouw(huis(), inst107e)
     stil107 = "sensor.l3"
     coach107e._restore(inst107e)
+    # Eerst doet hij het: een sensor die nog nooit iets meldde heeft sinds v0.184.0 een eigen melding.
+    asyncio.run(coach107e._async_sensorwacht(inst107e, NU107 - dt.timedelta(minutes=1)))
+    hass107e.states.zet(stil107, "unavailable")
     asyncio.run(coach107e._async_sensorwacht(inst107e, NU107))
     asyncio.run(coach107e._async_sensorwacht(inst107e, NU107 + dt.timedelta(minutes=11)))
     kritiek107 = [d for d in hass107e.services.verstuurd if d[0] == "notify" and "meldt al" in d[2].get("message", "")]
@@ -6365,6 +6368,8 @@ try:
     controle("de lijst van Nord Pool is al opgehaald, voor vandaag", gevraagd115[:1] == [NU115.date().isoformat()],
              f"{gevraagd115}")
 
+    # Eerst doet hij het: een sensor die nog nooit iets meldde heeft sinds v0.184.0 een eigen melding.
+    asyncio.run(coach115._async_sensorwacht(inst115, NU115 - dt.timedelta(minutes=1)))
     hass115.states.zet("sensor.frank_prijs", "unavailable")
     nu115 = [r for r in coach115._prices(inst115) if r["start"] <= NU115 < r["end"]]
     verwacht115 = (0.100 + 0.1088 + 0.02) * 1.21
@@ -7554,6 +7559,8 @@ controle("met een ventilator bewaakt de coach de temperatuursensor",
          coach135._sensoren(uit135).get("sensor.batterij_temp") == "de temperatuur van Accu", "")
 niets135 = {**zonder135, "notifications": uit135["notifications"]}
 controle("zonder melding en zonder ventilator niet", "sensor.batterij_temp" not in coach135._sensoren(niets135), "")
+# Eerst doet hij het: een sensor die nog nooit iets meldde heeft sinds v0.184.0 een eigen melding.
+asyncio.run(coach135._async_sensorwacht(inst135, T135 + dt.timedelta(minutes=99)))
 hass135.states.zet("sensor.batterij_temp", "unavailable")
 hass135.services.verstuurd.clear()
 for minuten in (100, 111):
@@ -12845,6 +12852,7 @@ try:
     # Vier integraties tegelijk stil: één melding, het internet, en kritiek om de temperatuur.
     sys.modules["homeassistant.helpers.entity_registry"] = register216(VIER216)
     hass216, _, coach216 = bouw(huis216(), inst216)
+    asyncio.run(coach216._async_geheugen_laden())
     coach216._restore(inst216)
     # Eerst doen ze het: alleen wat het eerst deed telt voor het internet (v0.178.0).
     wacht216(coach216, inst216, -1)
@@ -12872,7 +12880,9 @@ try:
     # De herstart halverwege: niets dubbel, en terug is één regel in de geschiedenis.
     voor216 = len(meldingen216(hass216))
     hass216.services.verstuurd.clear()
-    coach216b = coachmod.ChargerCoach(hass216)
+    coach216._meldingen_onthouden()
+    coach216b = herstart213(hass216)
+    asyncio.run(coach216b._async_geheugen_laden())
     coach216b._restore(inst216)
     for m in (20, 30, 45):
         wacht216(coach216b, inst216, m)
@@ -12894,6 +12904,7 @@ try:
     sys.modules["homeassistant.helpers.entity_registry"] = register216(EEN216)
     inst216c = instellingen(devices=[LAADPAAL, KOEL216, VRIES216, WAS216, DROOG216])
     hass216c, _, coach216c = bouw(huis216(), inst216c)
+    wacht216(coach216c, inst216c, -1)
     for e in STIL216:
         hass216c.states.zet(e, "unavailable")
     for m in (0, 11):
@@ -12908,6 +12919,7 @@ try:
     sys.modules["homeassistant.helpers.entity_registry"] = register216(VIER216)
     inst216d = instellingen(devices=[LAADPAAL, KOEL216, VRIES216, WAS216, DROOG216])
     hass216d, _, coach216d = bouw(huis216(), inst216d)
+    wacht216(coach216d, inst216d, -1)
     for e in ("sensor.koel_temp", "sensor.vries_temp"):
         hass216d.states.zet(e, "unavailable")
     wacht216(coach216d, inst216d, 0)
@@ -12928,6 +12940,7 @@ try:
     # Een droger die de coach alleen meeleest: een gewone melding, geen kritiek, en geen "rekent zonder".
     inst216e = instellingen(devices=[LAADPAAL, DROOG216])
     hass216e, _, coach216e = bouw(huis216(), inst216e)
+    wacht216(coach216e, inst216e, -1)
     hass216e.states.zet("sensor.droog", "unavailable")
     for m in (0, 11):
         wacht216(coach216e, inst216e, m)
@@ -12944,7 +12957,9 @@ try:
 
     # Eén sensor alleen geeft de melding van voorheen.
     inst216f = instellingen()
-    hass216f, _, coach216f = bouw({**huis(), "sensor.l3": "unavailable"}, inst216f)
+    hass216f, _, coach216f = bouw(huis(), inst216f)
+    wacht216(coach216f, inst216f, -1)
+    hass216f.states.zet("sensor.l3", "unavailable")
     for m in (0, 11):
         wacht216(coach216f, inst216f, m)
     los216 = [g for g in meldingen216(hass216f) if "niets" in g["message"]]
@@ -13249,8 +13264,10 @@ try:
         asyncio.run(coach219e._async_sensorwacht(inst219e, T219 + dt.timedelta(minutes=m)))
     stil219 = [m for _k, m in lijst219(hass219e) if "niets" in m]
     print(f"  {stil219}")
+    # Sinds v0.184.0 zonder "hapert": ze hebben nog nooit iets gemeld (proef 224).
     controle("vijf vermogens die nog nooit iets zeiden: niet het internet",
-             len(stil219) == 1 and "internet" not in stil219[0] and "hapert" in stil219[0], f"{stil219}")
+             len(stil219) == 1 and "internet" not in stil219[0] and "hapert" not in stil219[0]
+             and "nog niets gemeld sinds ze in de coach staan" in stil219[0], f"{stil219}")
     # Wat het eerst deed en dan samen wegvalt, is wel het internet; ook na een herstart.
     hass219f, _, coach219f = bouw({**huis(), **{f"switch.p{i}": "on" for i in range(1, 6)},
                                    **{f"sensor.p{i}_w": "5" for i in range(1, 6)}}, inst219e)
@@ -13615,6 +13632,112 @@ valt223(hass223e, (5,), 2, "on")
 for s223 in (2, 60, 121, 180):
     ronde223(coach223e, inst223e, s223)
 controle("twee seconden weg: geen melding en geen regel", lijst219(hass223e) == [], f"{lijst219(hass223e)}")
+
+print("=== 224. een paal zonder auto en een sensor die nog nooit iets meldde: geen kritieke melding (v0.184.0) ===")
+# In een klantwoning op 30-10-2026 kwam er een Easee bij, zonder auto. Zijn vermogen en stroom bleven
+# `unknown`, want zonder auto meldt de Easee ze niet. Om 18:13 zei de sensorwacht dat de integratie
+# haperde, als kritiek, terwijl de paal nog op alleen meten stond. Om 18:20, een minuut nadat de coach
+# hem mocht sturen, kwam de melding dat hij het vermogen van de paal niet kon lezen.
+T224 = dt.datetime(2026, 10, 30, 18, 3)
+
+
+def wacht224(coach, inst, minuten):
+    asyncio.run(coach._async_sensorwacht(inst, T224 + dt.timedelta(minutes=minuten)))
+
+
+def lijst224(hass, vanaf=0):
+    return [(g["kind"], g["message"]) for g in asyncio.run(coachmod.async_get_meldingen(hass).async_list())[vanaf:]]
+
+
+def nieuw224(controllable):
+    inst = instellingen(devices=[{**LAADPAAL, "controllable": controllable}])
+    waarden = {**huis(status="disconnected"), "sensor.laadpaal_vermogen": "unknown", "sensor.laadpaal_stroom": "unknown"}
+    hass, _, coach = bouw(waarden, inst)
+    asyncio.run(coach._async_geheugen_laden())
+    return hass, inst, coach
+
+
+# 1. Een paal die de coach niet stuurt telt als meelezen.
+meelezen224 = coachmod.ChargerCoach._sensoren_meelezen(instellingen(devices=[{**LAADPAAL, "controllable": False}]))
+controle("een paal die de coach niet stuurt: zijn sensoren lezen alleen mee",
+         {"sensor.laadpaal_vermogen", "sensor.laadpaal_stroom", "sensor.laadpaal_status"} <= meelezen224, f"{meelezen224}")
+controle("een paal die hij wel stuurt niet",
+         not coachmod.ChargerCoach._sensoren_meelezen(instellingen(devices=[LAADPAAL])) & {"sensor.laadpaal_vermogen"}, "")
+
+# De nieuwe Easee, eerst alleen meten, en een herstart halverwege: niets over vermogen en stroom.
+hass224, inst224, coach224 = nieuw224(False)
+for m in (0, 5):
+    wacht224(coach224, inst224, m)
+coach224._meldingen_onthouden()
+coach224 = herstart213(hass224)
+asyncio.run(coach224._async_geheugen_laden())
+for m in (10, 11, 15, 30):
+    wacht224(coach224, inst224, m)
+controle("een nieuwe paal zonder auto, vermogen en stroom onbekend: geen melding, ook na een herstart",
+         lijst224(hass224) == [], f"{lijst224(hass224)}")
+
+# 2. Een sensor die nog nooit iets meldde: een gewone melding, zonder "hapert".
+hass224b, _, coach224b = bouw({**huis(), "sensor.l3": "unknown"}, instellingen())
+inst224b = instellingen()
+asyncio.run(coach224b._async_geheugen_laden())
+for m in (0, 5):
+    wacht224(coach224b, inst224b, m)
+coach224b._meldingen_onthouden()
+coach224b = herstart213(hass224b)
+asyncio.run(coach224b._async_geheugen_laden())
+# De klok van de sensorwacht begint na een herstart opnieuw, net als bij een sensor die werkte.
+for m in (10, 15, 21):
+    wacht224(coach224b, inst224b, m)
+nooit224 = lijst224(hass224b)
+print(f"  {nooit224}")
+controle("een sensor die nog nooit iets meldde: één gewone melding, ook over een herstart heen",
+         nooit224 == [("melding", "De stroommeting van fase L3 heeft nog niets gemeld sinds hij in de coach staat.")],
+         f"{nooit224}")
+hass224b.states.zet("sensor.l3", "2")
+wacht224(coach224b, inst224b, 22)
+controle("komt hij er, dan doet hij het nu, niet weer",
+         lijst224(hass224b, 1) == [("melding", "De stroommeting van fase L3 doet het nu.")], f"{lijst224(hass224b, 1)}")
+# Valt hij daarna stil, met een herstart halverwege, dan is het kritiek zoals voorheen.
+hass224b.states.zet("sensor.l3", "unavailable")
+wacht224(coach224b, inst224b, 23)
+coach224b._meldingen_onthouden()
+coach224b = herstart213(hass224b)
+asyncio.run(coach224b._async_geheugen_laden())
+for m in (25, 30, 36):
+    wacht224(coach224b, inst224b, m)
+stil224 = lijst224(hass224b, 2)
+controle("een sensor die werkte en stilvalt: kritiek, ook na een herstart halverwege",
+         stil224 == [("kritiek", "De stroommeting van fase L3 meldt al 11 minuten niets. Waarschijnlijk hapert de "
+                                 "integratie erachter. De coach rekent zolang zonder.")], f"{stil224}")
+
+# 4. De paal die de coach stuurt, zonder auto: het vermogen telt als 0 W, geen tip en geen melding.
+hass224c, inst224c, coach224c = nieuw224(True)
+paal224 = inst224c["devices"][0]
+tel224 = []
+for m in range(0, 8):
+    asyncio.run(ronde(coach224c, inst224c, T224 + dt.timedelta(minutes=m), paal224))
+    tel224 += [d[2]["message"] for d in hass224c.services.verstuurd if d[0] == "notify"]
+coach224c._meldingen_onthouden()
+coach224c = herstart213(hass224c)
+asyncio.run(coach224c._async_geheugen_laden())
+for m in range(8, 16):
+    asyncio.run(ronde(coach224c, inst224c, T224 + dt.timedelta(minutes=m), paal224))
+    tel224 += [d[2]["message"] for d in hass224c.services.verstuurd if d[0] == "notify"]
+for m in (0, 11, 15):
+    wacht224(coach224c, inst224c, m)
+print(f"  zonder auto: {tel224} tip {coach224c.state['dev-laadpaal'].get('tip')!r} stil {coach224c._net_stil_sinds}")
+controle("een gestuurde paal zonder auto en zonder vermogen: geen melding, ook na een herstart",
+         tel224 == [] and [g for g in lijst224(hass224c) if g[0] != "besluit"] == [], f"{tel224} {lijst224(hass224c)}")
+controle("en geen tip op de kaart", not coach224c.state["dev-laadpaal"].get("tip") and coach224c._net_stil_sinds is None,
+         f"{coach224c.state['dev-laadpaal'].get('tip')} {coach224c._net_stil_sinds}")
+# De auto plugt in en het vermogen blijft weg: de melding zoals voorheen.
+hass224c.states.zet("sensor.laadpaal_status", "awaiting_start")
+met224 = []
+for m in range(16, 30):
+    asyncio.run(ronde(coach224c, inst224c, T224 + dt.timedelta(minutes=m), paal224))
+    met224 += [d[2]["message"] for d in hass224c.services.verstuurd if d[0] == "notify"]
+controle("met een auto eraan en geen vermogen: de melding over het vermogen van de paal",
+         len([m for m in met224 if "vermogen van je laadpaal" in m]) == 1, f"{met224}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

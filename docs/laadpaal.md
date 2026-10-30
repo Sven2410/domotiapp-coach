@@ -1348,6 +1348,34 @@ staat in `GeheugenStore` (`meldingen`), zodat een internetstoring vlak na een he
 heet. Nog niet gebouwd, en voor de eigenaar om te beslissen: "internet" alleen als er ook sensoren buiten de
 bundel stil zijn. Proef 219.
 
+**Sinds v0.184.0 geeft een sensor die nog nooit iets meldde geen kritieke melding.** In een klantwoning op
+30-10-2026 kwam er een Easee bij, zonder auto en eerst alleen meten. Zijn vermogen en stroom bleven `unknown`,
+want zonder auto meldt een Easee ze niet, ook niet na het herladen van de integratie. Twee meldingen waren
+onterecht:
+- **18:13, de sensorwacht, kritiek:** "Waarschijnlijk hapert de integratie erachter." De integratie liep gewoon:
+  de spanning, de teller en `online` kwamen binnen.
+- **18:20, `_nettip`:** een minuut nadat de coach de paal mocht sturen, zei de melding dat hij het vermogen van
+  de paal niet kon lezen.
+
+Er zijn drie regels bij gekomen:
+- **Een paal die de coach niet stuurt** (`controllable` uit) leest alleen mee (`_sensoren_meelezen`). Een sensor
+  die zwijgt is dan een gewone melding, zoals bij een droger die de coach alleen uitleest.
+- **Een sensor die nog nooit iets meldde** (niet in `_sensor_ooit`) krijgt een eigen gewone melding, zonder
+  "hapert": "De stroommeting van fase L3 heeft nog niets gemeld sinds hij in de coach staat." Komt hij er, dan
+  staat "... doet het nu." in de geschiedenis.
+  - `_sensor_ooit` staat in `GeheugenStore`. Een sensor die werkte en midden in een storing een herstart
+    meemaakt, blijft dus kritiek.
+- **Een paal die zelf zegt dat er geen auto aan hangt** (`_paal_zonder_auto`: `disconnected` in de status, of
+  de kabelmelding uit bij een Alfen) trekt niets.
+  - Een vermogen dat dan `unknown` is, telt als 0 W, dus zonder `_net_stil_sinds`, tip of melding. Het
+    vermogen en de stroom van zo'n paal tellen dan ook niet bij de sensorwacht.
+  - Alleen `unknown`: een paal die niet bereikbaar is (`unavailable`) is een storing en wordt gemeld zoals
+    altijd (proef 137).
+  - Plugt de auto in en blijft het vermogen weg, dan komt de melding zoals voorheen.
+
+Proef 224, met een herstart halverwege. Wat er nog zo is: de klok van tien minuten van de sensorwacht
+(`_sensor_stil`) begint na een herstart opnieuw.
+
 ## Een accustand die vastzit (v0.176.0)
 
 In een klantwoning stond de accustand van een bus op 28-10-2026 de hele dag op 25%. Er gingen in twee beurten

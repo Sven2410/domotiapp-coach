@@ -2442,22 +2442,36 @@ class ChargerCoach:
             for car in device.get("cars") or []
             if car.get("soc_entity")
         }
+        # Het vermogen en de stroom van een paal zonder auto (v0.184.0): een Easee meldt ze dan niet,
+        # en ze blijven `unknown`. Niet bereikbaar blijft een storing.
+        zonder_auto = {
+            entity_id
+            for device in settings.get("devices") or []
+            if device.get("type") == "laadpaal" and self._paal_zonder_auto(device.get("entities") or {})
+            for entity_id in (device.get("entity"), (device.get("entities") or {}).get("current"))
+            if entity_id
+        }
         stil_nu: list[tuple[str, str, datetime, timedelta]] = []
         terug: list[str] = []
+        nu_wel: list[str] = []
         for entity_id, naam in self._sensoren(settings).items():
             state = self.hass.states.get(entity_id)
             stil = state is None or state.state in ("unknown", "unavailable", "")
-            if stil and entity_id in zonnen and self._zon_slaapt():
+            if stil and (entity_id in zonnen and self._zon_slaapt()
+                         or entity_id in zonder_auto and state is not None and state.state == "unknown"):
                 # Een omvormer die slaapt is geen storing. De klok begint pas
-                # als de zon hoog genoeg staat om hem wakker te maken.
+                # als de zon hoog genoeg staat om hem wakker te maken. Een paal
+                # zonder auto die zijn vermogen niet meldt ook niet.
                 self._sensor_stil.pop(entity_id, None)
                 continue
             sinds = self._sensor_stil.get(entity_id)
             if not stil:
+                nieuw = entity_id not in self._sensor_ooit
                 self._sensor_ooit.add(entity_id)
                 if entity_id in self._sensor_gemeld:
                     self._sensor_gemeld.discard(entity_id)
-                    terug.append(naam)
+                    # Wat nog nooit iets meldde doet het nu, niet weer (v0.184.0).
+                    (nu_wel if nieuw else terug).append(naam)
                 self._sensor_stil.pop(entity_id, None)
                 continue
             if sinds is None:
@@ -2474,6 +2488,14 @@ class ChargerCoach:
                 t("{naam} doet het weer.", naam=namen[0]) if len(namen) == 1
                 else t("{namen} doen het weer.", namen=t("{voor} en {laatste}", voor=", ".join(namen[:-1]),
                                                          laatste=namen[-1])),
+                telefoon=False,
+            )
+        if nu_wel:
+            namen = [f"{nu_wel[0][0].upper()}{nu_wel[0][1:]}", *nu_wel[1:]]
+            await self._async_tell(
+                t("{naam} doet het nu.", naam=namen[0]) if len(namen) == 1
+                else t("{namen} doen het nu.", namen=t("{voor} en {laatste}", voor=", ".join(namen[:-1]),
+                                                       laatste=namen[-1])),
                 telefoon=False,
             )
         if any(now - sinds >= grens for _e, _n, sinds, grens in stil_nu):
@@ -2496,7 +2518,29 @@ class ChargerCoach:
     async def _async_sensoren_stil(
         self, settings: dict[str, Any], bundel: list[tuple[str, str, datetime, timedelta]], now: datetime
     ) -> None:
-        """Eén melding voor de sensoren die samen stilvielen (v0.175.0)."""
+        """Eén melding voor de sensoren die samen stilvielen (v0.175.0).
+
+        Een sensor die nog nooit iets meldde (`_sensor_ooit`, in `GeheugenStore`) krijgt sinds
+        v0.184.0 een eigen gewone melding, zonder "hapert" en zonder kritiek. Bij een klant op
+        30-10-2026 kwam er een nieuwe laadpaal bij zonder auto: zijn vermogen bleef `unknown`, de
+        integratie liep gewoon, en toch was het kritiek dat de integratie haperde.
+        """
+        nooit = [rij for rij in bundel if rij[0] not in self._sensor_ooit]
+        bundel = [rij for rij in bundel if rij[0] in self._sensor_ooit]
+        if nooit:
+            for entity_id, _naam, sinds, _grens in nooit:
+                self._sensor_gemeld.add(entity_id)
+                _LOGGER.warning("%s heeft nog nooit iets gemeld (%d minuten)", entity_id,
+                                int(_tussen(sinds, now).total_seconds() // 60))
+            namen = [naam for _e, naam, _s, _g in nooit]
+            namen[0] = f"{namen[0][0].upper()}{namen[0][1:]}"
+            await self._async_tell(
+                t("{naam} heeft nog niets gemeld sinds hij in de coach staat.", naam=namen[0]) if len(namen) == 1
+                else t("{namen} hebben nog niets gemeld sinds ze in de coach staan.",
+                       namen=t("{voor} en {laatste}", voor=", ".join(namen[:-1]), laatste=namen[-1])),
+            )
+        if not bundel:
+            return
         temperaturen = {
             device["entities"]["temperature"]
             for device in settings.get("devices") or []
@@ -2512,8 +2556,7 @@ class ChargerCoach:
                 # Alleen wat het eerst deed (v0.178.0): een sensor die nog nooit iets zei, zoals
                 # een stekker die net is toegevoegd en nog niet aan het net hangt, zegt niets over
                 # het internet. Bij een klant op 29-10-2026 heette vijf nieuwe stekkers zo "het internet".
-                if entity_id not in self._sensor_ooit:
-                    continue
+                # Sinds v0.184.0 zitten die hier niet meer in; ze hebben hun eigen melding.
                 rij = register.async_get(entity_id)
                 entry_id = getattr(rij, "config_entry_id", None) if rij is not None else None
                 if entry_id:
@@ -2581,13 +2624,15 @@ class ChargerCoach:
 
         Een wasmachine of droger zonder "mag sturen", en een batterij die hij alleen leest: de coach
         doet er niets mee, dus een sensor die zwijgt is geen kritieke melding. De temperatuur van zo'n
-        apparaat telt wel, als er een melding of een ventilator aan hangt (`_temp_nodig`).
+        apparaat telt wel, als er een melding of een ventilator aan hangt (`_temp_nodig`). Sinds
+        v0.184.0 ook een laadpaal die de coach niet stuurt.
         """
         uit: set[str] = set()
         for device in settings.get("devices") or []:
             alleen = (
                 (device.get("type") in PROGRAMMA_TYPES and _programma_alleen_lezen(device))
                 or (device.get("type") == "thuisbatterij" and device.get("brand") in BATTERIJ_ALLEEN_LEZEN)
+                or (device.get("type") == "laadpaal" and not device.get("controllable"))
             )
             if not alleen:
                 continue
@@ -2600,6 +2645,16 @@ class ChargerCoach:
                 ):
                     uit.add(waarde)
         return uit
+
+    def _paal_zonder_auto(self, entities: dict[str, Any]) -> bool:
+        """De paal zegt zelf dat er geen auto aan hangt (v0.184.0).
+
+        Een Easee met `disconnected` in zijn status, een Alfen met de kabelmelding uit. Zegt hij
+        niets, dan weet de coach het niet en is het geen "geen auto".
+        """
+        if entities.get("status"):
+            return "disconnect" in _text(self.hass, entities["status"])
+        return bool(entities.get("connected")) and _text(self.hass, entities["connected"]).strip() == "off"
 
     @staticmethod
     def _eigen_entiteiten(settings: dict[str, Any]) -> set[str]:
@@ -11118,6 +11173,12 @@ class ChargerCoach:
         laadvermogen = self._volgehouden(
             device.get("entity"), _watts(self.hass, device.get("entity")), now
         )
+        # Een paal zonder auto trekt niets, ook als hij zijn vermogen niet meldt (v0.184.0). Een
+        # Easee zonder auto liet het in een klantwoning op 30-10-2026 op `unknown` staan, ook na het
+        # herladen van de integratie, en dan kwam de melding over het vermogen van de paal.
+        # Alleen `unknown`: een paal die niet bereikbaar is, is een storing (proef 137).
+        if laadvermogen is None and _text(self.hass, device.get("entity")) == "unknown" and self._paal_zonder_auto(entities):
+            laadvermogen = 0.0
 
         # De netmeting is niet te lezen. Dan is de zon onbekend en niet nul, dus
         # er wordt niet op gestuurd; de prijs- en klaar-tijdregels werken gewoon
