@@ -96,6 +96,34 @@ er gewoon.
   - welke ooit bereikbaar waren;
   - welke de gewone melding al kregen.
 
+## Vanaf het wegvallen zelf, en één regel terug (v0.183.0)
+
+In een klantwoning op 30-10-2026 om 07:42 vielen negen stekkers van de wifi, in twee groepjes
+13 seconden na elkaar. De bewoner kreeg toch twee kritieke meldingen, 70 seconden na elkaar. Om
+15:18 gebeurde het opnieuw: de vriezer en de warmhoudlade vielen in dezelfde seconde weg en
+kwamen in verschillende meldingen.
+
+- **De oorzaak.** De coach telde vanaf het moment waarop hij een stekker weg zág. De eerste
+  wisseling wekt hem (`_watch`), maar een wisseling die binnenkomt terwijl er al een ronde
+  loopt, wekt hem niet opnieuw (`_tick`, er loopt er maar één tegelijk). Die stekker zag hij
+  pas bij de volgende minuutronde. Bij de melding was hij dan 51 of 55 seconden weg, minder
+  dan `ALTIJD_AAN_BUNDEL`.
+- **Nu telt een stekker die niet bereikbaar is vanaf `last_changed` van zijn schakelaar**
+  (`_stekker_weg_sinds`), nooit later dan nu. Dat zet Home Assistant bij elke wisseling, ook
+  naar niet bereikbaar. Zo valt hij in dezelfde melding, en na een herstart telt hij vanaf
+  het echte wegvallen en niet vanaf de eerste ronde.
+- **Uit telt nog vanaf nu.** Daar is de wachttijd hoe lang de coach al probeert hem aan te
+  zetten. Vanaf `last_changed` zou een stekker die al uren uit stond meteen "de coach krijgt
+  hem niet aan" krijgen, voor de coach het geprobeerd heeft.
+- **Terug in één regel.** Om 07:59 kwamen ze binnen elf seconden allemaal terug, en dat gaf
+  negen losse regels "... staat weer aan." Nu wacht die regel (`_stekker_terug`) tot er
+  niets meer weg is, of tot er een minuut voorbij is sinds de eerste terugkwam: "Wasmachine,
+  Droger en Vriezer staan weer aan." Hij gaat, net als voorheen, alleen in de geschiedenis.
+  - Valt een stekker binnen die minuut weer weg, dan was hij niet terug. Hij blijft gemeld,
+    zonder tweede kritieke melding.
+  - Wat er terug is staat ook in `GeheugenStore` (`stekker_terug`), dus een herstart
+    halverwege geeft nog steeds één regel.
+
 ## Ook een vaatwasser (v0.122.0)
 
 De eigenaar op 15-10-2026: "bij het apparaat vaatwasser ook de optie kunnen aanzetten dat
@@ -152,9 +180,10 @@ stekker als `power` en `energy`. Dat is iets toevoegen; het contract blijft 1.
 
 ## Proeven
 
-Proef 157, 158, 218 en 219 in test_coach.py (de bewaking, de meldingen, de niveaus, de sensorwacht, een
+Proef 157, 158, 218, 219 en 223 in test_coach.py (de bewaking, de meldingen, de niveaus, de sensorwacht, een
 volle ronde, de vaatwasser; de vriezer, de wasmachine op het vermogen van de stekker en de teller die
-zakt; vijf stekkers in één melding, een herstart halverwege, nieuwe stekkers en het internet), en zeven proeven "smart plug" in test_rapport.mjs (de lijst tegen const.py, naam en icoon, de
+zakt; vijf stekkers in één melding, een herstart halverwege, nieuwe stekkers en het internet; twee groepjes waarvan de tweede de coach niet wekt, een herstart terwijl
+de stekker wegvalt, en terug in één regel), en zeven proeven "smart plug" in test_rapport.mjs (de lijst tegen const.py, naam en icoon, de
 kaart, Apparaten en Meldingen, het blok Stekker bij alle vijf de types).
 
 ## Nog niet in het echt gezien

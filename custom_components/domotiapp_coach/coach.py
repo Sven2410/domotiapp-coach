@@ -276,6 +276,11 @@ ALTIJD_AAN_WACHT = timedelta(minutes=2)
 # `ALTIJD_AAN_WACHT`, dan gaan de stekkers die al een minuut weg zijn mee: de coach
 # zet een stekker binnen een seconde aan, dus na een minuut weet hij dat het niet lukte.
 ALTIJD_AAN_BUNDEL = timedelta(minutes=1)
+# Sinds v0.183.0 telt een stekker die niet bereikbaar is vanaf het moment waarop zijn
+# schakelaar wegviel (`last_changed`), niet vanaf het moment waarop de coach het zag. In een
+# klantwoning op 30-10-2026 vielen twee stekkers in dezelfde seconde weg; de coach zag de
+# tweede pas bij de volgende minuutronde, en ze kwamen in twee meldingen. Wat terugkomt wordt
+# ook één regel: wat binnen `ALTIJD_AAN_BUNDEL` terugkwam, of alles zodra niets meer weg is.
 # Welke apparaten "altijd aan" kunnen hebben. Een vaatwasser sinds v0.122.0: de
 # eigenaar op 15-10-2026, "sommige vaatwassers hangen namelijk ook aan een smart
 # plug om alles te meten." Een vriezer, koelkast, wasmachine en droger sinds
@@ -1414,6 +1419,14 @@ def _text(hass: HomeAssistant, entity_id: str | None) -> str:
     return "" if state is None else str(state.state).lower()
 
 
+def _opsomming(namen: list[tuple[str, str]]) -> str:
+    """Stekkers in één zin: de eerste met zijn naam vooraan, de rest zoals hij verderop heet."""
+    lijst = [namen[0][0], *(verder for _naam, verder in namen[1:])]
+    if len(lijst) == 1:
+        return lijst[0]
+    return t("{voor} en {laatste}", voor=", ".join(lijst[:-1]), laatste=lijst[-1])
+
+
 # De standen van Miele (de integratie `miele` van Home Assistant) in de woorden
 # van Home Connect, waar de rest van de coach mee rekent (v0.124.0; `DRAAIT`,
 # `KLAAR` in planner.py). "programmed" en "waiting_to_start" zijn: het
@@ -1709,6 +1722,9 @@ class ChargerCoach:
         self._stekker_ooit: set[str] = set()
         self._stekker_nieuw: set[str] = set()
         self._stekker_klok: dict[str, Any] = {}
+        # Sinds v0.183.0: welke gemelde stekkers terug zijn en sinds wanneer, voor één regel
+        # "staan weer aan" (zie `ALTIJD_AAN_BUNDEL`).
+        self._stekker_terug: dict[str, datetime] = {}
         # Welke vrijgaveschakelaars de stroom van hun eigen machine zijn, al in
         # het log gezet. Zie `_vrijgave_entiteit`.
         self._stroom_gemeld: set[tuple[str, str]] = set()
@@ -3098,6 +3114,8 @@ class ChargerCoach:
         # vooraan, naam verderop, sinds, soort). Soort: "weg" (niet bereikbaar), "nieuw" (nog
         # nooit bereikbaar), "uit".
         kandidaten: list[tuple[str, str, str, datetime, str]] = []
+        # Per stekker, in de volgorde van de instellingen: hoe hij vooraan en verderop heet.
+        namen: dict[str, tuple[str, str]] = {}
         for device in settings.get("devices") or []:
             plug = _altijd_aan(device)
             if not plug:
@@ -3107,7 +3125,12 @@ class ChargerCoach:
             naam = _stekker_naam(device)
             # Verderop in een opsomming "de vriezer", maar een eigen naam blijft zoals hij is.
             verder = naam if str(device.get("name") or "").strip() else naam[0].lower() + naam[1:]
+            namen[sleutel] = (naam, verder)
             stand = _text(self.hass, plug).strip()
+            if stand != "on" and sleutel in self._stekker_terug:
+                # Terug en meteen weer weg: dan was hij niet terug, en blijft hij gemeld.
+                self._stekker_terug.pop(sleutel)
+                self._stekker_gemeld.add(sleutel)
             if stand in ("on", "off") and sleutel not in self._stekker_ooit:
                 # Voor het eerst bereikbaar: wat er tot nu toe gemeld was, was "nog niet
                 # bereikbaar", en de klok voor "staat uit" begint nu pas.
@@ -3123,7 +3146,7 @@ class ChargerCoach:
                 self._stekker_klok_stop(sleutel)
                 if sleutel in self._stekker_gemeld:
                     self._stekker_gemeld.discard(sleutel)
-                    await self._async_tell(t("{naam} staat weer aan.", naam=naam), telefoon=False)
+                    self._stekker_terug.setdefault(sleutel, now)
                 elif sleutel in self._stekker_gezet:
                     await self._async_tell(
                         t("{naam} stond uit; de coach heeft hem weer aangezet.", naam=naam), telefoon=False
@@ -3131,7 +3154,9 @@ class ChargerCoach:
                 self._stekker_gezet.discard(sleutel)
                 continue
             if sleutel not in self._stekker_uit:
-                self._stekker_uit[sleutel] = now
+                # Uit telt vanaf nu, want de wachttijd is hoe lang de coach het al probeert.
+                # Niet bereikbaar telt vanaf het wegvallen zelf (v0.183.0).
+                self._stekker_uit[sleutel] = now if stand == "off" else self._stekker_weg_sinds(plug, now)
             if sleutel not in self._stekker_klok and now - self._stekker_uit[sleutel] < ALTIJD_AAN_WACHT:
                 # De ronde loopt eens per minuut; deze klok kijkt precies als
                 # de wachttijd om is, zodat de melding na twee minuten komt en
@@ -3165,6 +3190,31 @@ class ChargerCoach:
         self._stekker_gezet &= gezien
         self._stekker_nieuw &= gezien
         self._stekker_ooit &= gezien
+        self._stekker_terug = {k: v for k, v in self._stekker_terug.items() if k in gezien}
+        if self._stekker_terug and (
+            not self._stekker_gemeld or now - min(self._stekker_terug.values()) >= ALTIJD_AAN_BUNDEL
+        ):
+            terug = [namen[k] for k in namen if k in self._stekker_terug]
+            self._stekker_terug.clear()
+            await self._async_tell(
+                t("{naam} staat weer aan.", naam=terug[0][0]) if len(terug) == 1
+                else t("{namen} staan weer aan.", namen=_opsomming(terug)),
+                telefoon=False,
+            )
+
+    def _stekker_weg_sinds(self, entity_id: str, now: datetime) -> datetime:
+        """Wanneer de schakelaar van een stekker wegviel, nooit later dan `now` (v0.183.0).
+
+        Home Assistant zet `last_changed` bij elke wisseling van de toestand, ook naar niet
+        bereikbaar. Zonder toestand is `now` het enige wat de coach weet.
+        """
+        state = self.hass.states.get(entity_id)
+        gezet = getattr(state, "last_changed", None) if state is not None else None
+        if not isinstance(gezet, datetime):
+            return now
+        if gezet.tzinfo is not None:
+            gezet = dt_util.as_local(gezet).replace(tzinfo=None)
+        return min(gezet, now)
 
     async def _async_stekkers_melden(
         self, bundel: list[tuple[str, str, str, datetime, str]], now: datetime, mag: bool, telefoon: bool
@@ -3179,10 +3229,7 @@ class ChargerCoach:
         er niets aan doen. Valt hij later weg, nadat hij er was, dan is het wel kritiek.
         """
         def namen(rijen: list[tuple[str, str, str, datetime, str]]) -> str:
-            lijst = [rijen[0][1], *(k[2] for k in rijen[1:])]
-            if len(lijst) == 1:
-                return lijst[0]
-            return t("{voor} en {laatste}", voor=", ".join(lijst[:-1]), laatste=lijst[-1])
+            return _opsomming([(k[1], k[2]) for k in rijen])
 
         weg = [k for k in bundel if k[4] == "weg"]
         uit = [k for k in bundel if k[4] == "uit"]
@@ -14942,6 +14989,7 @@ class ChargerCoach:
             "stekker_nieuw": sorted(self._stekker_nieuw),
             "stekker_ooit": sorted(self._stekker_ooit),
             "stekker_sinds": {k: _naar_geheugen(v) for k, v in sorted(self._stekker_uit.items())},
+            "stekker_terug": {k: _naar_geheugen(v) for k, v in sorted(self._stekker_terug.items())},
             "sensor_ooit": sorted(self._sensor_ooit),
             "soc_gevraagd": sorted(self._soc_asked),
             "getipt": dict(sorted(self._getipt.items())),
@@ -14973,6 +15021,8 @@ class ChargerCoach:
         self._stekker_ooit |= {str(k) for k in lijst("stekker_ooit")}
         for k, v in momenten("stekker_sinds").items():
             self._stekker_uit.setdefault(k, v)
+        for k, v in momenten("stekker_terug").items():
+            self._stekker_terug.setdefault(k, v)
         self._sensor_ooit |= {str(k) for k in lijst("sensor_ooit")}
         self._soc_asked |= {str(k) for k in lijst("soc_gevraagd")}
         getipt = data.get("getipt")

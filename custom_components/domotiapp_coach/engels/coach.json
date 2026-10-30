@@ -124,6 +124,7 @@
   "De ventilator van {naam} staat aan: {temp}.": "The fan for {naam} is on: {temp}.",
   "De ventilator van {naam} staat uit: {temp}.": "The fan for {naam} is off: {temp}.",
   "{naam} staat weer aan.": "{naam} is on again.",
+  "{namen} staan weer aan.": "{namen} are on again.",
   "{naam} stond uit; de coach heeft hem weer aangezet.": "{naam} was off; the coach switched it back on.",
   "{naam} is al {minuten} minuten niet bereikbaar; de coach weet niet of hij aan staat.": "{naam} has been unreachable for {minuten} minutes; the coach does not know whether it is on.",
   "{naam} staat al {minuten} minuten uit en de coach krijgt hem niet aan.": "{naam} has been off for {minuten} minutes and the coach cannot switch it on.",
