@@ -33,6 +33,7 @@ import {
 } from "./editor-base.js";
 import "../components/entity-picker.js";
 import { SALDEREN_TOT, salderen } from "../geld.js";
+import { herrekenenKan, salderenTelt } from "../toepassing.js";
 import { datum, locale, nt, t, tn } from "../i18n.js";
 import { bevestigdZin, opbouwCss, opbouwHtml } from "../opbouw.js";
 import {
@@ -570,7 +571,7 @@ class DacViewContract extends DacEditorElement {
             </div>
 
             <!-- de opgeslagen beurten opnieuw uitrekenen (v0.136.0) -->
-            <div class="block" data-installateur>
+            <div class="block" data-installateur id="herreken-blok">
               <label class="block-title" for="beurten-van">${t("Laadbeurten en programma's opnieuw uitrekenen")}</label>
               <span class="sub">${t("Na een gewijzigde prijs: wat de opgeslagen beurten kostten en bespaarden, opnieuw met het contract van die dag. Alleen bij een vaste of variabele prijs. Eerst zie je wat het wordt.")}</span>
               <input type="date" id="beurten-van">
@@ -1192,8 +1193,11 @@ class DacViewContract extends DacEditorElement {
     } else {
       this.$("#soort-rij").style.display = "";
       this.$("#lev-rij").style.display = "";
-      this.$("#salderen-blok").style.display = "";
+      // Salderen zolang het nog iets doet (v0.186.0, `salderenTelt`).
+      this.$("#salderen-blok").style.display = salderenTelt(contract, dagTekst(new Date())) ? "" : "none";
     }
+    // Opnieuw uitrekenen alleen met beurten, en niet bij dynamisch in Nederland (v0.186.0).
+    this.$("#herreken-blok").style.display = herrekenenKan(this.draft_) ? "" : "none";
     for (const button of this.$$("#dynamic-interval button")) {
       button.setAttribute("aria-pressed", String(button.dataset.interval === (d.interval ?? "hour")));
     }
@@ -1279,6 +1283,10 @@ class DacViewContract extends DacEditorElement {
     this.$("#water-aan").checked = Boolean(meters.water_enabled);
     this.$("#gas-velden").style.display = meters.gas_enabled ? "" : "none";
     this.$("#water-velden").style.display = meters.water_enabled ? "" : "none";
+    // Zonder gas of watermeter de hele kaart weg (v0.186.0); het vinkje staat ook onder
+    // Installatie, bij Meterstanden. Tot dan stond er "Geen gas." en "Geen watermeter.".
+    this.$("#gas").style.display = meters.gas_enabled ? "" : "none";
+    this.$("#water").style.display = meters.water_enabled ? "" : "none";
     this.$("#gas-samenvatting").textContent = meters.gas_enabled ? `${gdelen.join(", ")}.` : t("Geen gas.");
     // Water (v0.130.1): het waterbedrijf en de prijs in een zin, voor wie de
     // velden niet ziet.

@@ -18,6 +18,7 @@ import {
   saveBarHtml,
 } from "./editor-base.js";
 import { apparaatFase, groepFase } from "../devices.js";
+import { heeftZon } from "../toepassing.js";
 import "../components/entity-picker.js";
 
 /** Nominal voltage per phase: 3 x 25 A -> 17250 W, 1 x 25 A -> 5750 W. */
@@ -82,7 +83,7 @@ class DacViewInstallation extends DacEditorElement {
 
             <!-- Terugverdiend (v0.148.0): de installateur ziet het altijd op de kaart van de
                  thuisbatterij, de bewoner alleen als dit aan staat. -->
-            <label class="check" for="terug-bewoner">
+            <label class="check" for="terug-bewoner" id="terug-bewoner-rij">
               <input type="checkbox" id="terug-bewoner">
               <span>
                 <strong>${t("Terugverdiend ook aan de bewoner tonen")}</strong>
@@ -280,7 +281,7 @@ class DacViewInstallation extends DacEditorElement {
           </div>
         </section>
 
-        <section class="card">
+        <section class="card" id="zonverwachting">
           <h2>${icons.sun} ${t("Zonverwachting")}</h2>
           <p class="hint">${t("Wat er vandaag en morgen aan zon verwacht wordt. Daarmee kan de coach besluiten of het de moeite is om te wachten, of dat hij beter vannacht op de goedkope uren kan draaien. Integraties als Forecast.Solar en Solcast leveren deze waarden als sensoren; vul in wat je hebt.")}</p>
           <div class="fields">
@@ -584,7 +585,19 @@ class DacViewInstallation extends DacEditorElement {
 
   afterChange_() {
     this.paintHints_();
+    this.paintToepassing_();
     this.syncSaveBar_();
+  }
+
+  /**
+   * Alleen wat bij deze installatie iets doet (v0.186.0, toepassing.js): de zonverwachting met
+   * een omvormer (die komt zodra er een ingevuld is), Terugverdiend met een thuisbatterij.
+   */
+  paintToepassing_() {
+    if (!this.draft_ || !this.rendered_) return;
+    this.$("#zonverwachting").style.display = heeftZon(this.draft_) ? "" : "none";
+    const accu = (this.draft_.devices ?? []).some((a) => a?.type === "thuisbatterij");
+    this.$("#terug-bewoner-rij").style.display = accu ? "" : "none";
   }
 
   /**
@@ -628,6 +641,7 @@ class DacViewInstallation extends DacEditorElement {
     this.$("#max-grid").value = inst.max_grid_watts;
     this.$("#max-auto").checked = Boolean(inst.max_grid_auto);
     this.$("#terug-bewoner").checked = Boolean(inst.payback_resident);
+    this.paintToepassing_();
     this.$("#balancer").checked = Boolean(inst.load_balancer);
     this.$("#balancer-limit").value = inst.balancer_entity ?? "";
     this.paintBalancer_();

@@ -13793,6 +13793,54 @@ ws225 = bron49
 controle("de websocket bewaart het vinkje, standaard uit",
          'vol.Optional("goedkoop_blok", default=False): bool' in ws225, "")
 
+print("=== 226. een batterij met een laadschema: geen noodstroom, balanceren, vakantiestand, en de auto helpen (v0.186.0) ===")
+# De eigenaar op 30-10-2026: "growatt moet geen noodstroom hebben. geen balanceren geen vakantiestand
+# accu helpen ook niet. Dus de accu mag gewoon standaard de auto helpen bij growat. Verander dus niks
+# aan de anker bijvoorbeeld snap je?" Het paneel laat de vier blokken weg; wat er nog in de opslag
+# staat, telt hier ook niet meer.
+from domotiapp_coach.batterij import auto_grens as auto_grens226  # noqa: E402
+VOORKEUR226 = {"reserve_enabled": True, "reserve_percent": 30, "weekly_full": True, "weekly_full_day": 4,
+               "holiday": True, "holiday_max_percent": 50, "car_above": None}
+GROWATT226 = dict(GROWATT192, controllable=True, battery=dict(GROWATT192["battery"], **VOORKEUR226))
+ANKER226 = dict(BATTERIJ, battery=dict(BATTERIJ.get("battery") or {}, **VOORKEUR226))
+inst226 = instellingen(devices=[LAADPAAL, GROWATT226, ANKER226])
+hass226, store226, coach226 = bouw(huis(), inst226)
+NU226 = dt.datetime(2026, 10, 30, 12, 0)   # een vrijdag: de dag van de volle beurt
+rij226 = {"device": "dev-growatt", "growatt_vloer": 15}
+g226 = coach226._batterij_van(NU226, inst226, GROWATT226, rij226)
+coach226._growatt_batterij(g226, GROWATT226, rij226)
+a226 = coach226._batterij_van(NU226, inst226, ANKER226, {"device": "dev-batterij"})
+print(f"  Growatt: reserve {g226.reserve}, vol_voor {g226.vol_voor}, soc_max {g226.soc_max}, auto_boven {g226.auto_boven}, "
+      f"bodem {g226.bodem}; Anker: reserve {a226.reserve}, vol_voor {a226.vol_voor}, soc_max {a226.soc_max}, auto_boven {a226.auto_boven}")
+controle("Growatt: geen reserve, geen volle beurt en geen vakantiegrens, ook al staan ze aan in de opslag",
+         g226.reserve is None and g226.vol_voor is None and g226.soc_max == 100.0, "")
+controle("Growatt: de auto helpen tot zijn eigen vloer (15%), niet 'zonder grens staat dit uit'",
+         g226.auto_boven == 0.0 and g226.bodem == 15.0, f"{g226.auto_boven} {g226.bodem}")
+g226.soc, g226.nacht = 60.0, False
+controle("en auto_grens geeft die vloer", auto_grens226(g226, None) == 15.0, f"{auto_grens226(g226, None)}")
+controle("de Anker blijft precies zoals hij was: reserve 30, de vakantiegrens 50, De auto uit",
+         a226.reserve == 30.0 and a226.soc_max == 50.0 and a226.auto_boven is None,
+         f"{a226.reserve} {a226.soc_max} {a226.auto_boven}")
+# De volle beurt los, want de vakantiestand slaat hem over (`_vakantie`).
+zonder226 = dict(VOORKEUR226, holiday=False)
+a226v = coach226._batterij_van(NU226, inst226, dict(ANKER226, battery=dict(ANKER226["battery"], **zonder226)), {"device": "dev-batterij"})
+g226v = coach226._batterij_van(NU226, inst226, dict(GROWATT226, battery=dict(GROWATT226["battery"], **zonder226)), rij226)
+controle("de volle beurt op vrijdag: bij de Anker wel, bij de Growatt niet",
+         a226v.vol_voor is not None and g226v.vol_voor is None, f"{a226v.vol_voor} {g226v.vol_voor}")
+a226.soc, a226.nacht = 60.0, False
+controle("en helpt de auto zonder grens niet", auto_grens226(a226, None) is None, "")
+controle("de vakantiestand telt bij de Growatt niet (_vakantie), bij de Anker wel",
+         coach226._vakantie(GROWATT226) is None and coach226._vakantie(ANKER226) == 50.0, "")
+# Na een herstart: het staat in de instellingen en de coach leest het elke ronde opnieuw.
+coach226b = herstart213(hass226)
+g226b = coach226b._batterij_van(NU226, inst226, GROWATT226, rij226)
+controle("na een herstart hetzelfde", g226b.reserve is None and g226b.vol_voor is None and g226b.auto_boven == 0.0, "")
+# De sensor voor DomotiApp Lovelace zegt wat de coach doet.
+sensor226 = (BRONMAP / "sensor.py").read_text(encoding="utf-8")
+controle("de sensor meldt bij een laadschema geen vakantiestand en geen reserve",
+         '"vakantie": bool(eigen.get("holiday")) and not schema,' in sensor226
+         and 'if eigen.get("reserve_enabled") and not schema else None' in sensor226, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

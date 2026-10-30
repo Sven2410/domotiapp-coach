@@ -19,6 +19,7 @@ import { define } from "../base.js";
 import { deviceLabelMap } from "../devices.js";
 import { vlakkePrijs } from "../geld.js";
 import { datum, nt, t } from "../i18n.js";
+import { heeftZon, ietsStuurbaar, stuurbareBatterij } from "../toepassing.js";
 import { icons } from "../icons.js";
 import { planRegels, regelUitleg, zonRegels } from "../voorrang.js";
 import {
@@ -98,7 +99,7 @@ class DacViewStrategy extends DacEditorElement {
 
         ${adminNoticeHtml}
 
-        <section class="card">
+        <section class="card" id="niveau-kaart">
           <h2>${icons.compass} ${t("Hoeveel doet de coach zelf?")}</h2>
           <p class="hint">${t("Van alleen meekijken tot zelf schakelen. Begin gerust bij Voorstellen: dan zie je precies wat hij zou doen en gebeurt er niets zonder jouw akkoord.")}</p>
           <div class="fields">
@@ -121,7 +122,7 @@ class DacViewStrategy extends DacEditorElement {
         <!-- De voorrang bij zonoverschot (v0.92.0). De bewoner van de eerste
              woning op 23-09-2026: "niet automatisch de auto voorrang geven op
              alles dus"; te verslepen zoals de kaarten op het overzicht. -->
-        <section class="card">
+        <section class="card" id="zon-kaart">
           <h2>${icons.sun} ${t("Voorrang bij zonoverschot")}</h2>
           <p class="hint">
             ${t("Wie het overschot van je zonnepanelen als eerste krijgt, van boven naar beneden. Elke regel krijgt wat hij kan opnemen tot zijn grens, en wat er dan over is gaat naar de volgende. Boven zijn grens laadt een apparaat gewoon verder met wat er dan nog over is; waar het laden van de auto stopt, stel je in op de kaart van de laadpaal, onder Instellen. Dit geldt alleen voor overschot: wat er volgens een planning van het net geladen wordt staat hier los van.")}
@@ -143,7 +144,7 @@ class DacViewStrategy extends DacEditorElement {
              woning: "eerst de auto volgens laadplanning, dan de accu; laadt de
              accu maar met 3500 W en heb ik nog ruimte op mijn aansluiting, dan
              kan ik ook mijn boiler nog vol laden." -->
-        <section class="card">
+        <section class="card" id="plan-kaart">
           <h2>${icons.plug} ${t("Voorrang bij planningen")}</h2>
           <p class="hint">
             ${t("Wie als eerste de ruimte op je aansluiting krijgt als er volgens een planning van het net geladen wordt. Wie hoger staat krijgt wat er onder je zekeringen past; wie lager staat krijgt wat er daarna over is, en een boiler gaat pas aan als hij er nog bij past.")}
@@ -166,7 +167,7 @@ class DacViewStrategy extends DacEditorElement {
 
         <!-- De nachtstrategie (v0.90.0), in de woorden van de bewoner van de
              eerste woning op 23-09-2026. -->
-        <section class="card">
+        <section class="card" id="nacht-kaart">
           <h2>${icons.thuisbatterij} ${t("Nachtstrategie")}</h2>
           <label class="check" for="night">
             <input type="checkbox" id="night">
@@ -186,7 +187,7 @@ class DacViewStrategy extends DacEditorElement {
             <div class="block fields">
               <div class="block-title">${t("Kleuren")}</div>
               <p class="sub">${t("Waar de kleuren op het overzicht omslaan van groen naar oranje naar rood.")}</p>
-              <div class="row">
+              <div class="row" id="zelf-kleuren">
                 <label>${t("Zelfbenutting (%)")}</label>
                 <div class="two">
                   <div class="row">
@@ -343,6 +344,24 @@ class DacViewStrategy extends DacEditorElement {
     rij.style.display = rij.hidden ? "none" : "";
   }
 
+  /**
+   * Alleen wat bij deze installatie iets doet (v0.186.0, toepassing.js): hoe ver de coach mag
+   * gaan met een apparaat dat hij stuurt, de voorrang bij zon met zonnepanelen, een voorrang
+   * met minstens twee regels, en de nacht met een thuisbatterij die hij stuurt.
+   */
+  paintToepassing_() {
+    const d = this.draft_;
+    const toon = (id, aan) => {
+      const el = this.$(id);
+      if (el) el.style.display = aan ? "" : "none";
+    };
+    toon("#niveau-kaart", ietsStuurbaar(d));
+    toon("#zon-kaart", heeftZon(d) && this.zonRegels_().length >= 2);
+    toon("#plan-kaart", this.planRegels_().length >= 2);
+    toon("#nacht-kaart", stuurbareBatterij(d));
+    toon("#zelf-kleuren", heeftZon(d));
+  }
+
   blockers_() {
     return [];
   }
@@ -361,6 +380,7 @@ class DacViewStrategy extends DacEditorElement {
     this.paintZon_();
     this.paintPlan_();
     this.$("#night").checked = this.draft_?.strategy?.night_strategy !== false;
+    this.paintToepassing_();
     this.paintWeergave_();
     this.syncSaveBar_();
   }

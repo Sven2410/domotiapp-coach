@@ -43,6 +43,7 @@ import { volgCoach } from "../data-source.js";
 import { canAlwaysOn, deviceLabel, deviceLabelMap } from "../devices.js";
 import { icons } from "../icons.js";
 import { huisNu } from "../format.js";
+import { batterijMetTemperatuur, belastingTeMeten, meters } from "../toepassing.js";
 import { datum, locale, nt, t, tn } from "../i18n.js";
 
 /**
@@ -410,7 +411,7 @@ const css = /* css */ `
   .aanzet span { display: block; font-size: 12.5px; color: var(--dac-ink-3); margin-top: 2px; line-height: 1.45; }
   /* Voor elk blok velden, niet alleen dat van de zware belasting: bij Lekkage en
      Thuisbatterij te warm bleven de velden staan met de melding uit (21-10-2026). */
-  .velden[hidden] { display: none; }
+  .velden[hidden], .veld[hidden] { display: none; }
   @media (min-width: 620px) { .velden.twee { grid-template-columns: 1fr 1fr; } }
 
   /* ---- de geschiedenis ---- */
@@ -611,7 +612,7 @@ class DacViewNotifications extends DacElement {
             <button type="button" class="schuif" role="switch" aria-checked="false" id="verbruik-aan" aria-label="${t("Lekkage of abnormaal verbruik aan")}"><span class="knob"></span></button>
           </div>
           <div class="velden" id="verbruik-velden" hidden>
-            <div class="veld">
+            <div class="veld" id="verbruik-water-rij">
               <label for="verbruik-water">${t("Water dat blijft lopen, langer dan")}</label>
               <select id="verbruik-water">${[30, 60, 120, 240, 480].map((m) => `<option value="${m}">${m < 60 ? t("{n} minuten", { n: m }) : m === 60 ? t("1 uur") : t("{n} uur", { n: m / 60 })}</option>`).join("")}</select>
               <span class="uitleg">${t("Een bad of een wasmachine loopt een half uur; een kraan die openstaat of een lekkende leiding loopt de hele nacht.")}</span>
@@ -865,6 +866,8 @@ class DacViewNotifications extends DacElement {
     el.append(kop);
 
     for (const soort of SOORTEN_INFO) {
+      // Zware belasting alleen als de coach de belasting kan meten (v0.186.0).
+      if (soort.id === "belasting" && !belastingTeMeten(this.settings_)) continue;
       const rij = document.createElement("div");
       rij.className = "soort";
       const tekst = document.createElement("div");
@@ -1071,11 +1074,16 @@ class DacViewNotifications extends DacElement {
   paintVerbruik_() {
     const blok = this.$("#verbruik");
     if (!blok) return;
-    blok.hidden = !this.settings_;
+    // Alleen met een gas- of watermeter, en lopend water alleen met de sensor van het
+    // verbruik nu (v0.186.0, `meters` in toepassing.js).
+    const m = meters(this.settings_);
+    blok.hidden = !this.settings_ || !(m.gas || m.water || m.waterLoopt);
     if (blok.hidden) return;
     const alert = this.verbruik_();
     this.$("#verbruik-aan").setAttribute("aria-checked", String(Boolean(alert.enabled)));
     this.$("#verbruik-velden").hidden = !alert.enabled;
+    const water = this.$("#verbruik-water-rij");
+    if (water) water.hidden = !m.waterLoopt;
     this.$("#verbruik-water").value = String(alert.water_flow_minutes ?? 120);
     this.$("#verbruik-factor").value = String(alert.factor ?? 3);
   }
@@ -1119,8 +1127,9 @@ class DacViewNotifications extends DacElement {
     const blok = this.$("#warmte");
     if (!blok) return;
     const accus = this.batterijTemperaturen_();
-    // Alleen voor wie een thuisbatterij heeft; zonder is er niets om te meten.
-    blok.hidden = !this.settings_ || !accus.length;
+    // Alleen voor een thuisbatterij met een temperatuursensor; zonder is er niets om te meten
+    // (v0.186.0, `_temp_nodig` in coach.py). Tot dan stond het er bij elke thuisbatterij.
+    blok.hidden = !this.settings_ || !batterijMetTemperatuur(this.settings_);
     if (blok.hidden) return;
     const alert = this.warmte_();
     this.$("#warmte-aan").setAttribute("aria-checked", String(Boolean(alert.enabled)));
@@ -1130,14 +1139,7 @@ class DacViewNotifications extends DacElement {
     const metSensor = accus.filter((a) => a.sensor);
     const graden = (g) => `${g.toLocaleString(locale(), { maximumFractionDigits: 1 })} °C`;
     let hint;
-    // Apparaten ziet alleen de installateur (v0.114.0); de bewoner krijgt te
-    // horen wie het kan regelen.
-    if (!metSensor.length) {
-      hint = this.isAdmin_()
-        ? t("Vul eerst de temperatuur van de batterij in onder Apparaten; zonder sensor is er niets te melden.")
-        : t("Je installateur moet eerst de temperatuur van de batterij koppelen; zonder sensor is er niets te melden.");
-    }
-    else if (alert.max_c === null || alert.max_c === undefined) hint = t("Vul in boven welke temperatuur je een bericht wilt.");
+    if (alert.max_c === null || alert.max_c === undefined) hint = t("Vul in boven welke temperatuur je een bericht wilt.");
     else {
       hint = metSensor
         .map((a) => {
@@ -1218,7 +1220,8 @@ class DacViewNotifications extends DacElement {
   paintBelasting_() {
     const blok = this.$("#belasting");
     if (!blok) return;
-    blok.hidden = !this.settings_;
+    // Alleen als de coach de belasting kan meten (v0.186.0, `belastingTeMeten`).
+    blok.hidden = !this.settings_ || !belastingTeMeten(this.settings_);
     if (blok.hidden) return;
     const alert = this.belasting_();
     this.$("#belasting-aan").setAttribute("aria-checked", String(Boolean(alert.enabled)));

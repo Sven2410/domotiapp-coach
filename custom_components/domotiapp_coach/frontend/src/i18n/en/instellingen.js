@@ -236,10 +236,6 @@ export const INSTELLINGEN = {
   "De volgende keer: {datum}.": "Next time: {datum}.",
   "Dit was eenmalig; er komt geen herinnering meer.": "This was a one-off; there will be no more reminders.",
   "Thuisbatterij": "Home battery",
-  "Vul eerst de temperatuur van de batterij in onder Apparaten; zonder sensor is er niets te melden.":
-    "First fill in the battery temperature under Devices; without a sensor there is nothing to report.",
-  "Je installateur moet eerst de temperatuur van de batterij koppelen; zonder sensor is er niets te melden.":
-    "Your installer first needs to link the battery temperature; without a sensor there is nothing to report.",
   "Vul in boven welke temperatuur je een bericht wilt.": "Fill in above which temperature you want a message.",
   "{naam} nu {waarde}": "{naam} now {waarde}",
   "Nu {waarde}": "Now {waarde}",

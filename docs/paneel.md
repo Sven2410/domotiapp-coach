@@ -521,3 +521,63 @@ zien wanneer een apparaat laadt).
 Wat er stond wordt niet gewist. De coach doet er bij een vlakke prijs niets mee, en na een overstap
 naar een dynamisch contract staat het er weer zoals het was. Proef "één prijs voor elk uur" in
 test_rapport.mjs.
+
+## Alleen wat van toepassing is (v0.186.0)
+
+De eigenaar op 30-10-2026, bij "Thuisbatterij te warm" in Meldingen, in een klantwoning met een batterij
+zonder temperatuursensor: "Zijn er apparaten ingesteld waar het niet van toepassing is moet de instelling
+weg natuurlijk. Zo houd je de coach heel overzichtelijk voor iedereen. Snap je. Check dus de hele coach en
+maak dat zo dat klanten alleen instellingen zien waar het van toepassing is."
+
+**De regel**: een blok, schuif of veld staat alleen in beeld als de coach er bij deze installatie iets mee
+doet. Dat hangt af van het apparaat, de sensor, het land, het contract en de stand van een andere
+instelling. Het is de gedachte van v0.149.0 (één prijs voor elk uur), nu over het hele paneel. Elk scherm
+vraagt het aan `toepassing.js`, met per vraag één functie die volgt wat de coach zelf doet.
+
+| waar | wat | alleen als |
+|---|---|---|
+| Instellen, thuisbatterij | Noodstroom, Balanceren, Vakantiestand, De auto | geen batterij met een laadschema (`accuKeuzes`); zie hieronder |
+| Instellen, thuisbatterij | Ontladen naar het net en de grens erbij | geen laadschema, en teruglevering levert iets op (`handelenKan`; in Portugal niet met nenhum of een vaste prijs van nul) |
+| Instellen, thuisbatterij | Ventilator | een ventilator én een temperatuursensor |
+| Instellen, laadpaal | de modus Zon, Zon: beginnen vanaf | zonnepanelen (`heeftZon`); een Zon die al gekozen was blijft te zien |
+| Instellen en de kaart, laadpaal | het schema (klaar om) | niet met Zonder accustand, in de goedkope uren (`canHaveDeadline`) |
+| Instellen, schema van de laadpaal | Laden tot | een auto van het huis met een accu-inhoud, en de klaar-tijd telt (`kentDoel`) |
+| Meldingen | Thuisbatterij te warm | een thuisbatterij met een temperatuursensor (`_temp_nodig` in coach.py) |
+| Meldingen | Lekkage of abnormaal verbruik | een gas- of watermeter; het lopende water alleen met de sensor van het verbruik nu |
+| Meldingen | Zware belasting, ook de schuif per persoon | de fasen tegen de hoofdzekering, een groep met een zekering, of een plafond (`async_current_load` in monitor.py) |
+| Contract | de kaarten gas en water | het vinkje gas of watermeter (ook onder Installatie, Meterstanden); tot dan stond er "Geen gas." |
+| Contract | Salderen | Nederland, tot 1 januari 2027 of zolang het contract dagen van daarvoor dekt (`salderenTelt`) |
+| Contract | Laadbeurten en programma's opnieuw uitrekenen | een laadpaal of een programma-apparaat, en niet dynamisch in Nederland |
+| Voorkeuren | Hoeveel doet de coach zelf? | minstens één apparaat dat de coach stuurt |
+| Voorkeuren | Voorrang bij zonoverschot | zonnepanelen en minstens twee regels |
+| Voorkeuren | Voorrang bij planningen | minstens twee regels |
+| Voorkeuren | Nachtstrategie | een thuisbatterij die de coach stuurt |
+| Voorkeuren, Weergave | de kleuren van Zelfbenutting | zonnepanelen |
+| Installatie | Zonverwachting | een omvormer onder Energiebronnen; de kaart komt zodra er een ingevuld is |
+| Installatie | Terugverdiend ook aan de bewoner tonen | een thuisbatterij |
+| Apparaten | Hangt op fase | een huis met drie fasen |
+
+**Wat al aan staat en verborgen raakt, blijft in de opslag.** Het doet dan niets. Er gaat geen instelling
+stil om. Komt de voorwaarde terug (een temperatuursensor erbij, een overstap naar dynamisch), dan staat het
+er weer zoals het was.
+
+**Wat de coach daarvoor zelf veranderde.** Twee punten, want daar deed een verborgen instelling nog wel iets:
+
+- Een batterij met een laadschema (`BATTERIJ_SCHEMA`, de Growatt) negeert Noodstroom, Balanceren en de
+  Vakantiestand, en helpt de auto standaard tot zijn eigen ondergrens. Zie docs/batterij.md.
+- Met Zonder accustand, in de goedkope uren telt een schema dat nog aan staat ook niet. Dan beslist de
+  modus zonder planning (`_decide` in planner.py). Zie docs/laadpaal.md.
+
+**Wat bewust blijft.** De modus zonder planning bij de paal met het goedkope blok: Zon en Continu gaan daar
+voor, en Goedkoopst heet dan "het goedkoopste blok van het etmaal". De lijst blijft zoals hij was. De
+vakantieschakelaar van DomotiApp Lovelace bij een Growatt bestaat nog, en staat al sinds v0.150.0 op niet
+beschikbaar (`AccuBediening`). Het contract met de kaarten verandert dus niet.
+
+**Meten zonder browser.** De proef "alleen wat van toepassing is" in test_rapport.mjs tekent Voorkeuren,
+Meldingen, Installatie en Instellen voor vijf vormen: kaal (geen zon, geen batterij, één fase), een Growatt
+zonder temperatuur in Portugal zonder teruglevering met het goedkope blok, een Anker met alles, Nederland
+dynamisch met alles, en een paal met het goedkope blok. In node is er geen `getComputedStyle`. De proef telt
+een element daarom als weg bij `hidden` of display none, en kijkt in de bron of elk element dat met `hidden`
+weg gaat een `[hidden]`-regel heeft. Het waterveld in Meldingen is een `.veld` met `display: grid`, en
+kreeg die regel erbij.
+

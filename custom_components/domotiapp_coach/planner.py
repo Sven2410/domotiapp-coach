@@ -3694,7 +3694,9 @@ def _decide(
     # Zonder planning bepaalt de modus hoe er geladen wordt (v0.87.0). Een
     # planning wint: staat het schema aan, dan rekent hij hieronder zoals
     # altijd naar de klaar-tijd. "Goedkoopst" valt ook door naar die som.
-    if not window.enabled and charger.modus in MODI_ZONDER_SOM:
+    # Met Zonder accustand, in de goedkope uren telt het schema niet, ook niet als het nog aan
+    # staat; het paneel laat het dan weg (v0.186.0). Dan beslist de modus.
+    if (not window.enabled or charger.goedkoop_blok) and charger.modus in MODI_ZONDER_SOM:
         return _modus_zonder_planning(now, prices, grid, car, charger, ceiling)
 
     start = window.opens if window.enabled else None

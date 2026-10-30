@@ -1697,6 +1697,25 @@ hetzelfde, want daar is de accu aan het begin van vazio al leeg. In het echt nog
 beproefd: of de omvormer zelf op de stopgrens stopt, en of hij met mains uit toch van het net bijlaadt
 bij zijn vloer (in de klantwoning stond `acChargeEnergyToday` vóór de test al op 2 kWh).
 
+**Geen noodstroom, balanceren of vakantiestand, en de auto helpen (v0.186.0).** De eigenaar op 30-10-2026:
+"growatt moet geen noodstroom hebben. geen balanceren geen vakantiestand accu helpen ook niet. Dus de accu
+mag gewoon standaard de auto helpen bij growat. Verander dus niks aan de anker bijvoorbeeld snap je?" Bij
+een batterij met een laadschema (`BATTERIJ_SCHEMA`) gaat het zo:
+
+- Instellen laat Noodstroom, Balanceren, Vakantiestand en De auto weg (`accuKeuzes` in toepassing.js).
+- De coach negeert ze ook als er nog iets van in de opslag staat (`_batterij_van`, `_vakantie`). Er is dan
+  geen reserve, geen `vol_voor` en geen vakantiegrens.
+- De sensor voor DomotiApp Lovelace meldt `vakantie` onwaar en geen `reserve`.
+- De auto helpen staat standaard aan, tot de eigen ondergrens van de batterij: `auto_boven` is 0, en
+  `auto_grens` neemt de hoogste van die en `bodem`, dus de vloer die de coach leerde (`growatt_vloer`).
+
+De Growatt houdt de meter zelf op nul, dus wat de paal trekt komt uit de accu zolang die iets heeft. De
+coach houdt hem daar niet meer tegen met `paal-laadt`. De nachtstrategie (Voorkeuren) blijft gelden, zoals
+bij elke batterij: met die aan helpt hij alleen met wat de nacht niet nodig heeft.
+
+Een Anker en elke batterij zonder laadschema blijven precies zoals ze waren: dezelfde blokken, en De auto
+zonder grens uit. Proef 226 in test_coach.py, en "alleen wat van toepassing is" in test_rapport.mjs.
+
 ## Growatt, stap 2: de zon en het schema na elke nacht bijstellen (v0.151.0)
 
 De eigenaar op 23-10-2026, via de beheersessie: "Sven wil alles: bouw stap 2 ook, niet wachten op de

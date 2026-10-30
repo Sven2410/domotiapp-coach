@@ -25,6 +25,7 @@ import { priceForecast } from "./data-source.js";
 import { clock, duration, huisNu } from "./format.js";
 import { datum, nt, t } from "./i18n.js";
 import { sheetCss } from "./theme.js";
+import { autoMetAccu, heeftZon, klaarTijdTelt } from "./toepassing.js";
 
 /** De dagen van de week als nummer, maandag (0) eerst, zoals een week hier opgeschreven wordt. */
 export const DAYS = [0, 1, 2, 3, 4, 5, 6];
@@ -102,9 +103,10 @@ export const timesFor = (device) =>
  * De bewoner van de eerste woning op 23-09-2026, naar evcc: "op maandag werk ik in
  * Arnhem (50%), op dinsdag in Groningen (100%). De algemene limiet geldt voor
  * snelladen, continu en zon; stel je een planning in, dan is de laadlimiet van
- * de planning leidend."
+ * de planning leidend." Sinds v0.186.0 alleen met een auto die de coach kent (een accu-inhoud),
+ * want zonder accustand is er niets om op te stoppen, en niet als de klaar-tijd niet telt.
  */
-export const kentDoel = (device) => device?.type === "laadpaal";
+export const kentDoel = (device) => device?.type === "laadpaal" && klaarTijdTelt(device) && autoMetAccu(device);
 
 /** Een ingevuld doel als getal tussen 10 en 100, of null voor "de algemene limiet". */
 export function doelUit(waarde) {
@@ -514,7 +516,7 @@ export class DacScheduleSheet extends DacElement {
     const TIMES = timesFor(this.device_);
     // Eén keer bouwen per soort apparaat: een laadpaal heeft één veld, de rest
     // drie, en hetzelfde scherm gaat voor allebei open.
-    if (holder.dataset.built !== this.device_.type) {
+    if (holder.dataset.built !== `${this.device_.type}:${kentDoel(this.device_)}`) {
       holder.innerHTML = TIMES.map(
         (time) => `
         <div class="row">
@@ -538,7 +540,7 @@ export class DacScheduleSheet extends DacElement {
           </div>
           <span class="sub">${t(DOEL_HINT)}</span>
         </div>` : "");
-      holder.dataset.built = this.device_.type;
+      holder.dataset.built = `${this.device_.type}:${kentDoel(this.device_)}`;
 
       const doelVeld = holder.querySelector("[data-window-target]");
       if (doelVeld) {
@@ -580,7 +582,7 @@ export class DacScheduleSheet extends DacElement {
   paintDays_(plan) {
     const holder = this.$("#plan-days");
     const TIMES = timesFor(this.device_);
-    if (holder.dataset.built !== this.device_.type) {
+    if (holder.dataset.built !== `${this.device_.type}:${kentDoel(this.device_)}`) {
       holder.innerHTML = DAYS.map(
         (day) => `
         <div class="plan-day">
@@ -615,7 +617,7 @@ export class DacScheduleSheet extends DacElement {
           </div>
         </div>`
       ).join("");
-      holder.dataset.built = this.device_.type;
+      holder.dataset.built = `${this.device_.type}:${kentDoel(this.device_)}`;
 
       for (let day = 0; day < DAYS.length; day += 1) {
         holder.querySelector(`[data-day="${day}"]`).addEventListener("change", () =>
@@ -847,10 +849,13 @@ export class DacScheduleSheet extends DacElement {
     blok.hidden = !heeftVoorkeuren(device);
     if (blok.hidden) return;
     const vk = this.$("#vk");
+    // Onbekende instellingen tellen als met zon, zoals `voorkeurHtml` zelf.
+    const zon = this.settings_ ? heeftZon(this.settings_) : true;
     const vorm = JSON.stringify([device.id, device.type, (device.cars ?? []).map((c) => [c.id, c.name, c.brand, Boolean(c.wake_entity)]),
-      Boolean(device.entities?.fan), device.brand]);
+      Boolean(device.entities?.fan), Boolean(device.entities?.temperature), device.brand, zon,
+      Boolean(device.goedkoop_blok), device.charge_mode === "zon"]);
     if (vorm !== this.vkVoor_) {
-      vk.innerHTML = voorkeurHtml(device);
+      vk.innerHTML = voorkeurHtml(device, { zon });
       this.vkVoor_ = vorm;
     }
     vulVoorkeuren(vk, device, this.shadowRoot?.activeElement ?? null, this.settings_?.contract ?? null);

@@ -3903,6 +3903,14 @@ loopt80.charging, loopt80.actual_amps, loopt80.started_at = True, 16.0, dt.datet
 d80k = decide(dt.datetime(2026, 10, 31, 8, 0), pt80(dt.datetime(2026, 10, 31, 8, 0)), NET_LEEG, ZONDER80, loopt80,
               Window(enabled=False))
 controle("om 08:00 stopt hij, ook als hij net begonnen was", not d80k.charge and d80k.rule == "blok-wacht", f"{d80k.rule}")
+# Met het blok staat er geen schema in het paneel (v0.186.0), en dan telt een schema dat nog aan staat
+# ook niet: de modus die de bewoner kiest beslist, met en zonder schema hetzelfde.
+for modus80 in ("zon", "continu", "goedkoopst"):
+    zonder80m = decide(middag80, pt80(middag80), NET_LEEG, ZONDER80, blokpaal80(modus=modus80), Window(enabled=False))
+    met80m = decide(middag80, pt80(middag80), NET_LEEG, ZONDER80, blokpaal80(modus=modus80), klaar80)
+    controle(f"modus {modus80}: met een schema dat nog aan staat hetzelfde als zonder ({zonder80m.rule})",
+             (met80m.rule, met80m.charge, met80m.amps) == (zonder80m.rule, zonder80m.charge, zonder80m.amps),
+             f"{met80m.rule} {zonder80m.rule}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
