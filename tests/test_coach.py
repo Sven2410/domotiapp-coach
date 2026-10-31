@@ -13841,6 +13841,75 @@ controle("de sensor meldt bij een laadschema geen vakantiestand en geen reserve"
          '"vakantie": bool(eigen.get("holiday")) and not schema,' in sensor226
          and 'if eigen.get("reserve_enabled") and not schema else None' in sensor226, "")
 
+print("=== 227. een Miele na een herstart: het begin uit de recorder, in de woorden van Miele (v0.187.0) ===")
+# De klantwoning op 31-10-2026: een Miele-wasmachine die de coach alleen uitleest, 09:51:00
+# programmed, 09:51:21 in_use, "draait" om 09:52 en na de herstart om 10:33 nog een keer. Proef
+# 194 deed het begin na; de recorder zelf zei in_use, en dat kwam nooit in `DRAAIT`.
+stand227 = coachmod._programma_stand
+controle("de stand in de woorden van Home Connect: Miele, de lange naam van Home Connect, en een onderbreking",
+         stand227("in_use") == "run" and stand227("programmed") == "ready"
+         and stand227("BSH.Common.EnumType.OperationState.Run") == "run"
+         and stand227("program_interrupted") == "finished" and stand227("program_interrupted", loopt=True) == "pause", "")
+
+
+def recorder227(toestanden):
+    async def _geschiedenis(entity_id, start, einde):
+        if entity_id != "sensor.was":
+            return []
+        return [(dt.datetime(2026, 9, 7, u, m, sec), t) for (u, m, sec), t in toestanden if dt.datetime(2026, 9, 7, u, m, sec) <= einde]
+    return _geschiedenis
+
+
+def herstart227(toestanden, controllable=False, voor=((19, 0, None, None), (19, 5, "in_use", "0.0"), (19, 20, None, "0.3"))):
+    hass, store, coach, ronde_ = bouw162({**WAS162, "controllable": controllable})
+    alles = []
+    for stap in voor:
+        _, v = ronde_(*stap)
+        alles += v
+    coach._async_geschiedenis = recorder227(toestanden)
+    coach._programma.pop("dev-was", None)
+    na = []
+    for stap in [(19, 30, None, "0.4"), (19, 31, None, "0.4")]:
+        _, v = ronde_(*stap)
+        na += v
+    return coach._programma.get("dev-was") or {}, alles, na
+
+
+MIELE227 = [((18, 0, 0), "off"), ((19, 4, 40), "programmed"), ((19, 5, 21), "in_use")]
+s227, voor227, na227 = herstart227(MIELE227)
+print(f"  gestart {s227.get('gestart')}, terugrekenen {s227.get('terugrekenen')}, na: {telefoon160(na227)}")
+controle("alleen uitgelezen: voor de herstart één keer 'draait'",
+         len([m for m in telefoon160(voor227) if "draait" in m]) == 1, f"{telefoon160(voor227)}")
+controle("na de herstart geen tweede 'draait'", not [m for m in telefoon160(na227) if "draait" in m], f"{telefoon160(na227)}")
+controle("de beurt begon op het moment van in_use, niet bij de herstart",
+         s227.get("gestart") == dt.datetime(2026, 9, 7, 19, 5, 21), f"{s227.get('gestart')}")
+controle("en het stuk voor de herstart wordt teruggerekend vanaf daar",
+         (s227.get("terugrekenen") or (None,))[0] == dt.datetime(2026, 9, 7, 19, 5, 21), f"{s227.get('terugrekenen')}")
+
+# Een onderbreking midden in de beurt is ook in de recorder een pauze: het begin blijft 19:05.
+s227b, _, na227b = herstart227(MIELE227 + [((19, 15, 0), "program_interrupted"), ((19, 15, 20), "in_use")])
+controle("onderbroken en verder: het begin blijft het eerste in_use",
+         s227b.get("gestart") == dt.datetime(2026, 9, 7, 19, 5, 21), f"{s227b.get('gestart')}")
+# En een integratie die bij de herstart even niets zegt, is geen nieuwe start.
+s227c, _, na227c = herstart227(MIELE227 + [((19, 29, 50), "unavailable"), ((19, 30, 5), "in_use")])
+controle("unavailable bij de herstart en dan weer in_use: het begin blijft 19:05",
+         s227c.get("gestart") == dt.datetime(2026, 9, 7, 19, 5, 21)
+         and not [m for m in telefoon160(na227c) if "draait" in m], f"{s227c.get('gestart')} {telefoon160(na227c)}")
+s227f, _, _ = herstart227(MIELE227 + [((19, 29, 50), "not_connected"), ((19, 30, 5), "in_use")])
+controle("en Miele die bij de herstart not_connected zegt evenmin",
+         s227f.get("gestart") == dt.datetime(2026, 9, 7, 19, 5, 21), f"{s227f.get('gestart')}")
+# Home Connect blijft zoals het was.
+s227d, _, na227d = herstart227([((18, 0, 0), "BSH.Common.EnumType.OperationState.Ready"),
+                                ((19, 5, 21), "BSH.Common.EnumType.OperationState.Run")],
+                               voor=((19, 0, "ready", None), (19, 5, "run", "0.0"), (19, 20, None, "0.3")))
+controle("Home Connect: het begin uit de recorder, zoals voorheen, en geen tweede 'draait'",
+         s227d.get("gestart") == dt.datetime(2026, 9, 7, 19, 5, 21)
+         and not [m for m in telefoon160(na227d) if "draait" in m], f"{s227d.get('gestart')} {telefoon160(na227d)}")
+# Een Miele die de coach stuurt, zonder regel in de opslag: het begin ook uit de recorder.
+s227e, _, _ = herstart227(MIELE227, controllable=True)
+controle("een Miele die de coach stuurt: het begin ook uit de recorder",
+         s227e.get("gestart") == dt.datetime(2026, 9, 7, 19, 5, 21), f"{s227e.get('gestart')}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

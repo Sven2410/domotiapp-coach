@@ -202,6 +202,18 @@ melding niet nog een keer (v0.152.0; in de klantwoning op 23-10-2026 "Droger dra
 om 11:29 en na een herstart om 11:56). Een apparaat dat hij stuurt zonder regel in de
 opslag meldt hij wel, want dan was de coach er niet toen het begon. Proef 194.
 
+**De recorder in de woorden van Miele** (v0.187.0). Tot dan zocht `_async_programma_begin`
+in de recorder naar `run`, de woorden van Home Connect, en Miele schrijft `in_use`. Bij een
+Miele vond hij het begin dus nooit, begon de beurt bij de herstart, kwam "draait" opnieuw en
+werd er niets teruggerekend. In de klantwoning op 31-10-2026: een wasmachine die de coach
+alleen uitleest, 09:51:21 `in_use`, "Washing machine is running" om 09:52 en na de installatie
+om 10:33 nog een keer. Proef 194 deed het begin na en zag het daarom niet. Nu lezen de ronde
+en de recorder met dezelfde `_programma_stand` (coach.py): de lange naam van Home Connect
+ingekort, Miele door `MIELE_STATUS`, en een onderbreking midden in de beurt is ook in de
+recorder een pauze. Een `unavailable` rond de herstart (bij Miele ook `not_connected`) telt
+niet als nieuwe start. Proef 227 leest de recorder echt: Miele alleen uitgelezen en gestuurd,
+met een onderbreking, met `unavailable` en `not_connected`, en Home Connect zoals het was.
+
 **De eindtijd van het apparaat zelf** (v0.58.0, de eigenaar: "pak de eindtijd van
 de integratie"): het veld Resterende tijd (`remaining`) mag een tijdstip
 zijn (Home Connect) of minuten of seconden (`_eindtijd` in coach.py). "Klaar
