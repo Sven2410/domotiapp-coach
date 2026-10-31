@@ -1448,6 +1448,22 @@ MIELE_STATUS = {
     "not_connected": "",
 }
 
+
+def _programma_stand(toestand: str, loopt: bool = False) -> str:
+    """De stand van een apparaat met een programma in de woorden van Home Connect.
+
+    `Dishcare...OperationState.Run` en `run` zijn hetzelfde, en Miele gaat door
+    `MIELE_STATUS`. Een onderbreking terwijl er een beurt loopt is een pauze
+    (v0.127.0). De ronde en de recorder na een herstart (`_async_programma_begin`)
+    lezen allebei hiermee; tot v0.187.0 zette de recorder Miele niet om, en
+    begon een beurt na een herstart opnieuw (de klantwoning, 31-10-2026).
+    """
+    plat = toestand.strip().lower().split(".")[-1]
+    if plat == "program_interrupted" and loopt:
+        return "pause"
+    return MIELE_STATUS.get(plat, plat)
+
+
 def _programma_alleen_lezen(device: dict[str, Any]) -> bool:
     """Of de coach dit apparaat met een programma alleen volgt (v0.127.0).
 
@@ -4041,13 +4057,10 @@ class ChargerCoach:
         if handmatig:
             status = self._status_uit_vermogen(sessie, now, watts)
         else:
-            status = _text(self.hass, entities.get("status")).strip().lower()
-            # `Dishcare...OperationState.Run` en `run` zijn hetzelfde; zie
+            ruw = _text(self.hass, entities.get("status")).strip().lower().split(".")[-1]
+            # In de woorden van Home Connect, ook bij Miele (v0.124.0); zie
             # `programma_van` voor dezelfde afspraak bij het programma.
-            status = status.split(".")[-1]
-            ruw = status
-            # En Miele in dezelfde woorden (v0.124.0).
-            status = MIELE_STATUS.get(status, status)
+            status = _programma_stand(ruw)
             # Een onderbreking midden in een beurt is een pauze (v0.127.0). In
             # de klantwoning op 16-10-2026: 08:59:26 in_use, 08:59:42
             # program_interrupted, 09:00:16 weer in_use; 16 seconden om de
@@ -4980,12 +4993,19 @@ class ChargerCoach:
         entities = device.get("entities") or {}
         gestart: datetime | None = None
         if entities.get("start") and entities.get("status"):
-            # Home Connect: de laatste overgang naar "run" in de recorder.
+            # Home Connect en Miele: de laatste overgang naar "run" in de recorder,
+            # in dezelfde woorden als de ronde (`_programma_stand`). Een onderbreking
+            # midden in de beurt is ook hier een pauze, anders begon de beurt bij
+            # het verdergaan. En een integratie die bij de herstart even niets
+            # zegt (`unavailable`, bij Miele `not_connected`) slaat hij over, om dezelfde
+            # reden.
             vorige: str | None = None
             for moment, toestand in await self._async_geschiedenis(
                 entities["status"], now - PROGRAMMA_TERUGKIJK, now
             ):
-                plat = toestand.strip().lower().split(".")[-1]
+                plat = _programma_stand(toestand, loopt=vorige in DRAAIT)
+                if plat in ("", "unknown", "unavailable", "none"):
+                    continue
                 if plat in DRAAIT and (vorige is None or vorige not in DRAAIT):
                     gestart = moment
                 vorige = plat
