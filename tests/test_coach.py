@@ -13910,6 +13910,89 @@ s227e, _, _ = herstart227(MIELE227, controllable=True)
 controle("een Miele die de coach stuurt: het begin ook uit de recorder",
          s227e.get("gestart") == dt.datetime(2026, 9, 7, 19, 5, 21), f"{s227e.get('gestart')}")
 
+print("=== 228. een geladen integratie waarvan alles stil is: één keer herladen, ook over een herstart (v0.188.0) ===")
+# Een klantwoning op 01-11-2026: na een stroomstoring startte Home Assistant voor DNS er was. De paal stond op
+# loaded, maar elke sensor ervan bleef drie uur unavailable, tot de eigenaar hem met de hand herlaadde.
+inst228 = instellingen(devices=[LAADPAAL])
+inst228["sources"]["extra"] = {"a": "sensor.paal228_status", "b": "sensor.paal228_w", "c": "sensor.zon228_w",
+                               "d": "sensor.half228_a", "e": "sensor.half228_b", "f": "sensor.leeg228"}
+NU228 = dt.datetime(2026, 11, 1, 11, 45)
+
+
+def stempel228(moment):
+    return moment.replace(tzinfo=dt.timezone.utc)
+
+
+hass228, _, coach228 = bouw({}, inst228)
+asyncio.run(coach228._async_geheugen_laden())
+for e, w, m in [("sensor.paal228_status", "unavailable", (11, 45, 45)), ("sensor.paal228_w", "unavailable", (11, 45, 0)),
+                ("sensor.zon228_w", "1200", (11, 44, 0)), ("sensor.half228_a", "unavailable", (11, 45, 0)),
+                ("sensor.half228_b", "3.2", (11, 45, 0)), ("sensor.leeg228", "unknown", (11, 45, 0))]:
+    hass228.states.zet(e, w, last_updated=stempel228(dt.datetime(2026, 11, 1, *m)))
+entries228 = {k: types.SimpleNamespace(domain=d, title=n, state="loaded", disabled_by=None)
+              for k, d, n in [("e-paal", "paal", "Paal"), ("e-zon", "omvormer", "Omvormer"),
+                              ("e-half", "half", "Half"), ("e-leeg", "leeg", "Leeg")]}
+bij228 = {"sensor.paal228_status": "e-paal", "sensor.paal228_w": "e-paal", "sensor.zon228_w": "e-zon",
+          "sensor.half228_a": "e-half", "sensor.half228_b": "e-half", "sensor.leeg228": "e-leeg"}
+herladen228 = []
+
+
+async def herlaad228(entry_id):
+    herladen228.append(entry_id)
+
+
+hass228.config_entries = types.SimpleNamespace(async_get_entry=lambda eid: entries228.get(eid), async_reload=herlaad228,
+                                               flow=types.SimpleNamespace(async_progress=lambda: []))
+er228 = types.ModuleType("homeassistant.helpers.entity_registry")
+er228.async_get = lambda hass: types.SimpleNamespace(
+    async_get=lambda eid: types.SimpleNamespace(config_entry_id=bij228[eid]) if eid in bij228 else None)
+oud228 = sys.modules.get("homeassistant.helpers.entity_registry")
+sys.modules["homeassistant.helpers.entity_registry"] = er228
+gemeld228 = []
+
+
+async def tell228(bericht, kritiek=False, telefoon=True):
+    gemeld228.append((bericht, kritiek, telefoon))
+
+
+def loop228(coach, van, tot):
+    coach._async_tell = tell228
+    for m in range(van, tot):
+        asyncio.run(coach._async_integraties(inst228, NU228 + dt.timedelta(minutes=m)))
+
+
+try:
+    loop228(coach228, 0, 61)
+    controle("een uur na de laatste die stilviel (11:45:45) nog niet", herladen228 == [], f"{herladen228}")
+    loop228(coach228, 61, 80)
+    print(f"  herladen {herladen228}, gemeld {gemeld228}")
+    controle("om 13:00, de eerste controle na dat uur: alleen de paal, één keer; niet de omvormer die iets meldt, "
+             "niet een integratie met nog één waarde en niet een met unknown", herladen228 == ["e-paal"], f"{herladen228}")
+    opslag228 = str(coachmod.async_get_geheugen(hass228)._store._data)
+    controle("het herladen staat al in de opslag", "integratie_stil" in opslag228 and "e-paal" in opslag228, opslag228[:200])
+    # Een herstart halverwege: de nieuwe coach herlaadt niet nog eens.
+    coach228b = herstart213(hass228)
+    asyncio.run(coach228b._async_geheugen_laden())
+    loop228(coach228b, 80, 200)
+    kritiek228 = [g for g in gemeld228 if g[1]]
+    print(f"  na de herstart: herladen {herladen228}, gemeld {gemeld228}")
+    controle("na een herstart niet nog eens herladen, en niet elk kwartier",
+             herladen228 == ["e-paal"], f"{herladen228}")
+    controle("een herladen die niet hielp: één kritieke melding met de naam van de integratie",
+             len(kritiek228) == 1 and "Paal" in kritiek228[0][0] and "sensor." not in kritiek228[0][0], f"{gemeld228}")
+    # De paal komt terug: doet het weer, en een volgende storing mag weer één keer.
+    hass228.states.zet("sensor.paal228_status", "disconnected", last_updated=stempel228(dt.datetime(2026, 11, 1, 14, 52)))
+    loop228(coach228b, 200, 230)
+    weer228 = [g for g in gemeld228 if "doet het weer" in g[0]]
+    controle("terug: één keer doet het weer, alleen in de geschiedenis", len(weer228) == 1 and weer228[0][2] is False,
+             f"{gemeld228}")
+    hass228.states.zet("sensor.paal228_status", "unavailable", last_updated=stempel228(dt.datetime(2026, 11, 1, 15, 20)))
+    loop228(coach228b, 230, 300)
+    controle("een nieuwe storing, weer een uur stil: nog één keer herladen, en helpt dat niet, weer één melding",
+             herladen228 == ["e-paal", "e-paal"] and len([g for g in gemeld228 if g[1]]) == 2, f"{herladen228} {gemeld228}")
+finally:
+    sys.modules["homeassistant.helpers.entity_registry"] = oud228
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

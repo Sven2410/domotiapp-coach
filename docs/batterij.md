@@ -2089,6 +2089,28 @@ vaak ook zo bij andere integraties."
 De melding komt binnen een kwartier na het eerste kwartier na de start, net als die voor een integratie die
 niet opkomt. Proef 217 in test_coach.py.
 
+## Een geladen integratie die niets meer meldt (v0.188.0)
+
+In een klantwoning viel Home Assistant op 01-11-2026 ruim een halfuur weg, en bij het
+opstarten was DNS er nog niet. De integratie van de paal bleef op `loaded` staan, maar elke sensor ervan
+bleef `unavailable`, om 14:50 nog steeds. De eigenaar herlaadde hem toen met de hand, en om 14:52:37 kwam de
+paal terug. De coach zag het niet, want een geladen integratie raakte hij bewust nooit aan. De eigenaar: "maak
+inderdaad dat de coach alles herlaadt". Bij dezelfde storing stond de Growatt op `setup_error`, en die
+herlaadde de coach om 11:59 wel.
+
+- **Wanneer:** in dezelfde kwartierronde (`_async_stil_herladen`). Een geladen integratie waarvan **alle**
+  entiteiten die de coach gebruikt `unavailable` zijn, en de laatste daarvan al een uur
+  (`INTEGRATIE_STIL`, gerekend vanaf de `last_changed` van de laatste die stilviel).
+- **Niet:** als er nog één entiteit iets zegt, want dan is hij online (de regel van v0.166.0). `unknown`
+  telt als iets zeggen: een paal zonder auto heeft geen vermogen, en de integratie doet het gewoon.
+- **Eén keer per storing:** daarna niet weer tot er een entiteit terugkomt. Dan komt er één keer "doet het
+  weer" in de geschiedenis, en mag een volgende storing weer één keer.
+- **Helpt het niet:** dan komt er bij de volgende controle één kritieke melding "komt niet op".
+- **Een herstart:** het moment van herladen gaat naar de opslag voordat hij herlaadt (`integratie_stil` in
+  de sleutel `meldingen` van `GeheugenStore`). Een herstart halverwege herlaadt dus niet nog eens.
+
+Proef 228 in test_coach.py, ook zonder het teruglezen uit de opslag (dan herlaadt hij twee keer).
+
 ## Een batterij die de coach niet volgt (v0.167.0)
 
 In een klantwoning laadde de batterij op 27-10-2026 van 16:00:54 tot 16:17 2,5 kW van het net, in het duurste

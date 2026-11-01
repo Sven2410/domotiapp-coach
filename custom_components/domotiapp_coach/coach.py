@@ -428,6 +428,11 @@ INTEGRATIE_CONTROLE = timedelta(minutes=15)
 INTEGRATIE_MELDEN = timedelta(hours=1)
 INTEGRATIE_WACHT = timedelta(seconds=60)
 INTEGRATIE_HERLADEN = ("setup_error", "not_loaded")
+# Een geladen integratie waarvan alles wat de coach gebruikt een uur `unavailable` is (v0.188.0). In
+# een klantwoning op 01-11-2026 stond de paal na een stroomstoring drie uur zo: Home Assistant startte
+# voor DNS er was, de integratie bleef op loaded, en pas herladen met de hand bracht hem terug. De
+# eigenaar: "maak inderdaad dat de coach alles herlaadt". Eén keer per storing (`_async_stil_herladen`).
+INTEGRATIE_STIL = timedelta(hours=1)
 _ENTITEIT_ID = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
 GROWATT_DOMEIN = "growatt_server"
 GROWATT_PAUZE = timedelta(minutes=5)
@@ -1695,6 +1700,8 @@ class ChargerCoach:
         # Integraties die om opnieuw inloggen vragen en al gemeld zijn (v0.176.0).
         self._integratie_inloggen: set[str] = set()
         self._integratie_om: datetime | None = None
+        # Per geladen integratie die helemaal stil was: wanneer de coach hem herlaadde (v0.188.0).
+        self._integratie_stil: dict[str, datetime] = {}
         # Per laadpaal sinds wanneer een opdracht niet aankomt, en welke al gemeld zijn (v0.163.3).
         self._paal_weg: dict[str, datetime] = {}
         # Wat elke paal deze ronde in totaal trekt of gaat trekken, per fase (v0.164.1): voor een
@@ -2715,7 +2722,8 @@ class ChargerCoach:
 
         Elk kwartier, en het eerste kwartier na de start niet: dan zet Home Assistant zelf nog alles
         neer. Alleen `setup_error`, en `not_loaded` als de gebruiker hem niet uitzette. Een geladen
-        integratie raakt de coach nooit aan, en `setup_retry` ook niet: dat doet Home Assistant zelf.
+        integratie alleen als alles wat de coach ervan gebruikt al een uur stil is, en dan één keer
+        (`_async_stil_herladen`, v0.188.0); `setup_retry` nooit: dat doet Home Assistant zelf.
         Lukt het na `INTEGRATIE_MELDEN` nog niet, dan één melding; lukt het, dan "doet het weer".
         """
         if self._integratie_om is None:
@@ -2729,11 +2737,14 @@ class ChargerCoach:
 
             register = er.async_get(self.hass)
             entries: list[str] = []
+            per_entry: dict[str, list[str]] = {}
             for entity_id in sorted(self._eigen_entiteiten(settings)):
                 rij = register.async_get(entity_id)
                 entry_id = getattr(rij, "config_entry_id", None) if rij is not None else None
                 if entry_id and entry_id not in entries:
                     entries.append(entry_id)
+                if entry_id:
+                    per_entry.setdefault(entry_id, []).append(entity_id)
         except Exception:  # noqa: BLE001 - zonder register geen controle
             _LOGGER.debug("kon de integraties niet nakijken", exc_info=True)
             return
@@ -2766,6 +2777,8 @@ class ChargerCoach:
                     self._integratie_stuk.pop(entry_id, None)
                     self._integratie_gemeld.discard(entry_id)
                     await self._async_tell(t("De integratie {naam} doet het weer.", naam=naam), telefoon=False)
+                if stand == "loaded" and not getattr(entry, "disabled_by", None):
+                    await self._async_stil_herladen(entry, entry_id, naam, per_entry.get(entry_id) or [], now)
                 continue
             sinds = self._integratie_stuk.setdefault(entry_id, now)
             _LOGGER.warning("de integratie %s (%s) staat op %s; de coach herlaadt hem", naam, entry.domain, stand)
@@ -2787,6 +2800,57 @@ class ChargerCoach:
                       "het doet.", naam=naam),
                     kritiek=True,
                 )
+
+    async def _async_stil_herladen(
+        self, entry: Any, entry_id: str, naam: str, entity_ids: list[str], now: datetime
+    ) -> None:
+        """Een geladen integratie waarvan alles wat de coach gebruikt stil is: één keer herladen (v0.188.0).
+
+        Stil is `unavailable`; `unknown` is een integratie die er is en niets te melden heeft (een
+        paal zonder auto). Zegt er nog één entiteit iets, dan is hij online en blijft hij met rust,
+        zoals de eigenaar bij v0.166.0 wilde. Zijn ze allemaal al `INTEGRATIE_STIL` stil (sinds de
+        laatste die stilviel, `last_changed`), dan herlaadt de coach hem één keer. Daarna niet weer
+        tot er iets terugkomt: na een herladen die niet hielp één kritieke melding, en zodra er weer
+        een waarde is "doet het weer". Het moment van herladen staat in de opslag voor hij herlaadt,
+        dus een herstart halverwege herlaadt niet nog eens.
+        """
+        staten = [s for s in (self.hass.states.get(e) for e in entity_ids) if s is not None]
+        if not staten:
+            return
+        if any(str(s.state) != "unavailable" for s in staten):
+            if self._integratie_stil.pop(entry_id, None) is not None:
+                self._integratie_gemeld.discard(entry_id)
+                _LOGGER.warning("de integratie %s meldt weer iets na het herladen", naam)
+                await self._async_tell(t("De integratie {naam} doet het weer.", naam=naam), telefoon=False)
+            return
+        herladen = self._integratie_stil.get(entry_id)
+        if herladen is not None:
+            if entry_id not in self._integratie_gemeld and now - herladen >= INTEGRATIE_CONTROLE:
+                self._integratie_gemeld.add(entry_id)
+                await self._async_tell(
+                    t("De integratie {naam} komt niet op. Herlaad hem in Home Assistant, of kijk of het internet "
+                      "het doet.", naam=naam),
+                    kritiek=True,
+                )
+            return
+        sinds = max(dt_util.as_local(s.last_changed).replace(tzinfo=None) for s in staten)
+        if now - sinds < INTEGRATIE_STIL:
+            return
+        self._integratie_stil[entry_id] = now
+        try:
+            self._meldingen_onthouden()
+            await async_get_geheugen(self.hass).async_bewaar(dt_util.utcnow())
+        except Exception:  # noqa: BLE001 - dan toch herladen
+            _LOGGER.exception("kon het herladen van %s niet bewaren", naam)
+        _LOGGER.warning(
+            "de integratie %s (%s) staat op loaded, maar alles wat de coach ervan gebruikt is sinds %s "
+            "unavailable; de coach herlaadt hem", naam, entry.domain, sinds.isoformat(timespec="minutes"),
+        )
+        try:
+            async with asyncio.timeout(INTEGRATIE_WACHT.total_seconds()):
+                await self.hass.config_entries.async_reload(entry_id)
+        except Exception as err:  # noqa: BLE001 - het internet kan er nog niet zijn
+            _LOGGER.warning("de integratie %s herladen lukte niet: %s", naam, err)
 
     async def _async_reserveverloop(
         self, dynamic: dict[str, Any], van: datetime, tot: datetime
@@ -15081,6 +15145,7 @@ class ChargerCoach:
             "integratie": sorted(self._integratie_gemeld),
             "inloggen": sorted(self._integratie_inloggen),
             "integratie_stuk": {k: _naar_geheugen(v) for k, v in sorted(self._integratie_stuk.items())},
+            "integratie_stil": {k: _naar_geheugen(v) for k, v in sorted(self._integratie_stil.items())},
             "temp": sorted(str(k) for k in self._temp_gemeld),
             "vriezer": sorted([list(k) for k in self._vriezer_gemeld]),
             "stekker": sorted(self._stekker_gemeld),
@@ -15112,6 +15177,7 @@ class ChargerCoach:
         self._integratie_gemeld |= {str(k) for k in lijst("integratie")}
         self._integratie_inloggen |= {str(k) for k in lijst("inloggen")}
         self._integratie_stuk.update(momenten("integratie_stuk"))
+        self._integratie_stil.update(momenten("integratie_stil"))
         self._temp_gemeld |= {str(k) for k in lijst("temp")}
         self._vriezer_gemeld |= {(str(k[0]), str(k[1])) for k in lijst("vriezer") if isinstance(k, list) and len(k) == 2}
         self._stekker_gemeld |= {str(k) for k in lijst("stekker")}
