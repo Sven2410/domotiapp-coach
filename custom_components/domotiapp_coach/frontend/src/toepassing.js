@@ -22,6 +22,24 @@ export const heeftZon = (settings) => solarEntities(settings?.sources).length > 
 /** Of de coach minstens één apparaat mag sturen; anders doet hoe ver hij mag gaan niets. */
 export const ietsStuurbaar = (settings) => apparaten(settings).some((d) => d.controllable);
 
+/**
+ * Of de marge onder de hoofdzekering iets doet (v0.192.0): de coach stuurt iets en meet de stroom per fase,
+ * zoals `Grid.phase_amps` en `_laadruimte_w` in coach.py.
+ */
+export const margeTelt = (settings) =>
+  ietsStuurbaar(settings) && Boolean(settings?.sources?.phases_enabled)
+  && ["l1", "l2", "l3"].some((f) => settings?.sources?.phases?.[f]?.current);
+
+/**
+ * De marge onder de hoofdzekering in ampère, zoals `hoofd_marge` in planner.py (v0.192.0): het grootste van
+ * 2 A (3 A met een lastbewaker) en 8% van de zekering, of wat de bewoner koos als dat meer is.
+ */
+export function hoofdMarge(zekering, lastbewaker = false, ingesteld = null) {
+  const ondergrens = Math.max(lastbewaker ? 3 : 2, (Number(zekering) || 0) * 0.08);
+  const gekozen = ingesteld === null || ingesteld === undefined || ingesteld === "" ? 0 : Number(ingesteld);
+  return Math.max(ondergrens, Number.isFinite(gekozen) ? gekozen : 0);
+}
+
 /** Of er een thuisbatterij is die de coach stuurt: de nachtstrategie gaat over haar (`b.nacht`). */
 export const stuurbareBatterij = (settings) =>
   apparaten(settings).some((d) => d.type === "thuisbatterij" && d.controllable);

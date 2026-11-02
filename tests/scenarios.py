@@ -186,6 +186,20 @@ een_fase_krap = vast_zonnig.kopie(
     begin="2026-09-07 16:55", kabel_erin="17:00", klaar_om="23:45", duur_uren=7,
     auto=replace(BUS, soc=30.0), stap_seconden=10,
 )
+# Sinds v0.192.0 gaat ook een auto die al laadt uit als de marge op is (de eigenaar op 02-11-2026:
+# "Auto gewoon stop zetten. veiligheid voorop"). Een Ford die dan zijn beurt beëindigt, zoals op
+# 30-08-2026, moet daarna weer gaan laden: de coach start de paal opnieuw (`_niet_vol`).
+ford_geen_ruimte = een_fase_krap.kopie(
+    naam="ford-geen-ruimte", uitleg="als eenfase-krappe-zekering, maar de auto beëindigt zijn beurt zodra hij 0 A krijgt",
+    auto=replace(BUS, soc=30.0, storing_bij_nul=True),
+)
+# Een marge die de bewoner zelf ruimer zet (v0.192.0): 3x25 A met 6 A marge, en de oven op de zware fase.
+eigen_marge = vast_zonnig.kopie(
+    naam="eigen-marge", uitleg="dynamisch, geen zon, 3x25 A, de bewoner zet 6 A marge; om 02:00 gaat er 3 kW bij op de zware fase",
+    contract="dynamisch", zekering=25.0, marge=6.0, zon=Zon(wolken="geen"), voorspeller="geen",
+    huis=Huis(basis_w=1200.0), begin="2026-09-07 22:55", kabel_erin="23:00", duur_uren=8,
+    gebeurtenissen=[("02:00", "oven", 30)], stap_seconden=10,
+)
 oven = vast_zonnig.kopie(
     naam="oven-tijdens-laden", uitleg="dynamisch, geen zon, 1x25 A: om 02:00 gaat er 3 kW bij terwijl de bus op 16 A laadt",
     contract="dynamisch", aansluiting_fasen=1, zekering=25.0, zon=Zon(wolken="geen"), voorspeller="geen",
@@ -1801,7 +1815,7 @@ ALLE = [
     vast_geen_klaar_tijd, vast_krap, vast_onhaalbaar,
     dyn_zonnig, dyn_bewolkt, dyn_geen_zon, dyn_markt, dyn_salderen, dyn_avond, dyn_grote_auto,
     dyn_negatief, dyn_kwartier_later, dyn_geen_klaar_tijd,
-    meter_teken, meter_teken_om, een_fase_krap, oven, puls_snelladen, auto_neemt_minder, lastbewaker, warmtepomp, ford_bijkomen, ford_oude_opslag, warmtepomp_uit,
+    meter_teken, meter_teken_om, een_fase_krap, ford_geen_ruimte, eigen_marge, oven, puls_snelladen, auto_neemt_minder, lastbewaker, warmtepomp, ford_bijkomen, ford_oude_opslag, warmtepomp_uit,
     geen_soc, soc_opgegeven, soc_traag, laadgrens, laadgrens_ingesteld,
     doel_onder_auto, soc_stappen, bijna_vol, auto_slaapt,
     pauze, pauze_vergeten, snelladen, kabel_eruit, oude_tijden,

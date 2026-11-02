@@ -429,6 +429,9 @@ _STRATEGY = _schema(
         vol.Optional("level"): vol.In(LEVELS),
         vol.Optional("night_strategy"): bool,
         vol.Optional("plan_priority"): vol.All([str], vol.Length(max=24)),
+        # De marge onder de hoofdzekering (v0.192.0). Wat onder de ondergrens zit, trekt de coach
+        # zelf op (`hoofd_marge`), want die hangt af van de zekering en de lastbewaker.
+        vol.Optional("fuse_margin_amps"): vol.Any(None, vol.All(vol.Coerce(float), vol.Range(0, 100))),
         vol.Optional("solar_priority"): vol.All(
             [_schema({
                 vol.Required("device"): str,

@@ -691,7 +691,7 @@ een meter die hele ampères meldt geeft alleen de wissels door, en dan telt hoog
 even vaak als laag.
 
 Omlaag blijft op de mediaan gaan, want één sample dat nergens bij hoort mag een
-laadbeurt niet knijpen (`nood_ruimte`, de nacht van 30-08-2026). Omhoog niet
+laadbeurt niet knijpen (de nacht van 30-08-2026). Omhoog niet
 meer: wat er boven de staande limiet bij zou komen, komt er alleen bij als het
 ook past naast de hoogste meting van de laatste anderhalve minuut
 (`ruimten_nu` in planner.py, `phase_peak_amps` in `Grid` en `Circuit`,
@@ -1501,3 +1501,41 @@ Proeven:
 - het virtuele huis: `pt-bi-zonder-accustand` (een herstart om 23:30), `pt-bi-zonder-accustand-groot` ('s
   ochtends niet vol, de volgende nacht verder), `dynamisch-zonder-accustand` en `-donker`. `pt-bihorario` is
   dezelfde avond zonder het vinkje.
+
+## De marge onder de hoofdzekering zelf instellen, en een auto die laadt gaat ook uit (v0.192.0)
+
+De eigenaar op 02-11-2026, in een klantwoning met 30 A: "ik wil eigenlijk de load balancing marge zelf kunnen
+instellen. Ik wil hem iets veiliger zetten eigenlijk". En daarna: "marge stel ik zelf in dat moet de klant ook
+kunnen instellen tot een minimum veiligheidsmarge hard gecodeerd snap je. 2. Auto gewoon stop zetten. veiligheid
+voorop". Gemeten die avond om 22:34:57: de paal op 15 A en fase 3 op 27,0 tot 27,3 A; de coach ging tot 27,6 A.
+
+- **Eén som voor de marge** (`hoofd_marge` in planner.py, `_hoofd_marge` in coach.py): het grootste van
+  `FUSE_MARGIN_AMPS` (2 A, met een lastbewaker `BALANCER_MARGIN_AMPS`, 3 A) en `FUSE_MARGIN_SHARE` (8%) van de
+  zekering, zoals altijd, of wat de bewoner of installateur koos als dat meer is. Lager kan niet. De paal
+  (`Grid.margin_amps`), de batterij (`_laadruimte_w`, `_laadruimte_plan`) en de fasewacht (`_watch_phases`)
+  rekenden elk dezelfde regel zelf uit; nu gaan ze alle drie hierlangs. De groepen houden hun eigen regel
+  (`fuse_margin_van` met 2 A); per groep instellen kan later.
+- **Het veld staat in Voorkeuren** (`strategy.fuse_margin_amps`, kaart "Marge onder de hoofdzekering"), niet bij
+  Installatie: die tab ziet de bewoner niet (`docs/paneel.md`), en `strategy/set` mag de bewoner gebruiken. Leeg
+  is de ondergrens. Onder het veld staat "Minstens 2,4 A. De drukste fase blijft onder 26 A.", en bij een te lage
+  waarde "de coach rekent met 2,4 A". De kaart staat er alleen als de coach iets stuurt en de stroom per fase
+  meet (`margeTelt` in toepassing.js); `hoofdMarge` daar is de tweeling van `hoofd_marge`.
+- **`tight` is weg.** Sinds de nacht van 30-08-2026 hield de coach een auto die al laadde op 6 A zolang dat zonder de
+  marge nog onder de zekering paste (`nood_ruimte`), omdat de Ford na 0 A zijn beurt beëindigde. Nu is het
+  `no-room`, 0 A. Tegen één uitschieter van de meter helpt de mediaan over `FASE_VENSTER`.
+- **Na een stop voor de zekering geen naijl.** Zonder `tight` liet het virtuele huis (`eenfase-krappe-zekering`) een
+  fout zien die er al lag: de minuut na het stoppen trok de coach de 16 A die de paal net nog trok van de fasemeting
+  af (`recent_charger_amps`, `METER_NAIJL`), het huis leek leeg, en de paal ging meteen weer op 16 A. Elke drie
+  minuten 34 A op een zekering van 25, 66 wissels. Nu vergeet de coach die stroom bij een eigen `no-room`
+  (`_laatste_stroom`), en een meter die nog achterloopt maakt het huis zwaarder. In dat scenario nu van 17:30 tot
+  19:01 0 A, 4 wissels, en om 22:43 vol (klaar-tijd 23:45).
+- **Komt de auto daarna zelf niet terug**, dan zegt de paal "klaar" terwijl de accustand zegt dat hij niet vol is,
+  en start de coach de paal één keer opnieuw (`_niet_vol`, `HERSTART_WACHT`). Scenario `ford-geen-ruimte`: een auto
+  die bij 0 A zijn beurt beëindigt (`storing_bij_nul`), om 19:02 de herstart, om 19:10 laadt hij weer, om 22:51 vol.
+  Een auto zonder accustand heeft dat vangnet niet; daar blijft de melding dat hij geen stroom afneemt
+  (`STIL_AANBOD`), met een klaar-tijd.
+
+Proef 80 in test_planner.py, 34b en 232 in test_coach.py, de scenario's `eenfase-krappe-zekering`,
+`ford-geen-ruimte` en `eigen-marge` (6 A marge op 3x25 A: de drukste fase blijft tijdens de oven onder 19 A), en
+de proef "de marge onder de hoofdzekering" in test_rapport.mjs.
+

@@ -18,8 +18,8 @@
 import { define } from "../base.js";
 import { deviceLabelMap } from "../devices.js";
 import { vlakkePrijs } from "../geld.js";
-import { datum, nt, t } from "../i18n.js";
-import { heeftZon, ietsStuurbaar, stuurbareBatterij } from "../toepassing.js";
+import { datum, getal, nt, t } from "../i18n.js";
+import { heeftZon, hoofdMarge, ietsStuurbaar, margeTelt, stuurbareBatterij } from "../toepassing.js";
 import { icons } from "../icons.js";
 import { planRegels, regelUitleg, zonRegels } from "../voorrang.js";
 import {
@@ -165,6 +165,23 @@ class DacViewStrategy extends DacEditorElement {
           </div>
         </section>
 
+        <!-- De marge onder de hoofdzekering (v0.192.0). De eigenaar op 02-11-2026: "marge stel ik
+             zelf in dat moet de klant ook kunnen instellen tot een minimum veiligheidsmarge hard
+             gecodeerd". Hier en niet bij Installatie, want die tab ziet de bewoner niet. -->
+        <section class="card" id="marge-kaart">
+          <h2>${icons.plug} ${t("Marge onder de hoofdzekering")}</h2>
+          <p class="hint">
+            ${t("Zoveel ampère houdt de coach vrij onder je hoofdzekering, zodat je huis iets kan bijschakelen voordat hij terugregelt. Is de marge op, dan gaan de laadpaal en de thuisbatterij omlaag, en een auto die laadt gaat uit. Leeg is de kleinste marge die de coach toestaat.")}
+          </p>
+          <div class="fields">
+            <div class="row">
+              <label for="marge">${t("Marge (A)")}</label>
+              <input type="number" id="marge" min="0" max="100" step="0.5" inputmode="decimal">
+              <span class="sub" id="marge-uitleg"></span>
+            </div>
+          </div>
+        </section>
+
         <!-- De nachtstrategie (v0.90.0), in de woorden van de bewoner van de
              eerste woning op 23-09-2026. -->
         <section class="card" id="nacht-kaart">
@@ -269,6 +286,13 @@ class DacViewStrategy extends DacEditorElement {
     });
     this.$("#zon-standaard").addEventListener("click", () => this.zetZon_([]));
     this.$("#plan-standaard").addEventListener("click", () => this.zetPlan_([]));
+    this.$("#marge").addEventListener("input", (event) => {
+      const waarde = event.target.value.trim();
+      const getalWaarde = Number(waarde.replace(",", "."));
+      this.draft_.strategy.fuse_margin_amps = waarde === "" || !Number.isFinite(getalWaarde) ? null : getalWaarde;
+      this.paintMarge_(false);
+      this.afterChange_();
+    });
     this.$("#night").addEventListener("change", (event) => {
       this.draft_.strategy.night_strategy = event.target.checked;
       this.afterChange_();
@@ -359,6 +383,7 @@ class DacViewStrategy extends DacEditorElement {
     toon("#zon-kaart", heeftZon(d) && this.zonRegels_().length >= 2);
     toon("#plan-kaart", this.planRegels_().length >= 2);
     toon("#nacht-kaart", stuurbareBatterij(d));
+    toon("#marge-kaart", margeTelt(d));
     toon("#zelf-kleuren", heeftZon(d));
   }
 
@@ -380,9 +405,30 @@ class DacViewStrategy extends DacEditorElement {
     this.paintZon_();
     this.paintPlan_();
     this.$("#night").checked = this.draft_?.strategy?.night_strategy !== false;
+    this.paintMarge_(true);
     this.paintToepassing_();
     this.paintWeergave_();
     this.syncSaveBar_();
+  }
+
+  // --- de marge onder de hoofdzekering (v0.192.0) --------------------------
+
+  /** Het veld en wat het betekent: de ondergrens, en tot waar de drukste fase mag. */
+  paintMarge_(veldOok) {
+    const inst = this.draft_?.installation ?? {};
+    const zekering = Number(inst.fuse_amps) || 25;
+    const ingesteld = this.draft_?.strategy?.fuse_margin_amps ?? null;
+    const minimum = hoofdMarge(zekering, Boolean(inst.load_balancer));
+    const marge = hoofdMarge(zekering, Boolean(inst.load_balancer), ingesteld);
+    const a = (x) => { const r = Math.round(x * 10) / 10; return getal(r, Number.isInteger(r) ? 0 : 1); };
+    const veld = this.$("#marge");
+    if (veldOok) veld.value = ingesteld ?? "";
+    veld.placeholder = a(minimum);
+    const teLaag = ingesteld !== null && Number(ingesteld) < minimum;
+    this.$("#marge-uitleg").textContent = [
+      teLaag ? t("Minstens {min} A; de coach rekent met {min} A.", { min: a(minimum) }) : t("Minstens {min} A.", { min: a(minimum) }),
+      t("De drukste fase blijft onder {grens} A.", { grens: a(zekering - marge) }),
+    ].join(" ");
   }
 
   // --- voorrang bij zonoverschot (v0.92.0) --------------------------------

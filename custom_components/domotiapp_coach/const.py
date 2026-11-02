@@ -693,6 +693,10 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # laatst, voor de ruimte op de aansluiting. Leeg is de standaard: auto,
         # accu, boiler. Zie `plan_regels` in planner.py.
         "plan_priority": [],
+        # De marge onder de hoofdzekering in ampère, door de bewoner of de installateur gekozen
+        # (v0.192.0). Leeg is de ondergrens die de coach altijd aanhield; lager dan die kan niet
+        # (`hoofd_marge` in planner.py).
+        "fuse_margin_amps": None,
         # What it aims for when it does act. Lowest cost reckons everything in
         # euros, which by itself already prefers using your own sun over
         # exporting it; "solar" insists on the sun even when buying would be

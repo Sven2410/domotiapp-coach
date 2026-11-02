@@ -27,7 +27,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time, timedelta, timezone, tzinfo
-from typing import Callable
+from typing import Any, Callable
 
 try:
     from .taal import getal, t, tn
@@ -372,7 +372,7 @@ PRICE_MARGIN = 0.001
 # van het plan voordat hij ervoor stopt. Een halve cent per kilowattuur: een
 # hele cent is wel een reden om te stoppen (proef 40 in test_planner.py), een
 # paar tiende cent niet. Een stop is niet gratis: een auto die uitgezet wordt
-# komt daar niet altijd zelf weer uit (zie `nood_ruimte`), en in het virtuele
+# komt daar niet altijd zelf weer uit (de Ford van 30-08-2026), en in het virtuele
 # huis stopte en startte hij op een zondagochtend vier keer omdat het uur van
 # dat moment steeds een paar tiende cent duurder was dan het volgende zonuur.
 STOP_MARGIN = 0.005
@@ -1134,30 +1134,6 @@ def circuit_ceiling(charger: Charger) -> float | None:
     return charger.circuit_amps - overschot
 
 
-def nood_ruimte(grid: Grid, charger: Charger) -> float:
-    """Wat er onder de grens van de aansluiting past als de marge er niet was.
-
-    De marge is comfort en geen natuurkunde. Hij staat er zodat een huis dat een
-    oven aanzet de coach vóór is, niet omdat de laatste ampères eronder
-    gevaarlijk zouden zijn. Een laadbeurt helemaal afbreken om die marge te
-    sparen kost meer dan hij oplevert: een auto die uitgezet wordt komt daar
-    lang niet altijd zelf weer uit.
-
-    Gemeten in de klantwoning in de nacht van 30-08-2026. De huismeter meldt daar
-    elke dertig seconden en gaf om 04:28:56 één sample van 27 A op L3; tien
-    seconden ervoor en dertig erna stond hij op 10. Op dat ene getal schreef de
-    coach 0 A. De paal stond achtenzeventig seconden uit, de Ford beëindigde
-    zijn laadbeurt, en die kwam de rest van de dag niet meer terug: de auto
-    stond om 09:37 nog steeds op 69,5%.
-
-    Dit tweede getal wordt daarom alleen gebruikt om een auto die al laadt op de
-    laagste stand aan te houden. De grens zelf blijft heilig: past `MIN_AMPS` er
-    ook zonder marge niet meer bij, dan gaat hij alsnog uit.
-    """
-    alle = ruimten(grid, charger, marge=False)
-    return min(ruimte for _naam, ruimte in alle) if alle else float("inf")
-
-
 def fuse_limited(grid: Grid, car: Car, charger: Charger) -> bool:
     """Whether the fuse is what is holding the charge down, not the charger or the car.
 
@@ -1245,6 +1221,24 @@ def fuse_margin(grid: Grid) -> float:
 def fuse_margin_van(fuse_amps: float, margin_amps: float) -> float:
     """Dezelfde marge voor elke zekering, ook die van een groep."""
     return max(margin_amps, fuse_amps * FUSE_MARGIN_SHARE)
+
+
+def hoofd_marge(fuse_amps: float, lastbewaker: bool = False, ingesteld: Any = None) -> float:
+    """De marge onder de hoofdzekering, in ampère (v0.192.0).
+
+    De ondergrens is wat de coach altijd aanhield: `FUSE_MARGIN_AMPS` of `FUSE_MARGIN_SHARE` van de
+    zekering, het grootste van de twee, en `BALANCER_MARGIN_AMPS` met een eigen lastbewaker. Daarboven
+    kiest de bewoner of de installateur zelf (`strategy.fuse_margin_amps`); lager kan niet. De eigenaar
+    op 02-11-2026: "marge stel ik zelf in dat moet de klant ook kunnen instellen tot een minimum
+    veiligheidsmarge hard gecodeerd". Elke plek die de marge van de hoofdzekering nodig heeft, gaat
+    hierlangs: de paal (`Grid.margin_amps`), de batterij en de grenzen in coach.py.
+    """
+    ondergrens = fuse_margin_van(fuse_amps, BALANCER_MARGIN_AMPS if lastbewaker else FUSE_MARGIN_AMPS)
+    try:
+        gekozen = float(ingesteld) if ingesteld not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        gekozen = 0.0
+    return max(ondergrens, gekozen)
 
 
 # The words the Easee reports when something other than the coach is holding the
@@ -3634,27 +3628,11 @@ def _decide(
         )
 
     if ceiling < MIN_AMPS:
-        # Een auto die al laadt gaat niet uit voor de marge alleen. Zie
-        # `nood_ruimte` voor waarom dat onderscheid er is.
-        # En alleen als het de marge onder de zekering is die knijpt. Zegt de
-        # lastbewaker zelf dat er niets meer in kan, of kan de paal of de auto
-        # niet lager, dan valt er niets aan te houden.
-        bewaker = beschikbaar_van_bewaker(grid)
-        if (
-            charger.charging
-            and nood_ruimte(grid, charger) >= MIN_AMPS
-            and (bewaker is None or bewaker >= MIN_AMPS)
-        ):
-            return Decision(
-                True,
-                MIN_AMPS,
-                t(
-                    "{wie} zit bijna vol, dus hij laadt door op de laagste stand.",
-                    wie=_aansluiting(grid, car, charger),
-                ),
-                plan=t("Gaat weer omhoog zodra er ruimte is."),
-                rule="tight",
-            )
+        # Ook een auto die al laadt gaat uit als de marge op is (v0.192.0). Tot dan hield de coach
+        # hem op de laagste stand zolang dat zonder de marge nog paste (`nood_ruimte`, de regel
+        # `tight`), omdat de Ford in de klantwoning na 0 A op 30-08-2026 niet meer opkwam. De
+        # eigenaar op 02-11-2026: "Auto gewoon stop zetten. veiligheid voorop". Komt hij daarna
+        # niet zelf terug, dan start de coach de paal opnieuw (`_niet_vol` in coach.py).
         return Decision(
             False,
             0,
@@ -4630,7 +4608,7 @@ def kies_fasen(drie: Decision, een: Decision, surplus_w: float, nu_fasen: int) -
 
 
 NEVER_HOLD = frozenset(
-    {"disconnected", "complete", "user-hold", "no-room", "tight", "no-prices", "no-soc", "blok-wacht"}
+    {"disconnected", "complete", "user-hold", "no-room", "no-prices", "no-soc", "blok-wacht"}
 )
 
 

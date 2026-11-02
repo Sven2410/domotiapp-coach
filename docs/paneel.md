@@ -17,7 +17,7 @@ de antwoorden op de acht vragen (privénotities, `indeling-bewoner-installateur.
 | Overzicht | iedereen | de kaarten, met per apparaat **Instellen** |
 | Historie | iedereen | |
 | Meldingen | iedereen | personen toevoegen en weghalen, de schuiven, de drempels (zware belasting, lekkage, temperatuur van de batterij) |
-| Voorkeuren | iedereen | hoeveel de coach zelf doet, de voorrang, de nacht, en het overzicht (kleurdrempels, de kaart met de fasen) |
+| Voorkeuren | iedereen | hoeveel de coach zelf doet, de voorrang, de nacht, de marge onder de hoofdzekering (v0.192.0, `docs/laadpaal.md`), en het overzicht (kleurdrempels, de kaart met de fasen) |
 | Apparaten | installateur | alleen de hardware: type, merk, entiteiten, mag sturen, fasen wisselen, de technische kant van de batterij, de auto's (merk, accu, stroom, fasen, sensoren, wekknop), de programmatabel, ruimtes |
 | Installatie | installateur | woning en aansluiting, kasten en groepen, energiebronnen, fasen, zonverwachting, meterstanden, navigatie |
 | Contract | iedereen | het contract van nu en de eerdere; de bewoner leest, en bevestigt zijn stroomprijs met "Ja, dit klopt" |
