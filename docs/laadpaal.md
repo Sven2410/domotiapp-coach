@@ -1396,6 +1396,21 @@ Er zijn drie regels bij gekomen:
 Proef 224, met een herstart halverwege. Wat er nog zo is: de klok van tien minuten van de sensorwacht
 (`_sensor_stil`) begint na een herstart opnieuw.
 
+**Sinds v0.190.0 leest ook een airco, boiler, smart plug of overig apparaat zonder "mag sturen" alleen mee**
+(`MEELEZEN_TYPES`, `_sensoren_meelezen`). In een klantwoning was de stekker onder een airco die de coach niet
+stuurt op 31-10-2026 elf minuten van de wifi. De airco stond uit (1,5 W), en toch kwam er om 22:38 een kritieke
+melding met "De coach rekent zolang zonder". Van 21-09 tot 31-10 gingen 35 van de 47 kritieke stiltemeldingen
+zo: twee airco's, een boiler en een stofzuiger aan een stekker. Nu is het een gewone melding, zonder die zin. Het
+vermogen blijft wel in de sensorwacht, want Historie trekt het af van het huisverbruik.
+
+Drie uitzonderingen blijven kritiek:
+- **Een stekker die altijd aan moet staan** (`_altijd_aan`), want daar doet de coach iets mee.
+- **Een apparaat waarmee de coach een groep zonder meter bewaakt** (`devices` van een groep in de installatie).
+- **Een vriezer of koelkast**: daar is melden het werk (`_temp_nodig`).
+
+Leest de hele bundel alleen mee, dan staat het in het log als info en niet als waarschuwing. Wie het log
+bewaakt krijgt er anders alsnog een alarm op. Proef 230, met een herstart halverwege.
+
 ## Een accustand die vastzit (v0.176.0)
 
 In een klantwoning stond de accustand van een bus op 28-10-2026 de hele dag op 25%. Er gingen in twee beurten

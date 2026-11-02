@@ -2111,6 +2111,36 @@ herlaadde de coach om 11:59 wel.
 
 Proef 228 in test_coach.py, ook zonder het teruglezen uit de opslag (dan herlaadt hij twee keer).
 
+### Niet bij een omvormer die slaapt, en niet bij een helper (v0.190.0)
+
+In een klantwoning gaat de omvormer elke avond bij zonsondergang van het netwerk, en komt hij 's ochtends
+vanzelf terug: op 30-10, 31-10 en 01-11-2026 tussen 07:39 en 07:51. v0.188.0 herlaadde hem op 02-11 om 18:39,
+een uur nadat hij stilviel. Daarna bleef hij op `setup_retry`, en ook de kWh-teller die de coach van hem leest
+werd `unavailable`. Die teller is een `utility_meter`, en die herlaadde de coach om 19:54 ook. Twee keer
+herladen op één avond, voor iets dat met herladen niet te verhelpen is.
+
+- **Een omvormer die slaapt:** is alles wat de coach van een integratie gebruikt van de omvormers
+  (`zon_entiteiten`: de vermogenssensoren en de kWh-tellers), en staat de zon onder `ZON_SLAAPT_ONDER`
+  (10°), dan wacht hij. Dat is dezelfde regel als in de sensorwacht. Een integratie met ook iets anders erin,
+  zoals een batterij, blijft zoals hij was.
+- **'s Ochtends** telt het uur vanaf het moment dat de zon boven de 10° kwam (`_zon_wakker`), niet vanaf de
+  avond ervoor. Anders herlaadt hij hem meteen bij 10°, terwijl een omvormer er in een klantwoning op 17 en
+  18-09-2026 pas 55 tot 64 minuten na zonsopkomst was. Dat moment staat in de opslag (`zon_wakker` in
+  `meldingen`). Na een herstart overdag zonder dat moment telt de start: hoogstens later herladen, nooit
+  eerder. Voor de kritieke melding na een herladen die niet hielp geldt hetzelfde uur.
+- **Overdag** is een stille omvormer een storing, en herlaadt hij zoals v0.188.0.
+- **Een helper herlaadt hij nooit** (`integration_type` `helper` in het manifest: `utility_meter`,
+  `template`, `derivative`, `integration`, `statistics`). Een helper is stil omdat zijn bron stil is, en de bron
+  zelf valt al onder deze regel. Weet de coach het type niet, dan herlaadt hij zoals voorheen.
+- **Een integratie van apparaten die de coach alleen uitleest** (`_alleen_uitlezen`, met hun kWh-teller erbij,
+  zoals de stekker onder een airco zonder sturen) herlaadt hij nog wel, want het vermogen telt in Historie. Het staat dan als info in het log, en "komt niet
+  op" is een gewone melding, geen kritieke.
+- **Goed nieuws** ("meldt weer iets na het herladen", "is herladen en doet het weer", "is weer ingelogd") staat
+  als info in het log en niet als waarschuwing.
+
+Proef 231 in test_coach.py, met een herstart 's nachts en een 's ochtends, en zonder `sun.sun` en zonder
+integratietype (dan herlaadt hij zoals voorheen).
+
 ## Een batterij die de coach niet volgt (v0.167.0)
 
 In een klantwoning laadde de batterij op 27-10-2026 van 16:00:54 tot 16:17 2,5 kW van het net, in het duurste

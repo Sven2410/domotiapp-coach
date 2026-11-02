@@ -14054,6 +14054,213 @@ c229d._zon_kwh = dict(DAG229)
 controle("na een herstart geen oordeel, en dus geen correctie, tot er weer genoeg gemeten is",
          c229d._zon_gemeten(D229.replace(hour=9, minute=31)) is None, "")
 
+print("=== 230. een apparaat dat de coach alleen uitleest: een stille sensor is geen kritieke melding (v0.190.0) ===")
+# Een klantwoning op 31-10-2026: de stekker onder een airco die de coach niet stuurt was elf minuten van de wifi, en
+# de bewoner kreeg een kritieke melding met "De coach rekent zolang zonder". Van 21-09 tot 31-10 gingen 35 van de 47
+# kritieke stiltemeldingen zo: twee airco's, een boiler en een stofzuiger aan een stekker, allemaal zonder sturen.
+AIRCO230 = {"id": "dev-airco230", "type": "airco", "name": "Airco boven", "controllable": False,
+            "entity": "sensor.airco230_w", "entities": {}}
+BOILER230 = {"id": "dev-boiler230", "type": "boiler", "name": "Boiler", "controllable": False,
+             "entity": "sensor.boiler230_w", "entities": {}}
+ROBOT230 = {"id": "dev-robot230", "type": "overig", "name": "Robot", "entity": "sensor.robot230_w", "entities": {}}
+PLUG230 = {"id": "dev-plug230", "type": "smartplug", "appliance": "overig", "name": "Pomp", "controllable": False,
+           "entity": "sensor.pomp230_w", "entities": {}}
+ALTIJD230 = {"id": "dev-altijd230", "type": "smartplug", "appliance": "overig", "name": "Aquarium", "always_on": True,
+             "controllable": False, "entity": "sensor.aquarium230_w", "entities": {"switch": "switch.aquarium230"}}
+GROEP230 = {"id": "dev-groep230", "type": "smartplug", "appliance": "overig", "name": "Kachel", "controllable": False,
+            "entity": "sensor.kachel230_w", "entities": {}}
+inst230 = instellingen(devices=[LAADPAAL, AIRCO230, BOILER230, ROBOT230, PLUG230, ALTIJD230, GROEP230, VRIEZER,
+                                {**AIRCO230, "id": "dev-airco230b", "controllable": True, "entity": "sensor.stuur230_w"}])
+inst230["installation"] = {**inst230["installation"], "circuits": [
+    {"id": "schuur", "name": "Schuur", "parent": "", "devices": [{"device": "dev-groep230"}]}]}
+mee230 = coachmod.ChargerCoach._sensoren_meelezen(inst230)
+controle("een airco, boiler, smart plug en overig apparaat zonder sturen lezen alleen mee",
+         {"sensor.airco230_w", "sensor.boiler230_w", "sensor.robot230_w", "sensor.pomp230_w"} <= mee230, f"{mee230}")
+controle("niet een airco die de coach stuurt, een stekker die altijd aan moet, een apparaat in een groep zonder meter "
+         "of een vriezer",
+         not mee230 & {"sensor.stuur230_w", "sensor.aquarium230_w", "sensor.kachel230_w", "sensor.vriezer_w",
+                       "sensor.laadpaal_vermogen"}, f"{mee230}")
+T230 = dt.datetime(2026, 10, 31, 22, 27)
+
+
+class Log230(coachmod.logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.rijen = []
+
+    def emit(self, record):
+        self.rijen.append((record.levelname, record.getMessage()))
+
+
+def stil230(airco, herstart=True):
+    """De stekker van de airco valt om 22:28 weg, met een herstart halverwege. Geeft de meldingen en het log."""
+    inst = instellingen(devices=[LAADPAAL, airco])
+    hass, _, coach = bouw({**huis(), "sensor.airco230_w": "1.5"}, inst)
+    asyncio.run(coach._async_geheugen_laden())
+    log = Log230()
+    coachmod._LOGGER.addHandler(log)
+    coachmod._LOGGER.setLevel(coachmod.logging.INFO)
+    coachmod.logging.disable(coachmod.logging.NOTSET)  # het harnas zet het log uit
+    try:
+        asyncio.run(coach._async_sensorwacht(inst, T230))
+        hass.states.zet("sensor.airco230_w", "unavailable")
+        asyncio.run(coach._async_sensorwacht(inst, T230 + dt.timedelta(minutes=1)))
+        if herstart:
+            coach._meldingen_onthouden()
+            coach = herstart213(hass)
+            asyncio.run(coach._async_geheugen_laden())
+        for m in (6, 12, 17, 18):
+            asyncio.run(coach._async_sensorwacht(inst, T230 + dt.timedelta(minutes=m)))
+    finally:
+        coachmod.logging.disable(coachmod.logging.WARNING)
+        coachmod._LOGGER.setLevel(coachmod.logging.NOTSET)
+        coachmod._LOGGER.removeHandler(log)
+    meldingen = [(g["kind"], g["message"]) for g in asyncio.run(coachmod.async_get_meldingen(hass).async_list())]
+    return meldingen, [r for r in log.rijen if "airco230" in r[1]]
+
+
+mee230b, log230b = stil230(AIRCO230)
+print(f"  zonder sturen: {mee230b} {log230b}")
+controle("een airco zonder sturen die stilvalt: een gewone melding zonder 'rekent zolang zonder', ook na een herstart",
+         mee230b == [("melding", "Het vermogen van Airco boven meldt al 11 minuten niets. Waarschijnlijk hapert de "
+                                 "integratie erachter.")], f"{mee230b}")
+controle("en in het log geen waarschuwing, alleen info", log230b and all(r[0] == "INFO" for r in log230b), f"{log230b}")
+stuur230, logs230 = stil230({**AIRCO230, "controllable": True})
+controle("een airco die de coach stuurt: kritiek zoals voorheen, met een waarschuwing in het log",
+         stuur230 == [("kritiek", "Het vermogen van Airco boven meldt al 11 minuten niets. Waarschijnlijk hapert de "
+                                  "integratie erachter. De coach rekent zolang zonder.")]
+         and any(r[0] == "WARNING" for r in logs230), f"{stuur230} {logs230}")
+
+print("=== 231. een omvormer die slaapt en een helper: niet herladen (v0.190.0) ===")
+# Een klantwoning op 02-11-2026: de omvormer gaat elke avond bij zonsondergang van het netwerk en komt 's ochtends
+# vanzelf terug. v0.188.0 herlaadde hem een uur later (18:39), en daarna bleef hij op setup_retry. Om 19:54 herlaadde
+# hij ook de kWh-teller van de omvormer, een utility_meter die stil was omdat zijn bron weg was.
+inst231 = instellingen(devices=[LAADPAAL])
+inst231["sources"]["solar"] = "sensor.omv231_w"
+inst231["sources"]["meters"] = {"solar_total": "sensor.omv231_kwh"}
+inst231["sources"]["extra"] = {"a": "sensor.hulp231", "b": "sensor.stekker231_w"}
+# De stekker van de airco met zijn kWh-teller: allebei van dezelfde integratie.
+inst231["devices"] = [LAADPAAL, {**AIRCO230, "entity": "sensor.stekker231_w", "energy_entity": "sensor.stekker231_kwh"}]
+D231 = dt.datetime(2026, 11, 2)
+
+
+def utc231(moment):
+    return moment.replace(tzinfo=dt.timezone.utc)
+
+
+def zon231(hass, hoogte):
+    hass.states.zet("sun.sun", {"state": "below_horizon" if hoogte < 0 else "above_horizon",
+                                "attributes": {"elevation": hoogte}})
+
+
+bij231 = {"sensor.omv231_w": "e-omv", "sensor.omv231_kwh": "e-teller", "sensor.hulp231": "e-hulp",
+          "sensor.stekker231_w": "e-stekker", "sensor.stekker231_kwh": "e-stekker"}
+entries231 = {k: types.SimpleNamespace(domain=d, title=n, state="loaded", disabled_by=None)
+              for k, d, n in [("e-omv", "omvormer", "Omvormer"), ("e-teller", "utility_meter", "Teller"),
+                              ("e-hulp", "template", "Hulp"), ("e-stekker", "stekker", "Stekker")]}
+er231 = types.ModuleType("homeassistant.helpers.entity_registry")
+er231.async_get = lambda hass: types.SimpleNamespace(
+    async_get=lambda eid: types.SimpleNamespace(config_entry_id=bij231[eid]) if eid in bij231 else None)
+
+
+async def integratie231(hass, domein):
+    return types.SimpleNamespace(integration_type="helper" if domein in ("utility_meter", "template") else "device")
+
+
+laden231 = types.ModuleType("homeassistant.loader")
+laden231.async_get_integration = integratie231
+oud231 = {k: sys.modules.get(k) for k in ("homeassistant.helpers.entity_registry", "homeassistant.loader")}
+
+
+def huis231(omv=(17, 35), teller=(18, 39), hulp=(12, 0), stekker=(12, 0), helpers=True):
+    """Alles stil vanaf de tijden; geeft een coach met de nep van Home Assistant eromheen."""
+    hass, _, coach = bouw(huis(), inst231)
+    asyncio.run(coach._async_geheugen_laden())
+    for e, m in [("sensor.omv231_w", omv), ("sensor.omv231_kwh", teller), ("sensor.hulp231", hulp),
+                 ("sensor.stekker231_w", stekker), ("sensor.stekker231_kwh", stekker)]:
+        hass.states.zet(e, "unavailable", last_updated=utc231(D231.replace(hour=m[0], minute=m[1])))
+    zon231(hass, -5.0)
+    hass.herladen = []
+
+    async def herlaad(entry_id):
+        hass.herladen.append(entry_id)
+
+    hass.config_entries = types.SimpleNamespace(async_get_entry=lambda eid: entries231.get(eid), async_reload=herlaad,
+                                                flow=types.SimpleNamespace(async_progress=lambda: []))
+    if not helpers:
+        sys.modules["homeassistant.loader"] = None
+    return hass, coach
+
+
+def loop231(hass, coach, van, tot, gemeld):
+    async def tell(bericht, kritiek=False, telefoon=True):
+        gemeld.append((bericht, kritiek, telefoon))
+
+    coach._async_tell = tell
+    t = van
+    while t < tot:
+        asyncio.run(coach._async_integraties(inst231, t))
+        t += dt.timedelta(minutes=1)
+
+
+try:
+    sys.modules["homeassistant.helpers.entity_registry"] = er231
+    sys.modules["homeassistant.loader"] = laden231
+    # De avond en de nacht, met een herstart om 23:00: de omvormer en zijn teller blijven met rust.
+    hass231, coach231 = huis231()
+    gemeld231 = []
+    loop231(hass231, coach231, D231.replace(hour=17, minute=36), D231.replace(hour=23), gemeld231)
+    coach231._meldingen_onthouden()  # dat doet elke ronde
+    coach231 = herstart213(hass231)
+    asyncio.run(coach231._async_geheugen_laden())
+    loop231(hass231, coach231, D231.replace(hour=23), D231.replace(hour=23, minute=59), gemeld231)
+    print(f"  's nachts herladen {hass231.herladen}, gemeld {gemeld231}")
+    controle("een omvormer die slaapt, en zijn kWh-teller: 's nachts niet herladen, ook na een herstart",
+             not {"e-omv", "e-teller"} & set(hass231.herladen), f"{hass231.herladen}")
+    controle("een helper die al een uur stil is niet, ook overdag niet", "e-hulp" not in hass231.herladen,
+             f"{hass231.herladen}")
+    controle("de stekker van een airco zonder sturen wel, en 'komt niet op' is dan geen kritiek",
+             hass231.herladen == ["e-stekker"] and len([g for g in gemeld231 if "Stekker" in g[0]]) == 1
+             and not [g for g in gemeld231 if g[1]], f"{hass231.herladen} {gemeld231}")
+    # De ochtend: om 07:40 staat de zon op 5 graden, om 08:00 op 12. Een herstart om 08:20.
+    D231b = D231 + dt.timedelta(days=1)
+    zon231(hass231, 5.0)
+    loop231(hass231, coach231, D231b.replace(hour=7, minute=40), D231b.replace(hour=8), gemeld231)
+    zon231(hass231, 12.0)
+    loop231(hass231, coach231, D231b.replace(hour=8), D231b.replace(hour=8, minute=20), gemeld231)
+    wakker231 = coach231._zon_wakker
+    coach231._meldingen_onthouden()
+    coach231 = herstart213(hass231)
+    asyncio.run(coach231._async_geheugen_laden())
+    controle("het moment dat de zon boven de tien graden kwam overleeft een herstart",
+             wakker231 == D231b.replace(hour=8) and coach231._zon_wakker == wakker231, f"{wakker231} {coach231._zon_wakker}")
+    loop231(hass231, coach231, D231b.replace(hour=8, minute=20), D231b.replace(hour=8, minute=59), gemeld231)
+    controle("in het uur daarna niet: de omvormer mag wakker worden", "e-omv" not in hass231.herladen,
+             f"{hass231.herladen}")
+    loop231(hass231, coach231, D231b.replace(hour=8, minute=59), D231b.replace(hour=9, minute=40), gemeld231)
+    kritiek231 = [g for g in gemeld231 if g[1]]
+    print(f"  's ochtends herladen {hass231.herladen}, kritiek {kritiek231}")
+    controle("komt hij een uur na de tien graden niet, dan één keer herladen, en daarna één kritieke melding",
+             hass231.herladen.count("e-omv") == 1 and len(kritiek231) == 1 and "Omvormer" in kritiek231[0][0],
+             f"{hass231.herladen} {kritiek231}")
+    controle("de helper nog steeds niet", "e-teller" not in hass231.herladen and "e-hulp" not in hass231.herladen,
+             f"{hass231.herladen}")
+    # Overdag is een stille omvormer wel een storing: om 12:00 weg, om 13:00 herladen zoals voorheen.
+    hass231c, coach231c = huis231(omv=(12, 0))
+    zon231(hass231c, 30.0)
+    loop231(hass231c, coach231c, D231.replace(hour=12), D231.replace(hour=13, minute=20), [])
+    controle("overdag een stille omvormer: herladen na een uur, zoals v0.188.0", "e-omv" in hass231c.herladen,
+             f"{hass231c.herladen}")
+    # Zonder deze regels: de omvormer om 18:39 herladen, zoals in de klantwoning, en de helpers ook.
+    hass231d, coach231d = huis231(helpers=False)
+    hass231d.states.waarden.pop("sun.sun")
+    loop231(hass231d, coach231d, D231.replace(hour=17, minute=36), D231.replace(hour=21), [])
+    print(f"  zonder zon en zonder integratietype: {hass231d.herladen}")
+    controle("zonder sun.sun en zonder integratietype herlaadt hij zoals voorheen",
+             {"e-omv", "e-teller", "e-hulp"} <= set(hass231d.herladen), f"{hass231d.herladen}")
+finally:
+    sys.modules.update(oud231)
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
