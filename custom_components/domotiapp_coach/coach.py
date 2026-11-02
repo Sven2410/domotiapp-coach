@@ -116,7 +116,6 @@ from .planner import (
     zon_rang,
     zon_regels,
     Apparaat,
-    BALANCER_MARGIN_AMPS,
     AIRCO_AAN_OP,
     AIRCO_STAP_C,
     Airco,
@@ -144,7 +143,8 @@ from .planner import (
     profiel_gemiddeld,
     CHARGE_EFFICIENCY,
     FUSE_MARGIN_AMPS,
-    FUSE_MARGIN_SHARE,
+    fuse_margin_van,
+    hoofd_marge,
     Car,
     Charger,
     Circuit,
@@ -568,7 +568,8 @@ MEETNAIJL = timedelta(minutes=5)
 
 # Over hoeveel tijd de fasestromen worden gladgestreken voor er een besluit op
 # valt. De huismeter van de klantwoning meldt elke dertig seconden en gooit er af
-# en toe één sample uit dat nergens bij hoort; zie `nood_ruimte` in planner.py.
+# en toe één sample uit dat nergens bij hoort: op 30-08-2026 om 04:28:56 27 A op L3, tien
+# seconden ervoor en dertig erna 10.
 # Een mediaan over anderhalve minuut haalt zo'n enkele uitschieter eruit en
 # laat een huis dat werkelijk bijschakelt er binnen twee metingen door.
 #
@@ -1015,6 +1016,16 @@ def zon_entiteiten(settings: dict[str, Any]) -> set[str]:
     tellers = [meters.get("solar_total"), *(meters.get("solar_total_extra") or []),
                *(bronnen.get("solar_total_extra") or [])]
     return set(zonsensoren(settings)) | {z for z in tellers if isinstance(z, str) and z}
+
+
+def _hoofd_marge(settings: dict[str, Any]) -> float:
+    """De marge onder de hoofdzekering voor deze installatie (`hoofd_marge` in planner.py, v0.192.0)."""
+    installation = settings.get("installation") or {}
+    return hoofd_marge(
+        float(installation.get("fuse_amps") or 25),
+        bool(installation.get("load_balancer")),
+        (settings.get("strategy") or {}).get("fuse_margin_amps"),
+    )
 
 
 def _moment(now: datetime | None = None) -> datetime:
@@ -3698,17 +3709,14 @@ class ChargerCoach:
         # hoofdaansluiting iets merkt.
         grenzen: dict[str, float] = {}
         zekering = float(installation.get("fuse_amps") or 25)
-        marge = (
-            BALANCER_MARGIN_AMPS if installation.get("load_balancer") else FUSE_MARGIN_AMPS
-        )
         for entity in entities:
-            grenzen[entity] = zekering - max(marge, zekering * FUSE_MARGIN_SHARE)
+            grenzen[entity] = zekering - _hoofd_marge(settings)
         if steerable:
             for groep in installation.get("circuits") or []:
                 if not isinstance(groep, dict):
                     continue
                 grens_groep = float(groep.get("fuse_amps") or 16)
-                grens_groep -= max(FUSE_MARGIN_AMPS, grens_groep * FUSE_MARGIN_SHARE)
+                grens_groep -= fuse_margin_van(grens_groep, FUSE_MARGIN_AMPS)
                 for key in ("l1", "l2", "l3"):
                     sensor = ((groep.get("sensors") or {}).get(key) or {}).get("current")
                     if sensor:
@@ -6878,10 +6886,9 @@ class ChargerCoach:
         eigen_a = max(0.0, batterij_w or 0.0) / VOLTS
         if sources.get("phases_enabled"):
             zekering = float(installation.get("fuse_amps") or 25)
-            marge = BALANCER_MARGIN_AMPS if installation.get("load_balancer") else FUSE_MARGIN_AMPS
             stromen = stromen_uit(sources.get("phases") or {}, True)
             if stromen:
-                ruimten.append(zekering - max(marge, zekering * FUSE_MARGIN_SHARE) - max(stromen)
+                ruimten.append(zekering - _hoofd_marge(settings) - max(stromen)
                                - (hoger or {}).get("", 0.0) + eigen_a)
         # En elke groep waar de batterij aan hangt, met haar eigen zekering en
         # meter. Op een eenfasige groep is er maar één meting en telt die.
@@ -6894,13 +6901,13 @@ class ChargerCoach:
             stromen = stromen_uit(groep.get("sensors") or {}, int(groep.get("phases") or 3) == 3)
             # Wat ze zelf laadt zit alleen in een meting; zonder meter komt het er niet weer bij.
             if stromen:
-                ruimten.append(zekering - max(FUSE_MARGIN_AMPS, zekering * FUSE_MARGIN_SHARE) - max(stromen)
+                ruimten.append(zekering - fuse_margin_van(zekering, FUSE_MARGIN_AMPS) - max(stromen)
                                - (hoger or {}).get(str(groep.get("id")), 0.0) + eigen_a)
             else:
                 # Plus wat de apparaten trekken die bij de groep gekozen zijn (v0.165.0), op haar fase.
                 bekend = self._groep_som(settings, groep) or {}
                 op_fase = bekend.get(fase) if fase in bekend else max(bekend.values(), default=0.0)
-                ruimten.append(zekering - max(FUSE_MARGIN_AMPS, zekering * FUSE_MARGIN_SHARE)
+                ruimten.append(zekering - fuse_margin_van(zekering, FUSE_MARGIN_AMPS)
                                - alles.get(str(groep.get("id")), 0.0) - (op_fase or 0.0))
         if not ruimten:
             return None
@@ -6993,11 +7000,10 @@ class ChargerCoach:
         eigen_zekeringen: dict[str, float] = {}
         if sources.get("phases_enabled") and bewaakt(sources.get("phases") or {}, fase if fasen == 1 else None):
             zekering = float(installation.get("fuse_amps") or 25)
-            marge = BALANCER_MARGIN_AMPS if installation.get("load_balancer") else FUSE_MARGIN_AMPS
-            eigen_zekeringen[""] = zekering - max(marge, zekering * FUSE_MARGIN_SHARE)
+            eigen_zekeringen[""] = zekering - _hoofd_marge(settings)
         for groep in self._groepen_keten(settings, device):
             zekering = float(groep.get("fuse_amps") or 16)
-            eigen_zekeringen[str(groep.get("id"))] = zekering - max(FUSE_MARGIN_AMPS, zekering * FUSE_MARGIN_SHARE)
+            eigen_zekeringen[str(groep.get("id"))] = zekering - fuse_margin_van(zekering, FUSE_MARGIN_AMPS)
         if not eigen_zekeringen:
             return []
 
@@ -9435,6 +9441,13 @@ class ChargerCoach:
         await self._async_proef_na(now, device, car, charger, decision)
         if decision.rule == "complete":
             self._te_laat.discard(device_id)
+        # Zet de coach de paal zelf uit omdat er geen ruimte is (v0.192.0), dan telt de stroom die
+        # hij net nog trok niet als naijl van de meter (`recent_charger_amps`). Anders leek het huis
+        # een ronde later leeg en ging de paal meteen weer op 16 A. In het virtuele huis
+        # (`eenfase-krappe-zekering`) zonder dit elke drie minuten 34 A op een zekering van 25. Een
+        # meter die nog achterloopt maakt het huis nu zwaarder, niet lichter.
+        if decision.rule.split("+")[0] == "no-room":
+            self._laatste_stroom.pop(device_id, None)
         if decision.rule.startswith("deadline") and window.deadline is not None:
             self._deadline_for[device_id] = window.deadline
         elif not decision.charge or decision.rule in ("boost", "complete"):
@@ -11496,12 +11509,9 @@ class ChargerCoach:
             charger_amps=charger_amps,
             # An installation with a balancer of its own guards the same fuse in
             # hardware. The coach widens its margin so it is the one to give way
-            # and the two never reach for the same amp at the same second.
-            margin_amps=(
-                BALANCER_MARGIN_AMPS
-                if installation.get("load_balancer")
-                else FUSE_MARGIN_AMPS
-            ),
+            # and the two never reach for the same amp at the same second. Sinds
+            # v0.192.0 kan de bewoner hem ruimer zetten (`hoofd_marge` in planner.py).
+            margin_amps=_hoofd_marge(settings),
             # Wat de lastbewaker op dit moment vrijgeeft, als de klant die
             # sensor heeft ingevuld. Zie `beschikbaar_van_bewaker` in planner.py:
             # dat is een restwaarde en geen tweede zekering.

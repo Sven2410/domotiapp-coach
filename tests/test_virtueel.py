@@ -198,9 +198,11 @@ for naam, vl in V.items():
     # waar dat uur voor bedoeld is: een warmtepomp zonder patroon eet er een
     # deel van op, en het gemeten plafond (v0.61.0) ziet het opnieuw aanlopen
     # na elke onderbreking niet voordat er geladen wordt. Vol vóór de
-    # klaar-tijd, en dat staat in zijn eigen controle.
+    # klaar-tijd, en dat staat in zijn eigen controle. `ford-geen-ruimte` (v0.192.0) laadt na het koken
+    # onafgebroken op 16 A; de negen minuten die de auto na de herstart nodig heeft zijn er niet in te
+    # halen. Zonder `tight` stopt hij voor de zekering, en dat wilde de eigenaar: "veiligheid voorop".
     if (gehaald(vl) and vl.klaar_tijd is not None and vl.klaar_op is not None
-            and naam not in ("afbouw-krap", "warmtepomp-nacht")):
+            and naam not in ("afbouw-krap", "warmtepomp-nacht", "ford-geen-ruimte")):
         controle(f"{naam}: een uur voor de klaar-tijd al vol",
                  vl.klaar_op <= vl.klaar_tijd - virtueel.dt.timedelta(minutes=55),
                  f"vol om {vl.klaar_op:%H:%M}, klaar-tijd {vl.klaar_tijd:%H:%M}")
@@ -211,7 +213,7 @@ for naam, vl in V.items():
     # driefasige auto 0,4 kWh over de grens heen.
     # Sinds v0.79.0 alleen bij een vast contract: bij dynamisch is de piek een
     # gewoon uur op zijn prijs (de bewoner van de eerste woning, 22-09-2026).
-    if (naam not in ("snelladen", "vast-onhaalbare-klaar-tijd", "eenfase-krappe-zekering")
+    if (naam not in ("snelladen", "vast-onhaalbare-klaar-tijd", "eenfase-krappe-zekering", "ford-geen-ruimte")
             and vl.scenario.contract.startswith("vast")):
         controle(f"{naam}: niets van het net in de avondpiek",
                  vl.net_kwh_tussen("18:00", "20:00") < 0.6,
@@ -554,12 +556,31 @@ if (vz := v("vast-zonnig")):
                      abs(vl.geladen_kwh - vz.geladen_kwh) < 0.2 and vl.uit_net_kwh < 0.3,
                      f"{vl.geladen_kwh:.1f} tegen {vz.geladen_kwh:.1f}, net {vl.uit_net_kwh:.2f}")
 
+# Sinds v0.192.0 gaat ook een auto die laadt uit als de marge op is; tot dan hield de coach hem op 6 A
+# (`tight`). De eigenaar op 02-11-2026: "Auto gewoon stop zetten. veiligheid voorop".
 if (vl := v("eenfase-krappe-zekering")):
-    controle("krappe zekering: tijdens het koken terug naar de laagste stand",
-             all(r.paal_amps <= 6.01 for r in regels_in(vl, "17:35", "19:00")),
+    controle("krappe zekering: tijdens het koken uit, want de marge is op",
+             all(r.paal_amps == 0 for r in regels_in(vl, "17:35", "19:00")),
              f"hoogste {max(r.paal_amps for r in regels_in(vl, '17:35', '19:00')):.0f} A")
-    controle("krappe zekering: maar niet uit", any(r.paal_amps > 0 for r in regels_in(vl, "18:00", "19:00")), "")
+    controle("krappe zekering: en de fase blijft onder de zekering min de marge (23 A)",
+             all(max(r.fase_amps) <= 23.05 for r in regels_in(vl, "17:35", "19:00")),
+             f"hoogste {max(max(r.fase_amps) for r in regels_in(vl, '17:35', '19:00')):.1f} A")
+    controle("krappe zekering: niet heen en weer tussen 0 en 16 A", vl.wissels() <= 6, f"{vl.wissels()} wissels")
+    controle("krappe zekering: daarna weer verder", laadt_tussen(vl, "19:05", "22:00"), "")
     controle("krappe zekering: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+if (vl := v("ford-geen-ruimte")):
+    controle("ford geen ruimte: uit tijdens het koken",
+             all(r.paal_amps == 0 for r in regels_in(vl, "17:35", "19:00")), "")
+    controle("ford geen ruimte: de coach start de paal één keer opnieuw, en de auto laadt weer",
+             len(meldingen(vl, "opnieuw gestart")) == 1 and laadt_tussen(vl, "19:15", "22:00"),
+             f"{[m for m in vl.meldingen]}")
+    controle("ford geen ruimte: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
+if (vl := v("eigen-marge")):
+    controle("eigen marge: met 6 A blijft de drukste fase tijdens de oven onder 19 A",
+             all(max(r.fase_amps) <= 19.05 for r in regels_in(vl, "02:01", "02:30")),
+             f"hoogste {max(max(r.fase_amps) for r in regels_in(vl, '02:01', '02:30')):.1f} A")
+    controle("eigen marge: en hij laadt door op wat er past", laadt_tussen(vl, "02:05", "02:30"), "")
+    controle("eigen marge: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
 
 if (vl := v("oven-tijdens-laden")):
     controle("oven: binnen een meetstap terug",

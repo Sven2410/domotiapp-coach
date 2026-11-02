@@ -281,6 +281,13 @@ export const INSTELLINGEN = {
   "gaat altijd voor: de coach verdeelt alleen wat er daarna onder je zekering over is":
     "always comes first: the coach only shares out what is left under your fuse after it",
   "Nachtstrategie": "Night strategy",
+  "Marge onder de hoofdzekering": "Margin below the main fuse",
+  "Zoveel ampère houdt de coach vrij onder je hoofdzekering, zodat je huis iets kan bijschakelen voordat hij terugregelt. Is de marge op, dan gaan de laadpaal en de thuisbatterij omlaag, en een auto die laadt gaat uit. Leeg is de kleinste marge die de coach toestaat.":
+    "This many amps the coach keeps free below your main fuse, so your house can switch something on before it steps back. When the margin is used up, the charger and the home battery go down, and a car that is charging stops. Empty is the smallest margin the coach allows.",
+  "Marge (A)": "Margin (A)",
+  "Minstens {min} A; de coach rekent met {min} A.": "At least {min} A; the coach uses {min} A.",
+  "Minstens {min} A.": "At least {min} A.",
+  "De drukste fase blijft onder {grens} A.": "The busiest phase stays below {grens} A.",
   "Houd rekening met de nacht.": "Plan for the night.",
   "De coach houdt genoeg in de thuisbatterij om de nacht door te komen met opgeslagen energie. Zet je dit uit, dan mag de batterij voor de auto en voor handelen leeg tot zijn ingestelde minimum, maar haal je mogelijk de nacht niet met nul op de meter.":
     "The coach keeps enough in the home battery to get through the night on stored energy. If you turn this off, the battery may empty to its set minimum for the car and for trading, but you may not get through the night with zero at the meter.",

@@ -3831,6 +3831,45 @@ proef("Voorkeuren heeft het overzicht erbij, en slaat dat meteen op via display/
   assert.deepEqual(stuk, { strategy: { level: "steer" } });
 });
 
+// De eigenaar op 02-11-2026: "marge stel ik zelf in dat moet de klant ook kunnen instellen tot een minimum
+// veiligheidsmarge hard gecodeerd". In Voorkeuren, want Installatie ziet de bewoner niet (v0.192.0).
+proef("de marge onder de hoofdzekering: in Voorkeuren, met de ondergrens van de coach (v0.192.0)", async () => {
+  const { hoofdMarge, margeTelt } = await import("../custom_components/domotiapp_coach/frontend/src/toepassing.js");
+  // Dezelfde gevallen als proef 80 in test_planner.py (`hoofd_marge`).
+  assert.ok(Math.abs(hoofdMarge(30) - 2.4) < 1e-9 && hoofdMarge(30, false, "") === hoofdMarge(30), "leeg: 8% van 30 A");
+  assert.equal(hoofdMarge(25), 2);
+  assert.equal(hoofdMarge(25, true), 3, "met een lastbewaker 3 A");
+  assert.equal(hoofdMarge(30, false, 4), 4);
+  assert.ok(Math.abs(hoofdMarge(30, false, 1) - 2.4) < 1e-9 && hoofdMarge(25, true, 2) === 3, "lager dan de ondergrens kan niet");
+  assert.ok(Math.abs(hoofdMarge(30, false, "abc") - 2.4) < 1e-9, "onzin telt als leeg");
+  const stuurt = { devices: [{ id: "p", type: "laadpaal", controllable: true }],
+    sources: { phases_enabled: true, phases: { l1: { current: "sensor.l1" } } } };
+  assert.equal(margeTelt(stuurt), true);
+  assert.equal(margeTelt({ ...stuurt, sources: { phases_enabled: false } }), false, "zonder fasemeting doet de marge niets");
+  assert.equal(margeTelt({ ...stuurt, devices: [{ id: "p", type: "laadpaal", controllable: false }] }), false);
+
+  await import("../custom_components/domotiapp_coach/frontend/src/views/strategy.js");
+  const Voorkeuren = geregistreerd.get("dac-view-strategy");
+  const html = Object.create(Voorkeuren.prototype).render();
+  assert.ok(html.includes('id="marge-kaart"') && html.includes('id="marge"'), "de kaart staat in Voorkeuren");
+  const el = Object.create(Voorkeuren.prototype);
+  const velden = { "#marge": { value: "", placeholder: "" }, "#marge-uitleg": { textContent: "" } };
+  el.$ = (sel) => velden[sel];
+  el.draft_ = { installation: { fuse_amps: 30, load_balancer: false }, strategy: { fuse_margin_amps: 4 } };
+  el.paintMarge_(true);
+  assert.equal(velden["#marge"].value, 4);
+  assert.equal(velden["#marge"].placeholder, "2,4");
+  assert.equal(velden["#marge-uitleg"].textContent, "Minstens 2,4 A. De drukste fase blijft onder 26 A.");
+  el.draft_.strategy.fuse_margin_amps = 1;
+  el.paintMarge_(false);
+  assert.equal(velden["#marge-uitleg"].textContent, "Minstens 2,4 A; de coach rekent met 2,4 A. De drukste fase blijft onder 27,6 A.");
+  el.draft_.strategy.fuse_margin_amps = null;
+  el.paintMarge_(true);
+  assert.equal(velden["#marge"].value, "", "leeg blijft leeg");
+  // Opslaan gaat met strategy/set, dat de bewoner mag.
+  assert.deepEqual(el.slice_({ strategy: { level: "steer", fuse_margin_amps: 4 } }), { strategy: { level: "steer", fuse_margin_amps: 4 } });
+});
+
 proef("op de kaart heet het Instellen, en de batterij krijgt een eigen knop", () => {
   const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf8");
   assert.ok(bron.includes('${icons.sliders} ${t("Instellen")}') && !bron.includes("Schema instellen"));

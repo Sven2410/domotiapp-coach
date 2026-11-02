@@ -77,8 +77,6 @@
   "Je hebt het laden zelf gepauzeerd.": "You paused charging yourself.",
   "Zo haalt de auto {klok} niet meer: hervat het laden of verzet je klaar-tijd.": "This way the car will no longer make {klok}: resume charging or move your ready time.",
   "Blijft stilstaan tot je het hervat of de kabel eruit gaat.": "Stays paused until you resume it or unplug the cable.",
-  "{wie} zit bijna vol, dus hij laadt door op de laagste stand.": "{wie} is almost full, so it keeps charging at the lowest setting.",
-  "Gaat weer omhoog zodra er ruimte is.": "Goes back up as soon as there is room.",
   "{wie} is te zwaar belast om te laden. Zodra er ruimte is, gaat hij verder.": "{wie} is too heavily loaded to charge. As soon as there is room, it continues.",
   "Snelladen staat aan, dus hij laadt op {amps} A.": "Fast charge is on, so it charges at {amps} A.",
   "Snelladen staat aan, dus hij laadt op {amps} A, ongeacht de prijs.": "Fast charge is on, so it charges at {amps} A, whatever the price.",

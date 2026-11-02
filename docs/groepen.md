@@ -27,8 +27,8 @@ krijgt elk apparaat "Hangt op groep" zodra er groepen zijn (views/devices.js).
 `ruimten` maakt per zekering dezelfde som die er al was voor de
 hoofdaansluiting: de zwaarste fase min wat daarvan van de paal zelf is, de
 zekering min dat huis min de marge (`fuse_margin_van`) min wat er deze ronde
-al aan een ander laadpunt onder dezelfde zekering is toegezegd. `ceiling_amps`,
-`nood_ruimte` en `fuse_limited` lopen over die lijst. Een groep zonder meter
+al aan een ander laadpunt onder dezelfde zekering is toegezegd. `ceiling_amps`
+en `fuse_limited` lopen over die lijst (`nood_ruimte` deed dat tot v0.192.0 ook). Een groep zonder meter
 heeft geen huis: daar telt alleen de toezegging. De zin op de kaart noemt de
 groep (`knelpunt`, `zekering_van`, `_aansluiting`): "De groep Garage is te
 zwaar belast om te laden", en bij snelladen "meer past er nu niet onder de

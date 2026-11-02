@@ -931,48 +931,39 @@ controle("en eenfasig al bij 1.380 W",
          planner.watts_for(planner.MIN_AMPS, 1) == 1380.0,
          f"{planner.watts_for(planner.MIN_AMPS, 1)}")
 
-print("=== 34. een volle aansluiting zet een lopende beurt niet meer uit ===")
+print("=== 34. een volle aansluiting zet ook een lopende beurt uit (v0.192.0) ===")
 # In de klantwoning meldde de huismeter op 30-08-2026 om 04:28:56 een enkel sample
 # van 27 A op L3. De coach schreef 0 A, de paal stond achtenzeventig seconden
 # uit, en de Ford beeindigde zijn laadbeurt en kwam er die hele dag niet meer
-# uit: om 09:37 stond de auto nog op 69,5%.
-#
-# De marge is comfort en geen natuurkunde. Een beurt afbreken om die marge te
-# sparen kost meer dan hij oplevert, dus zolang `MIN_AMPS` er ook zonder marge
-# nog bij past laadt hij door op de laagste stand. De grens zelf blijft heilig.
+# uit: om 09:37 stond de auto nog op 69,5%. Daarom hield de coach tot v0.192.0 een
+# lopende beurt op de laagste stand zolang die zonder de marge nog paste (`tight`).
+# De eigenaar op 02-11-2026: "Auto gewoon stop zetten. veiligheid voorop". Komt de
+# auto daarna niet zelf terug, dan start de coach de paal opnieuw (scenario
+# `ford-geen-ruimte` in het virtuele huis).
 nu34 = middag(4, 28)
 KRAP = Grid(surplus_w=0.0, phase_amps=[3.0, 3.0, 30.0], fuse_amps=25.0,
             charger_amps=12.0, margin_amps=3.0)
 LAADT = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=12.0,
                 started_at=middag(3, 0), limit_amps=12.0)
-print(f"  huis 18 A eigen last: plafond {planner.ceiling_amps(KRAP, LEEG, LAADT)} A, "
-      f"zonder marge {planner.nood_ruimte(KRAP, LAADT):.0f} A")
+print(f"  huis 18 A eigen last: plafond {planner.ceiling_amps(KRAP, LEEG, LAADT)} A")
 controle("onder de marge past er niets meer",
          planner.ceiling_amps(KRAP, LEEG, LAADT) < MIN_AMPS,
          f"{planner.ceiling_amps(KRAP, LEEG, LAADT)}")
-controle("zonder de marge nog wel",
-         planner.nood_ruimte(KRAP, LAADT) >= MIN_AMPS,
-         f"{planner.nood_ruimte(KRAP, LAADT)}")
-
 krap = decide(nu34, [], KRAP, LEEG, LAADT, venster(nu34), tariff=VAST, sun=ZON_KRAP)
 print(f"  {krap.rule}: laden={krap.charge} {krap.amps} A  {krap.reason}")
-controle("dus hij blijft laden op de laagste stand",
-         krap.charge and krap.amps == MIN_AMPS, f"{krap.rule} {krap.amps}")
-controle("met een eigen regel, zodat het logboek het verschil laat zien",
-         krap.rule == "tight", f"{krap.rule}")
+controle("dus gaat hij uit, ook al laadt hij en paste het zonder de marge nog",
+         not krap.charge and krap.amps == 0 and krap.rule == "no-room", f"{krap.rule} {krap.amps}")
+controle("de regel tight bestaat niet meer", not hasattr(planner, "nood_ruimte"), "")
 
-# Maar een huis dat er zelf overheen gaat wint nog steeds: 22 A eigen last plus
-# zes ampere past niet onder 25.
+# Een huis dat er zelf overheen gaat: hetzelfde.
 VOL = Grid(surplus_w=0.0, phase_amps=[3.0, 3.0, 34.0], fuse_amps=25.0,
            charger_amps=12.0, margin_amps=3.0)
 vol = decide(nu34, [], VOL, LEEG, LAADT, venster(nu34), tariff=VAST, sun=ZON_KRAP)
 print(f"  huis 22 A eigen last: {vol.rule}: {vol.amps} A")
-controle("een huis dat er zelf overheen gaat zet hem wel uit",
-         not vol.charge and vol.amps == 0, f"{vol.rule} {vol.amps}")
-controle("en heet dan gewoon no-room", vol.rule == "no-room", f"{vol.rule}")
+controle("een huis dat er zelf overheen gaat zet hem uit, en heet no-room",
+         not vol.charge and vol.amps == 0 and vol.rule == "no-room", f"{vol.rule} {vol.amps}")
 
-# En een paal die nog niet laadt begint er niet aan. De uitzondering gaat over
-# een auto die je niet wilt laten stoppen, niet over een auto die stilstaat.
+# En een paal die nog niet laadt begint er niet aan.
 STAAT_STIL = Charger(max_amps=16.0, connected=True, charging=False,
                      actual_amps=0.05, limit_amps=0.0)
 stil = decide(nu34, [], KRAP, LEEG, STAAT_STIL, venster(nu34), tariff=VAST, sun=ZON_KRAP)
@@ -3911,6 +3902,32 @@ for modus80 in ("zon", "continu", "goedkoopst"):
     controle(f"modus {modus80}: met een schema dat nog aan staat hetzelfde als zonder ({zonder80m.rule})",
              (met80m.rule, met80m.charge, met80m.amps) == (zonder80m.rule, zonder80m.charge, zonder80m.amps),
              f"{met80m.rule} {zonder80m.rule}")
+
+print("=== 80. de marge onder de hoofdzekering zelf instellen, met een ondergrens (v0.192.0) ===")
+# De eigenaar op 02-11-2026: "marge stel ik zelf in dat moet de klant ook kunnen instellen tot een
+# minimum veiligheidsmarge hard gecodeerd". In een klantwoning met 30 A ging de drukste fase tot 27,6 A.
+hm = planner.hoofd_marge
+controle("leeg: de ondergrens van altijd, 8% van 30 A", abs(hm(30.0) - 2.4) < 1e-9 and hm(30.0, False, "") == hm(30.0), f"{hm(30.0)}")
+controle("25 A: 2 A; met een lastbewaker 3 A", hm(25.0) == 2.0 and hm(25.0, True) == 3.0, f"{hm(25.0)} {hm(25.0, True)}")
+controle("ingevuld 4 A geldt", hm(30.0, False, 4) == 4.0 and hm(30.0, False, "4") == 4.0, f"{hm(30.0, False, 4)}")
+controle("ingevuld 1 A wordt de ondergrens: lager kan niet", abs(hm(30.0, False, 1) - 2.4) < 1e-9 and hm(25.0, True, 2) == 3.0,
+         f"{hm(30.0, False, 1)} {hm(25.0, True, 2)}")
+controle("onzin telt als leeg", abs(hm(30.0, False, "abc") - 2.4) < 1e-9, "")
+# Met 30 A en 4 A marge: de drukste fase blijft op 26 A. Een paal die al op 16 A laadt met 13 of 19 A huis
+# op die fase gaat omlaag; met 21 A huis past 6 A niet meer en gaat hij uit.
+nu90 = dt.datetime(2026, 8, 18, 20, 0)
+LAADT90 = Charger(max_amps=16.0, connected=True, charging=True, actual_amps=16.0,
+                  started_at=dt.datetime(2026, 8, 18, 19, 0), limit_amps=16.0)
+for huis90, verwacht in ((13.0, 13), (19.0, 7), (21.0, 0)):
+    g90 = Grid(surplus_w=0.0, phase_amps=[3.0, 3.0, huis90 + 16.0], fuse_amps=30.0, charger_amps=16.0,
+               margin_amps=hm(30.0, False, 4))
+    d90 = decide(nu90, [], g90, LEEG, LAADT90, venster(nu90), tariff=VAST, sun=Sun(remaining_kwh=0.0))
+    print(f"  huis {huis90:.0f} A: {d90.rule} {d90.amps} A")
+    controle(f"30 A, marge 4 A, huis {huis90:.0f} A: de paal naar {verwacht} A",
+             d90.amps <= verwacht and (d90.amps == 0) == (verwacht == 0) and (verwacht or d90.rule == "no-room"),
+             f"{d90.rule} {d90.amps}")
+    if verwacht:
+        controle(f"  en de drukste fase blijft onder 26 A", huis90 + d90.amps <= 26.0 + 1e-9, f"{huis90 + d90.amps}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

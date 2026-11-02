@@ -270,6 +270,9 @@ class Auto:
     storing_bij_inpluggen: bool = False
     # En een die er met een start niet uit komt, alleen met de kabel eruit.
     storing_alleen_kabel: bool = False
+    # Een auto die midden in het laden 0 A krijgt en zijn beurt beëindigt: storing, de paal zegt
+    # "completed". De Ford in de klantwoning op 30-08-2026, 78 seconden op 0 A om 04:28:56.
+    storing_bij_nul: bool = False
     # Of de auto zijn laadstatus aan Home Assistant meldt (`status_entity`),
     # en of het proefladen bij het inpluggen in zijn profiel aanstaat.
     meldt_status: bool = False
@@ -315,6 +318,9 @@ class Auto:
             self.trekt_amps = 0.0
             return
         if not gestart or aanbod_amps < MIN_AMPS:
+            if self.storing_bij_nul and self.trekt_amps > 0:
+                self.ga_in_storing()
+                return
             self.trekt_amps = 0.0
             self.wakker = False
             return
@@ -1141,6 +1147,8 @@ class Scenario:
     aansluiting_fasen: int = 3
     zekering: float = 25.0
     lastbewaker: bool = False
+    # De marge onder de hoofdzekering die de bewoner koos (`strategy.fuse_margin_amps`, v0.192.0).
+    marge: float | None = None
     # Een Easee Equalizer: houdt de som van huis en paal zelf onder de zekering,
     # meldt hoeveel hij vrijgeeft, en de paal zegt waarom hij geknepen wordt.
     equalizer: bool = False
@@ -1759,6 +1767,7 @@ def instellingen(s: Scenario) -> dict:
         "strategy": {
             "level": "steer",
             "night_strategy": s.nachtstrategie,
+            "fuse_margin_amps": s.marge,
             "solar_priority": s.zon_voorrang,
             "plan_priority": s.plan_voorrang,
             "schedules": [*schemas, {

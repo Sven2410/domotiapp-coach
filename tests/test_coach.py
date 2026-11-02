@@ -1680,11 +1680,15 @@ controle("over een beurt die om 03:01 begon",
 controle("en met het moment waarop de paal het zei, niet waarop de coach het geloofde",
          any("afgekoppeld om 03:50" in m for m in verslag33), f"{verslag33}")
 
-print("--- b. een meterpiek zet de paal niet meer op nul ---")
+print("--- b. een volle fase zet ook een lopende beurt uit (v0.192.0) ---")
 # Om 04:28:56 meldde de huismeter een enkel sample van 27 A op L3; tien seconden
 # ervoor en dertig erna stond hij op 10. De coach schreef 0 A, de paal stond
 # achtenzeventig seconden uit, en de Ford beeindigde zijn laadbeurt en kwam er
-# die hele dag niet meer uit.
+# die hele dag niet meer uit. Tegen één sample helpt de mediaan over `FASE_VENSTER`;
+# tot v0.192.0 hield de coach een lopende beurt daarnaast nog op 6 A zolang dat zonder
+# de marge paste (`tight`). De eigenaar op 02-11-2026: "Auto gewoon stop zetten.
+# veiligheid voorop". Een auto die daarna niet zelf terugkomt start de coach opnieuw
+# (`ford-geen-ruimte` in het virtuele huis).
 inst34 = instellingen()
 inst34["strategy"]["schedules"][0]["window"]["done_by"] = "07:00"
 hass34, _, coach34 = bouw(huis(status="ready_to_charge", teruglevering=0.0,
@@ -1698,14 +1702,16 @@ for minuut in range(21, 28):
     asyncio.run(ronde(coach34, inst34, nu=dt.datetime(2026, 8, 30, 4, minuut)))
 
 # Huis 30 min 12 van de paal is 18 A eigen last. Onder de marge past er dan
-# niets meer (25 min 18 min 3 is 4), zonder de marge nog wel (25 min 18 is 7).
+# niets meer (25 min 18 min 3 is 4).
 hass34.states.zet("sensor.l3", "30")
 piek, _ = asyncio.run(ronde(coach34, inst34, nu=dt.datetime(2026, 8, 30, 4, 28)))
 print(f"  met L3 op 30 A: {piek['rule']} {piek['amps']} A")
-controle("een volle fase zet een lopende beurt niet meer uit", piek["amps"] > 0,
+controle("een volle fase zet ook een lopende beurt uit", piek["amps"] == 0 and piek["rule"] == "no-room",
          f"{piek['rule']} {piek['amps']}")
-controle("hij zakt naar de laagste stand", piek["amps"] == planner.MIN_AMPS,
-         f"{piek['amps']}")
+# En wat hij net nog trok telt de volgende ronde niet als naijl van de meter: anders leek het huis
+# een ronde later leeg en ging hij meteen weer op 16 A (v0.192.0).
+controle("na een stop voor de zekering geen naijl van de paal", "dev-laadpaal" not in coach34._laatste_stroom,
+         f"{coach34._laatste_stroom}")
 
 # Maar een huis dat werkelijk over de zekering gaat wint nog steeds: 26 A huis
 # plus zes ampere past niet onder 25.
@@ -14260,6 +14266,44 @@ try:
              {"e-omv", "e-teller", "e-hulp"} <= set(hass231d.herladen), f"{hass231d.herladen}")
 finally:
     sys.modules.update(oud231)
+
+print("=== 232. de marge onder de hoofdzekering zelf instellen: één som voor paal, batterij en fasewacht (v0.192.0) ===")
+# Een klantwoning met 30 A op 02-11-2026: de drukste fase ging tot 27,6 A. De eigenaar: "marge stel ik zelf in
+# dat moet de klant ook kunnen instellen tot een minimum veiligheidsmarge hard gecodeerd".
+def inst232(marge, balancer=False):
+    inst = instellingen(devices=[LAADPAAL, BATTERIJ])
+    inst["installation"] = {**inst["installation"], "fuse_amps": 30, "load_balancer": balancer}
+    inst["strategy"] = {**inst["strategy"], "fuse_margin_amps": marge}
+    return inst
+
+
+controle("leeg: de ondergrens, 8% van 30 A", abs(coachmod._hoofd_marge(inst232(None)) - 2.4) < 1e-9,
+         f"{coachmod._hoofd_marge(inst232(None))}")
+controle("4 A ingevuld: 4 A; 1 A ingevuld: de ondergrens; met een lastbewaker minstens 3 A",
+         coachmod._hoofd_marge(inst232(4)) == 4.0 and abs(coachmod._hoofd_marge(inst232(1)) - 2.4) < 1e-9
+         and coachmod._hoofd_marge(inst232(1, True)) == 3.0, "")
+hass232, _, coach232 = bouw(huis75(afname=0.0, teruglevering=0.0), inst232(4))
+hass232.states.zet("sensor.l3", "18")
+ruimte232 = {m: coach232._laadruimte_w(inst232(m), BATTERIJ, 0.0) for m in (None, 4)}
+print(f"  laadruimte van de batterij op L3 bij 18 A: {ruimte232}")
+controle("de batterij rekent met dezelfde 4 A: 1,6 A minder dan leeg",
+         abs(ruimte232[None] - ruimte232[4] - 1.6 * coachmod.VOLTS) < 1, f"{ruimte232}")
+coach232._watch_phases(inst232(4), True)
+controle("de fasewacht grijpt in boven 26 A", coach232._urgent_above and all(
+    abs(g - 26.0) < 1e-9 for g in coach232._urgent_above.values()), f"{coach232._urgent_above}")
+grid232, _c, _ch, _w = coach232._read(dt.datetime(2026, 11, 2, 22, 30), inst232(4), LAADPAAL)
+controle("de paal ook: Grid.margin_amps is 4 A", grid232.margin_amps == 4.0, f"{grid232.margin_amps}")
+# Het staat in de instellingen, en die overleven een herstart: de opslag houdt het veld bij het laden.
+geladen232 = storage._prune(storage.DEFAULT_SETTINGS, storage._merge(storage.DEFAULT_SETTINGS,
+                                                                    {"strategy": {"fuse_margin_amps": 4.0}}))
+controle("de opslag houdt de marge bij het laden", geladen232["strategy"]["fuse_margin_amps"] == 4.0,
+         f"{geladen232['strategy']}")
+controle("en een opslag van voor v0.192.0 krijgt leeg", storage._prune(storage.DEFAULT_SETTINGS, storage._merge(
+    storage.DEFAULT_SETTINGS, {"strategy": {"level": "steer"}}))["strategy"]["fuse_margin_amps"] is None, "")
+ws232 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach"
+         / "websocket.py").read_text(encoding="utf-8")
+controle("strategy/set, dat de bewoner mag, neemt het veld aan",
+         'vol.Optional("fuse_margin_amps")' in ws232.split("_STRATEGY = _schema(")[1].split("\n)\n")[0], "")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
