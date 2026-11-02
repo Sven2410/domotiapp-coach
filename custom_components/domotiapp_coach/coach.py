@@ -288,6 +288,11 @@ ALTIJD_AAN_BUNDEL = timedelta(minutes=1)
 # die altijd aan moet staan." De schakelaar van de stekker staat bij allemaal in
 # `entities.switch`; alleen `_async_altijd_aan` raakt hem aan, en alleen om aan te zetten.
 ALTIJD_AAN_TYPES = ("smartplug", "vaatwasser", "vriezer", "koelkast", "wasmachine", "droger")
+# Welke apparaten de coach zonder "mag sturen" alleen uitleest (v0.190.0): een stille sensor ervan is
+# dan een gewone melding, geen kritieke (`_sensoren_meelezen`). In een klantwoning gingen van 21-09 tot
+# 31-10-2026 35 van de 47 kritieke stiltemeldingen over een airco, een boiler of een stekker die de coach
+# niet stuurt, meestal een stekker die even van de wifi was.
+MEELEZEN_TYPES = ("airco", "smartplug", "overig", "boiler")
 # De ingebouwde Nord Pool van Home Assistant hangt geen prijslijst aan zijn
 # sensoren; die geeft hij alleen via zijn dienst (v0.101.3). Zo vaak vraagt de
 # coach een dag die nog niet binnen is opnieuw, en vanaf dit uur morgen erbij:
@@ -443,6 +448,9 @@ INTEGRATIE_HERLADEN = ("setup_error", "not_loaded")
 # voor DNS er was, de integratie bleef op loaded, en pas herladen met de hand bracht hem terug. De
 # eigenaar: "maak inderdaad dat de coach alles herlaadt". Eén keer per storing (`_async_stil_herladen`).
 INTEGRATIE_STIL = timedelta(hours=1)
+# Integraties die zelf geen verbinding maken: een `utility_meter`, `template`, `derivative`, ...
+# (v0.190.0). Die zijn stil omdat hun bron stil is, en herladen helpt dan niet.
+INTEGRATIE_HELPER = "helper"
 _ENTITEIT_ID = re.compile(r"^[a-z_]+\.[a-z0-9_]+$")
 GROWATT_DOMEIN = "growatt_server"
 GROWATT_PAUZE = timedelta(minutes=5)
@@ -998,6 +1006,15 @@ def zonsensoren(settings: dict[str, Any]) -> list[str]:
     bronnen = settings.get("sources") or {}
     uit = [bronnen.get("solar")] + list(bronnen.get("solar_extra") or [])
     return [z for z in uit if isinstance(z, str) and z]
+
+
+def zon_entiteiten(settings: dict[str, Any]) -> set[str]:
+    """Wat de coach van de omvormers zelf leest: hun vermogen en hun kWh-tellers (v0.190.0)."""
+    bronnen = settings.get("sources") or {}
+    meters = bronnen.get("meters") or {}
+    tellers = [meters.get("solar_total"), *(meters.get("solar_total_extra") or []),
+               *(bronnen.get("solar_total_extra") or [])]
+    return set(zonsensoren(settings)) | {z for z in tellers if isinstance(z, str) and z}
 
 
 def _moment(now: datetime | None = None) -> datetime:
@@ -1712,6 +1729,8 @@ class ChargerCoach:
         self._integratie_om: datetime | None = None
         # Per geladen integratie die helemaal stil was: wanneer de coach hem herlaadde (v0.188.0).
         self._integratie_stil: dict[str, datetime] = {}
+        # Wanneer de zon vandaag boven `ZON_SLAAPT_ONDER` kwam, of None zolang hij eronder staat (v0.190.0).
+        self._zon_wakker: datetime | None = None
         # Per laadpaal sinds wanneer een opdracht niet aankomt, en welke al gemeld zijn (v0.163.3).
         self._paal_weg: dict[str, datetime] = {}
         # Wat elke paal deze ronde in totaal trekt of gaat trekken, per fase (v0.164.1): voor een
@@ -2597,6 +2616,12 @@ class ChargerCoach:
         except Exception:  # noqa: BLE001 - zonder register noemt de melding de integratie
             _LOGGER.debug("kon de integraties van de stille sensoren niet opzoeken", exc_info=True)
         minuten = min(int(_tussen(sinds, now).total_seconds() // 60) for _e, _n, sinds, _g in bundel)
+        # Kritiek alleen als de coach er iets mee moet. Een status die hij alleen
+        # meeleest laat hem niets anders doen, en de bewoner kan er niets mee.
+        kritiek = any(entity_id not in meelezen for entity_id, _n, _s, _g in bundel)
+        # Dan ook geen waarschuwing in het log (v0.190.0): wie het log bewaakt, krijgt er anders
+        # alsnog een alarm op.
+        log = _LOGGER.warning if kritiek else _LOGGER.info
         for entity_id, _naam, sinds, _grens in bundel:
             self._sensor_gemeld.add(entity_id)
             # De entiteit-id staat in het log en niet in de melding. De eigenaar op
@@ -2606,14 +2631,9 @@ class ChargerCoach:
             # de naam die hij zelf heeft ingevuld.
             # Alleen de id (v0.141.1): het log blijft Nederlands, en de naam ging door
             # `t()`, dus in het Engels kwam er "the temperature of ..." midden in.
-            _LOGGER.warning("%s meldt al %d minuten niets", entity_id,
-                            int(_tussen(sinds, now).total_seconds() // 60))
+            log("%s meldt al %d minuten niets", entity_id, int(_tussen(sinds, now).total_seconds() // 60))
         if len(entries) >= 2:
-            _LOGGER.warning("%d sensoren van %d integraties tegelijk stil; waarschijnlijk het internet",
-                            len(bundel), len(entries))
-        # Kritiek alleen als de coach er iets mee moet. Een status die hij alleen
-        # meeleest laat hem niets anders doen, en de bewoner kan er niets mee.
-        kritiek = any(entity_id not in meelezen for entity_id, _n, _s, _g in bundel)
+            log("%d sensoren van %d integraties tegelijk stil; waarschijnlijk het internet", len(bundel), len(entries))
         ids = [entity_id for entity_id, _n, _s, _g in bundel]
         namen = [naam for _e, naam, _s, _g in bundel]
         namen[0] = f"{namen[0][0].upper()}{namen[0][1:]}"
@@ -2652,23 +2672,38 @@ class ChargerCoach:
         await self._async_tell(tekst, kritiek=kritiek)
 
     @staticmethod
-    def _sensoren_meelezen(settings: dict[str, Any]) -> set[str]:
-        """De sensoren van een apparaat dat de coach alleen uitleest (v0.175.0).
+    def _alleen_uitlezen(settings: dict[str, Any]) -> list[dict[str, Any]]:
+        """De apparaten die de coach alleen uitleest (v0.175.0).
 
-        Een wasmachine of droger zonder "mag sturen", en een batterij die hij alleen leest: de coach
-        doet er niets mee, dus een sensor die zwijgt is geen kritieke melding. De temperatuur van zo'n
-        apparaat telt wel, als er een melding of een ventilator aan hangt (`_temp_nodig`). Sinds
-        v0.184.0 ook een laadpaal die de coach niet stuurt.
+        Een wasmachine of droger zonder "mag sturen", en een batterij die hij alleen leest. Sinds
+        v0.184.0 ook een laadpaal die de coach niet stuurt, en sinds v0.190.0 een airco, boiler,
+        smart plug of overig apparaat zonder "mag sturen" (`MEELEZEN_TYPES`). Behalve een stekker die
+        altijd aan moet staan, en een apparaat waarmee de coach een groep zonder meter bewaakt.
+        """
+        groepen = {
+            str((rij or {}).get("device"))
+            for groep in (settings.get("installation") or {}).get("circuits") or []
+            if isinstance(groep, dict)
+            for rij in groep.get("devices") or []
+        }
+        return [
+            device for device in settings.get("devices") or []
+            if (device.get("type") in PROGRAMMA_TYPES and _programma_alleen_lezen(device))
+            or (device.get("type") == "thuisbatterij" and device.get("brand") in BATTERIJ_ALLEEN_LEZEN)
+            or (device.get("type") == "laadpaal" and not device.get("controllable"))
+            or (device.get("type") in MEELEZEN_TYPES and not device.get("controllable")
+                and not _altijd_aan(device) and str(device.get("id")) not in groepen)
+        ]
+
+    @staticmethod
+    def _sensoren_meelezen(settings: dict[str, Any]) -> set[str]:
+        """De sensoren van een apparaat dat de coach alleen uitleest (`_alleen_uitlezen`, v0.175.0).
+
+        De coach doet er niets mee, dus een sensor die zwijgt is geen kritieke melding. De temperatuur
+        van zo'n apparaat telt wel, als er een melding of een ventilator aan hangt (`_temp_nodig`).
         """
         uit: set[str] = set()
-        for device in settings.get("devices") or []:
-            alleen = (
-                (device.get("type") in PROGRAMMA_TYPES and _programma_alleen_lezen(device))
-                or (device.get("type") == "thuisbatterij" and device.get("brand") in BATTERIJ_ALLEEN_LEZEN)
-                or (device.get("type") == "laadpaal" and not device.get("controllable"))
-            )
-            if not alleen:
-                continue
+        for device in ChargerCoach._alleen_uitlezen(settings):
             entities = device.get("entities") or {}
             if device.get("entity"):
                 uit.add(device["entity"])
@@ -2736,6 +2771,7 @@ class ChargerCoach:
         (`_async_stil_herladen`, v0.188.0); `setup_retry` nooit: dat doet Home Assistant zelf.
         Lukt het na `INTEGRATIE_MELDEN` nog niet, dan één melding; lukt het, dan "doet het weer".
         """
+        self._zon_wakker_bijhouden(now)
         if self._integratie_om is None:
             self._integratie_om = now + INTEGRATIE_CONTROLE
             return
@@ -2780,7 +2816,7 @@ class ChargerCoach:
             if entry_id in self._integratie_inloggen:
                 self._integratie_inloggen.discard(entry_id)
                 if stand == "loaded" and entry_id not in self._integratie_stuk:
-                    _LOGGER.warning("de integratie %s is weer ingelogd", naam)
+                    _LOGGER.info("de integratie %s is weer ingelogd", naam)
                     await self._async_tell(t("De integratie {naam} doet het weer.", naam=naam), telefoon=False)
             if stand not in INTEGRATIE_HERLADEN or getattr(entry, "disabled_by", None):
                 if stand == "loaded" and entry_id in self._integratie_stuk:
@@ -2788,7 +2824,9 @@ class ChargerCoach:
                     self._integratie_gemeld.discard(entry_id)
                     await self._async_tell(t("De integratie {naam} doet het weer.", naam=naam), telefoon=False)
                 if stand == "loaded" and not getattr(entry, "disabled_by", None):
-                    await self._async_stil_herladen(entry, entry_id, naam, per_entry.get(entry_id) or [], now)
+                    await self._async_stil_herladen(
+                        settings, entry, entry_id, naam, per_entry.get(entry_id) or [], now
+                    )
                 continue
             sinds = self._integratie_stuk.setdefault(entry_id, now)
             _LOGGER.warning("de integratie %s (%s) staat op %s; de coach herlaadt hem", naam, entry.domain, stand)
@@ -2801,7 +2839,7 @@ class ChargerCoach:
             if stand == "loaded":
                 self._integratie_stuk.pop(entry_id, None)
                 self._integratie_gemeld.discard(entry_id)
-                _LOGGER.warning("de integratie %s is herladen en doet het weer", naam)
+                _LOGGER.info("de integratie %s is herladen en doet het weer", naam)
                 await self._async_tell(t("De integratie {naam} doet het weer.", naam=naam), telefoon=False)
             elif entry_id not in self._integratie_gemeld and now - sinds >= INTEGRATIE_MELDEN:
                 self._integratie_gemeld.add(entry_id)
@@ -2812,7 +2850,7 @@ class ChargerCoach:
                 )
 
     async def _async_stil_herladen(
-        self, entry: Any, entry_id: str, naam: str, entity_ids: list[str], now: datetime
+        self, settings: dict[str, Any], entry: Any, entry_id: str, naam: str, entity_ids: list[str], now: datetime
     ) -> None:
         """Een geladen integratie waarvan alles wat de coach gebruikt stil is: één keer herladen (v0.188.0).
 
@@ -2823,6 +2861,14 @@ class ChargerCoach:
         tot er iets terugkomt: na een herladen die niet hielp één kritieke melding, en zodra er weer
         een waarde is "doet het weer". Het moment van herladen staat in de opslag voor hij herlaadt,
         dus een herstart halverwege herlaadt niet nog eens.
+
+        Sinds v0.190.0 niet bij een omvormer die slaapt: is alles wat de coach ervan gebruikt van de
+        omvormers (`zon_entiteiten`) en staat de zon onder `ZON_SLAAPT_ONDER`, dan wacht hij, zoals de
+        sensorwacht. 's Ochtends telt het uur vanaf het moment dat de zon daarboven kwam
+        (`_zon_wakker`), niet vanaf de avond ervoor. In een klantwoning herlaadde v0.188.0 elke avond
+        een omvormer die bij zonsondergang van het netwerk ging, en die bleef daarna op
+        `setup_retry`. Een helper herlaadt hij nooit (`INTEGRATIE_HELPER`), en een integratie van
+        apparaten die hij alleen uitleest (`_alleen_uitlezen`) geeft geen kritieke melding.
         """
         staten = [s for s in (self.hass.states.get(e) for e in entity_ids) if s is not None]
         if not staten:
@@ -2830,9 +2876,23 @@ class ChargerCoach:
         if any(str(s.state) != "unavailable" for s in staten):
             if self._integratie_stil.pop(entry_id, None) is not None:
                 self._integratie_gemeld.discard(entry_id)
-                _LOGGER.warning("de integratie %s meldt weer iets na het herladen", naam)
+                _LOGGER.info("de integratie %s meldt weer iets na het herladen", naam)
                 await self._async_tell(t("De integratie {naam} doet het weer.", naam=naam), telefoon=False)
             return
+        zon = set(entity_ids) <= zon_entiteiten(settings)
+        if zon and self._zon_slaapt():
+            return
+        wakker = self._zon_wakker if zon else None
+        if wakker is not None and now - wakker < INTEGRATIE_STIL:
+            return
+        # Alles van apparaten die hij alleen uitleest, ook hun kWh-teller; de temperatuur niet als er
+        # een melding of ventilator aan hangt.
+        meelezen = set(entity_ids) <= {
+            entity_id
+            for device in self._alleen_uitlezen(settings)
+            for entity_id in self._eigen_entiteiten({"devices": [device]})
+            if not (_temp_nodig(settings, device) and entity_id == (device.get("entities") or {}).get("temperature"))
+        }
         herladen = self._integratie_stil.get(entry_id)
         if herladen is not None:
             if entry_id not in self._integratie_gemeld and now - herladen >= INTEGRATIE_CONTROLE:
@@ -2840,11 +2900,14 @@ class ChargerCoach:
                 await self._async_tell(
                     t("De integratie {naam} komt niet op. Herlaad hem in Home Assistant, of kijk of het internet "
                       "het doet.", naam=naam),
-                    kritiek=True,
+                    kritiek=not meelezen,
                 )
             return
         sinds = max(dt_util.as_local(s.last_changed).replace(tzinfo=None) for s in staten)
         if now - sinds < INTEGRATIE_STIL:
+            return
+        if await self._async_is_helper(entry.domain):
+            _LOGGER.debug("de integratie %s (%s) is een helper; de coach herlaadt hem niet", naam, entry.domain)
             return
         self._integratie_stil[entry_id] = now
         try:
@@ -2852,7 +2915,7 @@ class ChargerCoach:
             await async_get_geheugen(self.hass).async_bewaar(dt_util.utcnow())
         except Exception:  # noqa: BLE001 - dan toch herladen
             _LOGGER.exception("kon het herladen van %s niet bewaren", naam)
-        _LOGGER.warning(
+        (_LOGGER.info if meelezen else _LOGGER.warning)(
             "de integratie %s (%s) staat op loaded, maar alles wat de coach ervan gebruikt is sinds %s "
             "unavailable; de coach herlaadt hem", naam, entry.domain, sinds.isoformat(timespec="minutes"),
         )
@@ -2861,6 +2924,29 @@ class ChargerCoach:
                 await self.hass.config_entries.async_reload(entry_id)
         except Exception as err:  # noqa: BLE001 - het internet kan er nog niet zijn
             _LOGGER.warning("de integratie %s herladen lukte niet: %s", naam, err)
+
+    def _zon_wakker_bijhouden(self, now: datetime) -> None:
+        """Wanneer de zon vandaag boven `ZON_SLAAPT_ONDER` kwam, voor `_async_stil_herladen` (v0.190.0).
+
+        Staat hij eronder, dan is er geen moment. Weet de coach het niet, na een herstart overdag
+        of zonder `sun.sun`, dan telt het moment dat hij het voor het eerst ziet: dat herlaadt
+        hoogstens later, nooit eerder. Het moment gaat na elke ronde in de opslag (`_meldingen_onthouden`).
+        """
+        if self._zon_slaapt():
+            self._zon_wakker = None
+        elif self._zon_wakker is None or self._zon_wakker.date() != now.date():
+            self._zon_wakker = now
+
+    async def _async_is_helper(self, domein: str) -> bool:
+        """Of een integratie een helper is (`integration_type` in zijn manifest). Weet de coach het
+        niet, dan niet."""
+        try:
+            from homeassistant.loader import async_get_integration
+
+            integratie = await async_get_integration(self.hass, domein)
+            return getattr(integratie, "integration_type", None) == INTEGRATIE_HELPER
+        except Exception:  # noqa: BLE001 - dan herlaadt hij zoals voorheen
+            return False
 
     async def _async_reserveverloop(
         self, dynamic: dict[str, Any], van: datetime, tot: datetime
@@ -15161,6 +15247,7 @@ class ChargerCoach:
             "inloggen": sorted(self._integratie_inloggen),
             "integratie_stuk": {k: _naar_geheugen(v) for k, v in sorted(self._integratie_stuk.items())},
             "integratie_stil": {k: _naar_geheugen(v) for k, v in sorted(self._integratie_stil.items())},
+            "zon_wakker": _naar_geheugen(self._zon_wakker),
             "temp": sorted(str(k) for k in self._temp_gemeld),
             "vriezer": sorted([list(k) for k in self._vriezer_gemeld]),
             "stekker": sorted(self._stekker_gemeld),
@@ -15193,6 +15280,8 @@ class ChargerCoach:
         self._integratie_inloggen |= {str(k) for k in lijst("inloggen")}
         self._integratie_stuk.update(momenten("integratie_stuk"))
         self._integratie_stil.update(momenten("integratie_stil"))
+        if self._zon_wakker is None and data.get("zon_wakker"):
+            self._zon_wakker = _uit_geheugen(data["zon_wakker"])
         self._temp_gemeld |= {str(k) for k in lijst("temp")}
         self._vriezer_gemeld |= {(str(k[0]), str(k[1])) for k in lijst("vriezer") if isinstance(k, list) and len(k) == 2}
         self._stekker_gemeld |= {str(k) for k in lijst("stekker")}
