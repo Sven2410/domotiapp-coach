@@ -290,7 +290,8 @@ volgorde al eens veranderde krijgt hem ook daar, na zijn voorganger, en niet ach
   een uur zet het in het vlak erboven: de prijs en per laag wat er gebeurt ("Thuisbatterij:
   Handelen, 2,5 kW eruit, naar 55%"). Met de keuzeknoppen zet je lagen aan en uit; dat onthoudt
   het scherm (`dac-vooruitblik` in localStorage), want het is een voorkeur van wie kijkt.
-  Onderaan de voorrang in woorden.
+  Onderaan de voorrang in woorden. Tussen de kop en de keuzeknoppen 12 px, zoals bij de energiestroom
+  (v0.191.0, `#vooruitblik` in overview.js). De eigenaar op 02-11-2026: "nu staat het bijna tegen elkaar".
 - **Haalt op** bij het openen, bij een besluit van de coach hooguit eens per minuut, en anders
   eens per vijf minuten (`haalVooruit_` in overview.js). Een coach van voor v0.133.0 kent het
   commando niet: dan blijft de kaart weg.

@@ -100,9 +100,11 @@ en de hulp aan de auto rekenden het hele verlies heen en terug als ontlaadverlie
 en hielden dus te veel over (in `batterij-helpt-auto-nacht` 6% om 07:00 in plaats
 van ruim 8; de accu haalt de ochtend nog steeds zonder de bodem te raken).
 
-In de pop-up staat het als "83% gemeten", met per richting de punten ("Laden 92%
-bij 2,3 kW", "Ontladen 88% bij 0,6 kW, 96% bij 2,1 kW"), uit `rte_power` in
-`battery_state`. Wissen van de metingen (`device/measurements/clear`) haalt
+In de pop-up staat het als "83% zelf geleerd", uit `rte_power` in `battery_state`.
+De punten per richting ("Laden: 92% bij 2,3 kW", "Ontladen: 88% bij 0,6 kW, 96% bij 2,1 kW") staan sinds
+v0.191.0 bij de batterij in Apparaten, onder het rendement (`geleerdRendement` in data-source.js). De eigenaar op
+02-11-2026, over de pop-up met drie regels rendement: "waarom zie ik zoveel info bij rendament?" De bewoner kan
+met die getallen niets; de installateur ziet ze in Apparaten. Wissen van de metingen (`device/measurements/clear`) haalt
 `rte_steps` en `rte_power` weg, en de regelaar begint opnieuw. Wat er bij een
 batterij die zelf nul doet uit komt, kan hij alleen als hij hem stuurt: stilstaan
 mag daar niet (de eigenaar op 21-10-2026), dus 's nachts op 300 W het huis voeden

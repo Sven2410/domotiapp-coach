@@ -229,6 +229,25 @@ export async function laadCoachPrijzen(hass, nu = Date.now()) {
  * volgorde als `_rendement_bron` in coach.py (v0.145.0): een kWh-meter op de batterij,
  * het zelf geleerde, de eigen tellers, wat er is ingevuld. `bron` zegt welke het is.
  */
+/**
+ * Het zelf geleerde rendement per vermogen (v0.142.0), voor Apparaten (v0.191.0): heen en terug, en per
+ * richting het rendement bij elk vermogen dat de coach gemeten heeft. Null met een kWh-meter op de
+ * batterij, want dan rekent de coach met de meter, of als hij nog niets geleerd heeft.
+ */
+export function geleerdRendement(device, batteryState) {
+  if (accuRendementBron(device, batteryState).bron === "meter") return null;
+  const macht = ((batteryState ?? []).find((r) => r?.device === device?.id) ?? {}).rte_power;
+  if (!macht?.rte) return null;
+  const kw = (x) => x.toLocaleString(locale(), { maximumFractionDigits: 1 });
+  const punten = (lijst) =>
+    (lijst ?? []).map(([k, e]) => t("{pct}% bij {kw} kW", { pct: Math.round(e * 100), kw: kw(k) })).join(", ");
+  return {
+    rte: (macht.rte * 100).toLocaleString(locale(), { maximumFractionDigits: 1 }),
+    laden: punten(macht.in),
+    ontladen: punten(macht.out),
+  };
+}
+
 export function accuRendementBron(device, batteryState) {
   const rij = (batteryState ?? []).find((r) => r?.device === device?.id) ?? {};
   if (device?.entities?.energy_in && device?.entities?.energy_out && rij.rte) return { rte: Number(rij.rte), bron: "meter" };
@@ -851,13 +870,12 @@ function deviceDetails(feed, device, settings) {
     const rij = (settings?.battery_state ?? []).find((r) => r?.device === device.id) ?? {};
     const opgave = device.battery?.rte_percent;
     const metMeter = accuRendementBron(device, settings?.battery_state).bron === "meter";
-    // Per vermogen (v0.142.0): heen en terug, en per richting het rendement bij
-    // elk vermogen dat de coach gemeten heeft, als de coach ermee rekent.
+    // Het zelf geleerde heen en terug (v0.142.0). De punten per vermogen staan sinds v0.191.0
+    // in Apparaten (`geleerdRendement`): de eigenaar op 02-11-2026, "waarom zie ik zoveel info bij
+    // rendement?"
     const macht = metMeter ? null : rij.rte_power;
     const pct = (x) => Math.round(x * 100);
-    const kw = (x) => x.toLocaleString(locale(), { maximumFractionDigits: 1 });
     const precies = (x) => (x * 100).toLocaleString(locale(), { maximumFractionDigits: 1 });
-    const punten = (lijst) => (lijst ?? []).map(([k, e]) => t("{pct}% bij {kw} kW", { pct: pct(e), kw: kw(k) })).join(", ");
     rows.push({
       label: t("Rendement"),
       text: metMeter
@@ -870,10 +888,6 @@ function deviceDetails(feed, device, settings) {
               ? t("{pct}% opgegeven", { pct: Number(opgave).toLocaleString(locale(), { maximumFractionDigits: 1 }) })
               : t("nog niet bekend"),
     });
-    if (macht?.rte) {
-      rows.push({ label: t("Laden"), text: punten(macht.in) });
-      rows.push({ label: t("Ontladen"), text: punten(macht.out) });
-    }
   }
 
   // Een boiler heeft geen tabel en geen programma: wat de coach van hem weet

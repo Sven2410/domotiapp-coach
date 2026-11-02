@@ -493,6 +493,8 @@ class DacViewOverview extends DacElement {
     /* ---- per phase ---- */
     .phases[hidden] { display: none; }
     .vooruit[hidden] { display: none; }
+    /* Lucht onder de kop, zoals bij de energiestroom en per fase (v0.191.0). */
+    #vooruitblik { margin-top: 12px; }
     .phase-rows { margin-top: 14px; display: grid; gap: 10px; }
     .phase-group {
       margin: 10px 0 4px;

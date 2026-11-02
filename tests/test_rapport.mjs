@@ -3319,6 +3319,30 @@ proef("het rendement op de batterijkaart: kWh-meter, zelf geleerd, uit de accu, 
   assert.equal(regel({}, {}), "nog niet bekend");
 });
 
+// De eigenaar op 02-11-2026, over de pop-up van de batterij met drie regels rendement: "waarom zie ik zoveel
+// info bij rendament?" De punten per vermogen staan nu bij de batterij in Apparaten (v0.191.0).
+proef("het zelf geleerde rendement: één regel in de pop-up, de punten per vermogen in Apparaten (v0.191.0)", async () => {
+  const staten = { "sensor.batterij_soc": { state: "39", attributes: { unit_of_measurement: "%" } } };
+  const feed = { get: (id) => staten[id] };
+  const geleerd = { rte: 0.8163, in: [[0.481, 0.8385], [2.368, 0.9184]], out: [[0.656, 0.8723], [2.89, 0.9343]] };
+  const accu = (meter = false) => ({ id: "b", type: "thuisbatterij", brand: "overig", entity: "", battery: {},
+    entities: { soc: "sensor.batterij_soc", ...(meter ? { energy_in: "sensor.in", energy_out: "sensor.uit" } : {}) } });
+  const staat = [{ device: "b", rte: 0.76, rte_power: geleerd }];
+  const rijen = new LiveSource().sample(feed, { sources: {}, devices: [accu()], battery_state: staat }).devices[0].details;
+  assert.equal(rijen.find((r) => r.label === "Rendement")?.text, "81,6% zelf geleerd");
+  assert.ok(!rijen.some((r) => r.label === "Laden" || r.label === "Ontladen"), JSON.stringify(rijen));
+  await import("../custom_components/domotiapp_coach/frontend/src/views/devices.js");
+  const el = Object.create(geregistreerd.get("dac-view-devices").prototype);
+  el.saved_ = { battery_state: staat };
+  const html = el.geleerdHtml_(accu());
+  assert.ok(html.includes("Zelf geleerd: 81,6% heen en terug."), html);
+  assert.ok(html.includes("Laden: 84% bij 0,5 kW, 92% bij 2,4 kW."), html);
+  assert.ok(html.includes("Ontladen: 87% bij 0,7 kW, 93% bij 2,9 kW."), html);
+  assert.equal(el.geleerdHtml_(accu(true)), "", "met een kWh-meter rekent de coach met de meter");
+  el.saved_ = { battery_state: [{ device: "b" }] };
+  assert.equal(el.geleerdHtml_(accu()), "", "nog niets geleerd: niets");
+});
+
 // De eigenaar op 14-10-2026 over de airco: "De klant stelt gewoon op de kaart in welke temperatuur
 // het moet zijn", en na v0.119.0: "goedkoop uur mag de bewoner zelf kiezen dus 3 opties of op zon of
 // goedkope uren of beide" en "Bij apparaten toevoegen alleen nog de optie Mitsubishi Electric kunnen
