@@ -342,9 +342,19 @@ HERVAT_MAX = timedelta(minutes=30)
 # zou één wolk de rest van de dag stempelen. En er moet genoeg beloofd zijn om
 # een verhouding van te maken: bij 0,05 kWh verwacht overschot zegt "de helft
 # ervan" niets. Zie `_zon_gemeten` en `overschot_kwh` in planner.py.
+#
+# En genoeg ten opzichte van de dag zelf (v0.189.0): het venster moet minstens
+# de helft beloven van het beste uur van vandaag. Bij zonsopkomst is het
+# venster bijna helemaal nacht, en belooft de verwachting voor het eerste uur
+# meer dan een lage zon geeft. Met alleen de vaste 0,5 kWh kwam er in een
+# klantwoning op 02-11-2026 om 07:25 een factor 0,01 uit (0,007 kWh gemeten,
+# 0,502 beloofd, op een dag van 48 kWh), zag de batterij geen zon meer voor die
+# dag en laadde hij tot 08:00 3,6 kWh van het net. Drie ochtenden achter elkaar.
+# Met het beste uur van die dag (6,5 kWh) oordeelt hij pas rond 08:35.
 ZON_VENSTER = timedelta(hours=2)
 ZON_MEETTIJD_MIN = 30.0
 ZON_MIN_VOORSPELD = 0.5
+ZON_MIN_BESTE_UUR = 0.5
 
 # How often to think. A minute is often enough to catch a kettle before a fuse
 # minds, and rare enough that a car is never re-commanded into giving up.
@@ -11858,6 +11868,10 @@ class ChargerCoach:
         16:00 en het dak deed 0,58. De coach verschoof zijn belofte van 16:00
         naar 17:00 en zou hem om 17:00 weer verschoven hebben. Zie
         `overschot_kwh` in planner.py.
+
+        Pas als het venster genoeg beloofde: `ZON_MIN_VOORSPELD`, en sinds
+        v0.189.0 ook de helft van het beste uur van vandaag (`ZON_MIN_BESTE_UUR`),
+        zodat een paar minuten zonsopkomst niet de hele dag bepalen.
         """
         grens = now - ZON_VENSTER
         binnen = [r for r in self._zon_reeks if r[0] >= grens]
@@ -11865,7 +11879,8 @@ class ChargerCoach:
         if minuten < ZON_MEETTIJD_MIN:
             return None
         voorspeld = sum(w * stap for _, w, _, stap in binnen) / 60.0 / 1000.0
-        if voorspeld < ZON_MIN_VOORSPELD:
+        beste = max((kwh for uur, kwh in self._zon_kwh.items() if uur.date() == now.date()), default=0.0)
+        if voorspeld < max(ZON_MIN_VOORSPELD, beste * ZON_MIN_BESTE_UUR):
             return None
         gemeten = sum(w * stap for _, _, w, stap in binnen) / 60.0 / 1000.0
         return max(0.0, min(1.0, gemeten / voorspeld))

@@ -2114,6 +2114,30 @@ zonder61 = bat.growatt_narekening(k61 + [{k: w for k, w in op61.items() if k != 
 controle("en in de narekening telt dat kwartier niet als van het net geladen",
          len(met61) == 2 and met61[1][0] == 0.0 and abs(zonder61[1][0] - 0.079) < 1e-9, f"{met61} {zonder61}")
 
+print("=== 62. bij zonsopkomst geen netladen door een zoncorrectie van één minuut (v0.189.0) ===")
+# In een klantwoning op 02-11-2026 om 07:25: het goedkope blok tot 08:00, een volle dag zon beloofd, en de
+# zoncorrectie op 0,01 omdat het dak bij zonsopkomst nog niets gaf. De batterij laadde 3,6 kWh van het net. Nu
+# oordeelt `_zon_gemeten` dan nog niet (None, proef 229 in test_coach.py).
+D62 = dt.datetime(2026, 11, 2)
+Z62 = {7: 1.0, 8: 3.74, 9: 5.0, 10: 6.0, 11: 6.5, 12: 6.5, 13: 6.3, 14: 5.6, 15: 4.3, 16: 2.6, 17: 0.8}
+P62 = prijzen([0.166] * 8 + [0.272] * 14 + [0.166] * 2, dag=D62) + prijzen(
+    [0.166] * 8 + [0.272] * 14 + [0.166] * 2, dag=D62 + dt.timedelta(days=1))
+
+
+def ochtend62(factor):
+    v = verwachting(Z62, huis=0.8, dag=D62)
+    v.solar_factor, v.solar_day = factor, D62.date()
+    b = plan_batterij(D62.replace(hour=7, minute=25), P62, Tariff(), v, anker(15.0, soc_min=15.0, soc_max=100.0, rte=0.9))
+    return b, sum(u.net_kwh for u in b.uren if u.stand == NETLADEN and u.start < D62.replace(hour=8))
+
+
+for f62, wat62 in [(0.01, "met een oordeel na een paar minuten (0,01)"), (None, "nog geen oordeel"), (0.17, "een dag die echt tegenvalt (0,17)")]:
+    b62, net62 = ochtend62(f62)
+    print(f"  {wat62}: {b62.stand}, {net62:.2f} kWh van het net voor 08:00")
+controle("met 0,01 laadde hij van het net, zoals in de klantwoning", ochtend62(0.01)[1] > 1.0, "")
+controle("zonder oordeel niet: de zon van de dag vult hem", ochtend62(None)[1] < 0.005 and ochtend62(None)[0].stand != NETLADEN, "")
+controle("een dak dat twee uur bijna niets gaf (0,17) laadt wel bij", ochtend62(0.17)[1] > 1.0, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
