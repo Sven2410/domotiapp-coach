@@ -186,6 +186,26 @@ voorspelling weer, en zo schoof de belofte elk uur op. Drie dingen erbij.
    `plan-ahead-sheet.js`): "Je dak gaf de afgelopen uren X% minder dan de
    zonverwachting zei, dus hij rekent verder met wat hij mat."
 
+**Pas een oordeel bij genoeg zon voor de dag** (v0.189.0). Het venster moet
+behalve de vaste 0,5 kWh (`ZON_MIN_VOORSPELD`) ook de helft beloven van het beste
+uur van vandaag (`ZON_MIN_BESTE_UUR`). Bij zonsopkomst is het venster bijna
+helemaal nacht, en de verwachting belooft voor het eerste uur meer dan een lage
+zon geeft. In een klantwoning op 02-11-2026 om 07:25: 0,502 kWh beloofd, 0,007
+gemeten, factor 0,01 voor een dag van 48 kWh. De batterij zag geen zon meer en
+laadde tot het eind van het goedkope blok (08:00) 3,6 kWh van het net, voor
+ongeveer € 0,60, en de zon vulde hem daarna alsnog. Drie ochtenden achter elkaar.
+Met het beste uur van die dag (6,5 kWh) oordeelt hij pas rond 08:35, met 0,50.
+
+Eerst is een demping geprobeerd, (gemeten + 1 kWh) / (beloofd + 1 kWh): bij
+zonsopkomst 0,67 in plaats van 0,01. Die tilde ook een middag op die echt
+tegenviel. In `zonbelofte-vast` werd om 15:00 0,30 (6,22 kWh beloofd, 1,86 gekomen)
+0,40, en toen beloofde de paal weer "eigen zon van 16:00", de fout van 17-09. De
+drempel naar het beste uur laat dat staan: daar is het venster ruim genoeg, en in de
+woning van 17-09 ook (het beste uur 1,55 kWh, de drempel 0,78). Wat ervoor betaald
+wordt: een ochtend die echt tegenvalt ziet hij later, pas als er een half beste uur
+beloofd is. Geldt voor de batterij en de paal, want ze lezen dezelfde
+`solar_factor`. Proef 229 in test_coach.py, proef 62 in test_batterij.py.
+
 **De correctie geldt alleen voor uren van de dag waarop gemeten is**
 (`Forecast.solar_day`, v0.67.2). In die woning liep de zin diezelfde avond tussen
 17:46 en 20:00 op van "50% minder" naar "86% minder", en dat klopte voor die

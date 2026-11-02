@@ -13993,6 +13993,67 @@ try:
 finally:
     sys.modules["homeassistant.helpers.entity_registry"] = oud228
 
+print("=== 229. de zoncorrectie bij zonsopkomst: pas een oordeel bij genoeg zon voor de dag (v0.189.0) ===")
+# Een klantwoning op 02-11-2026: om 07:25 was er 0,502 kWh beloofd en 0,007 gemeten, een factor 0,01 voor een dag
+# van 48 kWh, en de batterij laadde tot 08:00 van het net (proef 62 in test_batterij.py). Drie ochtenden achter
+# elkaar. Nu moet het venster minstens de helft van het beste uur van vandaag beloven (`ZON_MIN_BESTE_UUR`).
+D229 = dt.datetime(2026, 11, 2)
+DAG229 = {D229.replace(hour=u): k for u, k in {7: 1.0, 8: 3.743, 9: 5.0, 10: 6.0, 11: 6.5, 12: 6.5, 13: 6.3,
+                                                14: 5.6, 15: 4.3, 16: 2.6, 17: 0.8}.items()}
+
+
+def ochtend229(dak, van=(6, 30), tot=(7, 25), zon=None):
+    """Een coach die elke minuut het dak meet; `dak(moment)` in watt. Geeft de factor van elke minuut."""
+    _hass, _s, c = bouw(huis(), inst69())
+    c._zon_kwh = dict(zon or DAG229)
+    t = D229.replace(hour=van[0], minute=van[1])
+    factoren = {}
+    while t <= D229.replace(hour=tot[0], minute=tot[1]):
+        _hass.states.zet("sensor.zon", str(dak(t)))
+        c._zon_bijhouden(t, inst69())
+        factoren[t] = c._zon_gemeten(t)
+        t += dt.timedelta(minutes=1)
+    return c, factoren
+
+
+def zonsopkomst229(t):
+    """Na 07:15 een dak dat oploopt tot 60% van de belofte, zoals 08:00-08:35 in de klantwoning."""
+    if t < D229.replace(hour=7, minute=15):
+        return 0.0
+    belofte = DAG229.get(t.replace(minute=0), 0.0) * 1000.0
+    return min(0.6, (t - D229.replace(hour=7, minute=15)).total_seconds() / 3600.0) * belofte
+
+
+c229, f229 = ochtend229(zonsopkomst229, tot=(9, 30))
+eerste229 = next((t for t, f in f229.items() if f is not None), None)
+print(f"  eerste oordeel om {eerste229:%H:%M}, factor {f229.get(eerste229)}" if eerste229 else "  geen oordeel")
+controle("tot 08:00, het eind van het goedkope blok, geen oordeel: de verwachting van de dag blijft staan",
+         all(f is None for t, f in f229.items() if t < D229.replace(hour=8)), "")
+controle("daarna wel, zodra er de helft van het beste uur (3,25 kWh) beloofd is",
+         eerste229 is not None and eerste229 < D229.replace(hour=9, minute=30) and f229[eerste229] < 0.8, f"{eerste229}")
+# Met alleen de vaste 0,5 kWh had hij om 07:25 al geoordeeld, met bijna nul.
+oud229 = coachmod.ZON_MIN_BESTE_UUR
+coachmod.ZON_MIN_BESTE_UUR = 0.0
+_c, fo229 = ochtend229(zonsopkomst229, tot=(7, 40))
+coachmod.ZON_MIN_BESTE_UUR = oud229
+vroeg229 = [(t, f) for t, f in fo229.items() if f is not None]
+print(f"  zonder die drempel: eerste oordeel {vroeg229[0][0]:%H:%M}, factor {vroeg229[0][1]:.2f}" if vroeg229 else "")
+controle("zonder die drempel kwam er voor 08:00 een factor bij nul, zoals in de klantwoning",
+         vroeg229 and vroeg229[0][0] < D229.replace(hour=7, minute=40) and vroeg229[0][1] < 0.1, f"{vroeg229[:1]}")
+# Een dag die echt tegenvalt: twee uur 5 kWh beloofd en het dak geeft bijna niets.
+c229c, f229c = ochtend229(lambda t: 20.0, van=(9, 0), tot=(10, 59), zon={D229.replace(hour=u): 2.5 for u in range(9, 13)})
+laatst229c = f229c[D229.replace(hour=10, minute=59)]
+print(f"  twee uur 5 kWh beloofd, 0,04 gekomen: {laatst229c}")
+controle("een dag die echt tegenvalt: wel een oordeel, en laag (proef 62: dan laadt hij bij)",
+         laatst229c is not None and laatst229c < 0.05, f"{laatst229c}")
+# Een klein dak: het beste uur 1,55 kWh (de woning van 17-09), dus de drempel 0,78 kWh; proef 69 oordeelt na 45
+# minuten zoals voorheen.
+# Een herstart: de reeks staat alleen in het geheugen, dus de coach begint opnieuw zonder oordeel.
+c229d = herstart213(c229.hass)
+c229d._zon_kwh = dict(DAG229)
+controle("na een herstart geen oordeel, en dus geen correctie, tot er weer genoeg gemeten is",
+         c229d._zon_gemeten(D229.replace(hour=9, minute=31)) is None, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
