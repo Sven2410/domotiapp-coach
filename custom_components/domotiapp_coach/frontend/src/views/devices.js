@@ -69,6 +69,7 @@ import {
   saveBarHtml,
 } from "./editor-base.js";
 import { sheetCss } from "../theme.js";
+import { geleerdRendement } from "../data-source.js";
 import "../components/entity-picker.js";
 
 const uid = () => `dev-${Math.random().toString(36).slice(2, 9)}`;
@@ -1203,6 +1204,16 @@ class DacViewDevices extends DacEditorElement {
       </div>`;
   }
 
+  /** Het zelf geleerde rendement per vermogen (v0.191.0), dat tot dan in de pop-up van de batterij stond. */
+  geleerdHtml_(device) {
+    const geleerd = geleerdRendement(device, this.saved_?.battery_state);
+    if (!geleerd) return "";
+    return `
+        <p class="sub">${t("Zelf geleerd: {pct}% heen en terug.", { pct: geleerd.rte })}</p>
+        ${geleerd.laden ? `<p class="sub">${t("Laden: {punten}.", { punten: geleerd.laden })}</p>` : ""}
+        ${geleerd.ontladen ? `<p class="sub">${t("Ontladen: {punten}.", { punten: geleerd.ontladen })}</p>` : ""}`;
+  }
+
   batteryHtml_(device, index) {
     if (!isBattery(device) || !brandMeta(device)) return "";
     const b = { ...defaultBattery(device.brand), ...(device.battery ?? {}) };
@@ -1258,7 +1269,7 @@ class DacViewDevices extends DacEditorElement {
             ${getal("rte_percent", 'min="30" max="100" step="0.1"', t("alleen zonder kWh-meter"))}
           </div>
         </div>
-        <p class="sub">${t("Met het rendement rekent de coach uit of laden van het net loont: bij 75% moet het dure uur een derde duurder zijn dan het goedkope. Bij een vast contract zonder dal- en piektarief loont laden van het net nooit; dan bepaalt het rendement alleen of zon opslaan meer oplevert dan terugleveren. Met een kWh-meter op de batterij meet hij het zelf, en dan wint de meting. Zonder rendement houdt hij alleen de meter op nul.")}</p>
+        <p class="sub">${t("Met het rendement rekent de coach uit of laden van het net loont: bij 75% moet het dure uur een derde duurder zijn dan het goedkope. Bij een vast contract zonder dal- en piektarief loont laden van het net nooit; dan bepaalt het rendement alleen of zon opslaan meer oplevert dan terugleveren. Met een kWh-meter op de batterij meet hij het zelf, en anders leert hij het uit wat de batterij laadt en ontlaadt; wat hij meet wint. Zonder rendement houdt hij alleen de meter op nul.")}</p>${this.geleerdHtml_(device)}
         <div class="two">
           <div class="row">
             <label>${t("Hoogste laadvermogen (W)")}</label>

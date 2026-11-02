@@ -543,8 +543,11 @@ export const APPARATEN = {
   "alleen zonder sensor": "only without a sensor",
   "Rendement heen en terug (%)": "Round-trip efficiency (%)",
   "alleen zonder kWh-meter": "only without a kWh meter",
-  "Met het rendement rekent de coach uit of laden van het net loont: bij 75% moet het dure uur een derde duurder zijn dan het goedkope. Bij een vast contract zonder dal- en piektarief loont laden van het net nooit; dan bepaalt het rendement alleen of zon opslaan meer oplevert dan terugleveren. Met een kWh-meter op de batterij meet hij het zelf, en dan wint de meting. Zonder rendement houdt hij alleen de meter op nul.":
-    "With the efficiency the coach works out whether charging from the grid pays off: at 75% the expensive hour has to cost a third more than the cheap one. With a fixed contract without off-peak and peak rates, charging from the grid never pays off; then the efficiency only decides whether storing solar earns more than exporting it. With a kWh meter on the battery it measures it itself, and then the measurement wins. Without an efficiency it only keeps the meter at zero.",
+  "Met het rendement rekent de coach uit of laden van het net loont: bij 75% moet het dure uur een derde duurder zijn dan het goedkope. Bij een vast contract zonder dal- en piektarief loont laden van het net nooit; dan bepaalt het rendement alleen of zon opslaan meer oplevert dan terugleveren. Met een kWh-meter op de batterij meet hij het zelf, en anders leert hij het uit wat de batterij laadt en ontlaadt; wat hij meet wint. Zonder rendement houdt hij alleen de meter op nul.":
+    "With the efficiency the coach works out whether charging from the grid pays off: at 75% the expensive hour has to cost a third more than the cheap one. With a fixed contract without off-peak and peak rates, charging from the grid never pays off; then the efficiency only decides whether storing solar earns more than exporting it. With a kWh meter on the battery it measures it itself, and otherwise it learns it from what the battery charges and discharges; what it measures wins. Without an efficiency it only keeps the meter at zero.",
+  "Zelf geleerd: {pct}% heen en terug.": "Learned: {pct}% round trip.",
+  "Laden: {punten}.": "Charging: {punten}.",
+  "Ontladen: {punten}.": "Discharging: {punten}.",
   "Hoogste laadvermogen (W)": "Maximum charging power (W)",
   "bijvoorbeeld {n}": "for example {n}",
   "Hoogste ontlaadvermogen (W)": "Maximum discharging power (W)",
