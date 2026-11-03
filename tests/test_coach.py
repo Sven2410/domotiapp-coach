@@ -14748,7 +14748,29 @@ try:
     coach236b = herstart213(hass236)
     bedraad236(hass236, coach236b)
     asyncio.run(ronde75(hass236, coach236b, dt.datetime(2026, 11, 4, 5, 40)))
-    controle("één keer, ook na een herstart", len(hass236.vragen236) == 2, f"{hass236.vragen236}")
+    controle("met zeven dagen niet meer, ook na een herstart", len(hass236.vragen236) == 2, f"{hass236.vragen236}")
+    # De klantwoning op 03-11-2026 (v0.196.1): v0.196.0 om 20:02 geïnstalleerd, één keer nagerekend zonder vandaag,
+    # zes dagen en `zon_terug` gezet. Nu komt vandaag erbij zodra de zon onder is, ook met `zon_terug`.
+    hass236d, store236d, coach236d = huis236()
+    zes236 = [v for k, v in sorted(verwacht236.items()) if k != "2026-11-03"] + [["2026-11-02", 30.0, 33.0]]
+    instd236 = asyncio.run(coachmod.async_get_store(hass236d).async_load())
+    instd236["battery_state"] = [{"device": "dev-batterij", "zon_dagen": sorted(zes236), "zon_terug": "2026-11-03T20:03"}]
+    asyncio.run(coachmod.async_get_store(hass236d).async_save(instd236))
+    bedraad236(hass236d, coach236d)
+    asyncio.run(ronde75(hass236d, coach236d, dt.datetime(2026, 11, 3, 15, 0)))
+    rij236d = coach236d._batterij_rij(asyncio.run(coachmod.async_get_store(hass236d).async_load()), "dev-batterij")
+    controle("om 15:00 is de zon nog op: vandaag nog niet", len(rij236d.get("zon_dagen")) == 6
+             and len(hass236d.vragen236) == 1, f"{rij236d.get('zon_dagen')} {hass236d.vragen236}")
+    asyncio.run(ronde75(hass236d, coach236d, dt.datetime(2026, 11, 3, 15, 30)))
+    controle("en niet elk kwartier opnieuw, maar elk uur", len(hass236d.vragen236) == 1, f"{hass236d.vragen236}")
+    asyncio.run(ronde75(hass236d, coach236d, dt.datetime(2026, 11, 3, 20, 10)))
+    rij236d = coach236d._batterij_rij(asyncio.run(coachmod.async_get_store(hass236d).async_load()), "dev-batterij")
+    drie236 = {d[0]: d for d in rij236d.get("zon_dagen") or []}.get("2026-11-03")
+    print(f"  na zonsondergang: 03-11 {drie236}, zon_terug {rij236d.get('zon_terug')}")
+    controle("om 20:10 wel, ook al stond zon_terug er al: zeven dagen",
+             len(rij236d.get("zon_dagen")) == 7 and drie236 is not None
+             and abs(drie236[2] - verwacht236["2026-11-03"][2]) < 0.011 and rij236d.get("zon_terug") == "2026-11-03T20:10",
+             f"{rij236d}")
     # Zonder "vandaag nog" kijkt hij niet.
     hass236c, _, coach236c = huis236(remaining="")
     bedraad236(hass236c, coach236c)

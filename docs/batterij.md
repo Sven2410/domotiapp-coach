@@ -2455,8 +2455,13 @@ In de klantwoning van 03-11-2026 stond alles wat nodig was er al: "vandaag nog" 
 sinds 26-10, en de omvormer al weken in de kwartieropslag. De eigenaar koos op 03-11 uit drie wegen: "1, bouw de
 uitgave".
 
-- **Wanneer:** in de ronde van de batterij (`_async_zon_dagen_terug`), één keer per batterij, en alleen als er nog
-  minder dan zeven dagen zijn. Daarna staat `zon_terug` in `battery_state`, dus ook na een herstart niet nog eens.
+- **Wanneer:** in de ronde van de batterij (`_async_zon_dagen_terug`), zolang een batterij minder dan zeven dagen
+  heeft, en dan elk uur (`ZON_TERUG_NOG_EENS`, sinds v0.196.1). `zon_terug` in `battery_state` zegt wanneer er voor
+  het laatst iets bij kwam. Vandaag telt zodra de zon onder is.
+- **Waarom elk uur en vandaag erbij (v0.196.1).** v0.196.0 deed het één keer en liet vandaag weg. In de klantwoning
+  ging hij op 03-11-2026 om 20:02 erin, na zonsondergang: zes dagen, en 03-11 kwam er nooit meer bij, want het meten
+  zelf zag die dag niet vanaf zonsopkomst. Daarmee bleef het een nacht langer onder de zeven. Een dag die het meten
+  zelf niet kon tellen (na zonsopkomst begonnen) vult het narekenen zo ook aan, als de kwartieren hem wel hebben.
 - **Verwacht:** "vandaag nog" (`remaining_today` bij Zonverwachting) uit de recorder, gemiddeld over de tijd van de
   eerste stand na middernacht tot zonsopkomst. Voor de zon op is dat de hele dag. De recorder bewaart zijn
   toestanden tien dagen, dus verder terug gaat het niet.
@@ -2483,5 +2488,6 @@ uitgave".
 Proef 236 in test_coach.py: de som (het gemiddelde over de nacht, niet de stand van 11:00; een gat van 225
 minuten, twee en vier halve kwartieren; de dag dat de wintertijd ingaat), en in de coach negen dagen waarvan zes
 tellen naast een eigen dag, een recorder die er nog niet is, één keer ook over een herstart, zonder "vandaag nog",
-en de zin op de kaart in dezelfde ronde; en het meten zelf met een verwachting die om 04:00 van 16,6 naar 11,2 gaat,
+en de zin op de kaart in dezelfde ronde; de klantwoning van 03-11 (zes dagen en `zon_terug` al gezet: om 15:00
+nog niet, om 20:10 wel, en niet elk kwartier); en het meten zelf met een verwachting die om 04:00 van 16,6 naar 11,2 gaat,
 over een herstart om 02:00 (13,88).
