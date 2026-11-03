@@ -1751,6 +1751,22 @@ class Forecast:
     # dag: wat je dak vanmiddag deed zegt iets over vanavond en niets over
     # morgenmiddag. Zie `overschot_kwh`.
     solar_day: date | None = None
+    # Hoeveel zon de coach rekent waar hij nog niets gemeten heeft: de nacht en de
+    # ochtend van vandaag, en morgen (v0.193.0, alleen voor de thuisbatterij). Uit de
+    # gemeten fout van de verwachting en de prijs van een vergissing, zie `zon_marge`
+    # in batterij.py. Nooit onder één; niets is de verwachting zelf.
+    solar_prior: float | None = None
+
+
+def zon_factor(forecast: Forecast, uur: datetime) -> float:
+    """Waar de verwachting van dit uur mee vermenigvuldigd wordt.
+
+    Wat het dak vandaag deed (`solar_factor`) voor de uren van die dag, en anders de
+    marge uit de dagen ervoor (`solar_prior`), of één.
+    """
+    if forecast.solar_factor is not None and uur.date() == forecast.solar_day:
+        return forecast.solar_factor
+    return forecast.solar_prior or 1.0
 
 
 def overschot_kwh(
@@ -1786,19 +1802,14 @@ def overschot_kwh(
     Het deel en het hele uur zijn er voor het uur waar we in zitten: dat is
     korter dan een uur en levert dus ook minder.
     """
-    zon = max(0.0, forecast.solar_kwh.get(uur, 0.0))
-    if forecast.solar_factor is not None and uur.date() == forecast.solar_day:
-        zon *= forecast.solar_factor
+    zon = max(0.0, forecast.solar_kwh.get(uur, 0.0)) * zon_factor(forecast, uur)
     over = max(0.0, zon - forecast.house_kwh.get(uur.hour, 0.0))
     return over * (deel / heel if heel else 1.0)
 
 
 def _zon_uur(forecast: Forecast, uur: datetime) -> float:
     """De zon van één uur op de klok in kWh, bijgesteld zoals `overschot_kwh` dat doet."""
-    zon = max(0.0, forecast.solar_kwh.get(uur, 0.0))
-    if forecast.solar_factor is not None and uur.date() == forecast.solar_day:
-        zon *= forecast.solar_factor
-    return zon
+    return max(0.0, forecast.solar_kwh.get(uur, 0.0)) * zon_factor(forecast, uur)
 
 
 def zon_tussen(forecast: Forecast, van: datetime, tot: datetime) -> float:

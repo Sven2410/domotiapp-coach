@@ -101,6 +101,10 @@ from .batterij import (
     verdiend,
     vol_voor,
     zon_in_accu,
+    ZON_DAGEN_BEWAAR,
+    zon_marge,
+    zon_verhoudingen,
+    zon_vergissing,
 )
 from . import berichten, prijsopbouw, taal, tarifas
 from .taal import getal, t, tn
@@ -358,6 +362,10 @@ HERVAT_MAX = timedelta(minutes=30)
 # Met het beste uur van die dag (6,5 kWh) oordeelt hij pas rond 08:35.
 ZON_VENSTER = timedelta(hours=2)
 ZON_MEETTIJD_MIN = 30.0
+# De zon per dag (v0.193.0, `_zon_dag_bijhouden`): een ronde telt hooguit zoveel minuten, en een
+# dag waarop overdag meer dan zoveel minuten niet gemeten is telt niet mee in `zon_marge`.
+ZON_DAG_STAP_MIN = 5.0
+ZON_DAG_GAT_MIN = 30.0
 ZON_MIN_VOORSPELD = 0.5
 ZON_MIN_BESTE_UUR = 0.5
 
@@ -1742,6 +1750,9 @@ class ChargerCoach:
         self._integratie_stil: dict[str, datetime] = {}
         # Wanneer de zon vandaag boven `ZON_SLAAPT_ONDER` kwam, of None zolang hij eronder staat (v0.190.0).
         self._zon_wakker: datetime | None = None
+        # De zon van vandaag: de verwachting van voor zonsopkomst naast wat het dak gaf (v0.193.0).
+        # Zie `_zon_dag_bijhouden`.
+        self._zon_dag: dict[str, Any] | None = None
         # Per laadpaal sinds wanneer een opdracht niet aankomt, en welke al gemeld zijn (v0.163.3).
         self._paal_weg: dict[str, datetime] = {}
         # Wat elke paal deze ronde in totaal trekt of gaat trekken, per fase (v0.164.1): voor een
@@ -2935,6 +2946,104 @@ class ChargerCoach:
                 await self.hass.config_entries.async_reload(entry_id)
         except Exception as err:  # noqa: BLE001 - het internet kan er nog niet zijn
             _LOGGER.warning("de integratie %s herladen lukte niet: %s", naam, err)
+
+    def _zon_dag_bijhouden(self, now: datetime, settings: dict[str, Any]) -> list | None:
+        """De zonverwachting van vandaag naast wat het dak gaf, één keer per ronde (v0.193.0).
+
+        Verwacht: de som van de verwachting voor vandaag, tot het eerste uur waarin zon voorspeld
+        is. Dat is de verwachting waarmee hij 's nachts van het net laadde; daarna verandert hij
+        niet meer. Gemeten: wat de omvormers gaven (`_zon_w`), per ronde opgeteld zoals
+        `_zon_bijhouden` dat doet. Wat er overdag niet gemeten is (een herstart, een omvormer die
+        niets zegt, rondes die uitvielen) telt als gat; zie `_zon_dag_af`.
+
+        Elke ronde in de opslag (`zon_dag`), zodat een herstart midden op de dag de dag niet kost.
+        Geeft de afgesloten dag van gisteren terug als [dag, verwacht, gemeten] als die bruikbaar
+        was, anders None.
+        """
+        dag = self._zon_dag
+        if dag is None:
+            terug = self._geheugen_terug.pop("zon_dag", None)
+            dag = self._zon_dag_uit(terug) if terug else None
+        if dag is not None and dag.get("laatst") is not None and dag["laatst"] >= now:
+            return None
+        klaar = None
+        if dag is not None and dag.get("dag") != now.date().isoformat():
+            klaar = self._zon_dag_af(dag)
+            dag = None
+        if dag is None:
+            dag = {"dag": now.date().isoformat(), "begon": now, "laatst": None, "verwacht": None,
+                   "van": None, "tot": None, "gemeten": 0.0, "gat": 0.0}
+        uren = sorted(u for u, kwh in self._zon_kwh.items() if u.date() == now.date() and kwh > 0)
+        if uren and (dag["van"] is None or now < dag["van"]):
+            # Nog voor de zon: de verwachting mag nog bijkomen, zoals de voorspeller hem bijwerkt.
+            dag["verwacht"] = round(sum(self._zon_kwh[u] for u in uren), 3)
+            dag["van"], dag["tot"] = uren[0], uren[-1] + timedelta(hours=1)
+        stap = 1.0 if dag["laatst"] is None else max(0.0, (now - dag["laatst"]).total_seconds() / 60.0)
+        overdag = dag["van"] is not None and dag["van"] <= now <= dag["tot"] + timedelta(minutes=ZON_DAG_STAP_MIN)
+        opbrengst = self._zon_w(settings)
+        if overdag and stap > ZON_DAG_STAP_MIN:
+            dag["gat"] += stap - ZON_DAG_STAP_MIN
+        if opbrengst is None:
+            if overdag:
+                dag["gat"] += min(stap, ZON_DAG_STAP_MIN)
+        else:
+            dag["gemeten"] += max(0.0, opbrengst) / 1000.0 * min(stap, ZON_DAG_STAP_MIN) / 60.0
+        dag["laatst"] = now
+        self._zon_dag = dag
+        self._onthoud("zon_dag", {
+            "dag": dag["dag"], "begon": _naar_geheugen(dag["begon"]), "laatst": _naar_geheugen(now),
+            "verwacht": dag["verwacht"], "van": _naar_geheugen(dag["van"]), "tot": _naar_geheugen(dag["tot"]),
+            "gemeten": round(dag["gemeten"], 4), "gat": round(dag["gat"], 2),
+        })
+        return klaar
+
+    @staticmethod
+    def _zon_dag_uit(data: dict[str, Any]) -> dict[str, Any] | None:
+        """De dag zoals hij in de opslag stond, of None."""
+        try:
+            return {
+                "dag": str(data["dag"]), "begon": _uit_geheugen(data.get("begon")),
+                "laatst": _uit_geheugen(data.get("laatst")),
+                "verwacht": None if data.get("verwacht") is None else float(data["verwacht"]),
+                "van": _uit_geheugen(data.get("van")), "tot": _uit_geheugen(data.get("tot")),
+                "gemeten": float(data.get("gemeten") or 0.0), "gat": float(data.get("gat") or 0.0),
+            }
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _zon_dag_af(dag: dict[str, Any]) -> list | None:
+        """Een dag is om: [dag, verwacht, gemeten], of None als hij niet te vertrouwen is.
+
+        Niet als er geen verwachting was, als de coach de zon niet van begin tot eind zag, of als
+        er overdag meer dan `ZON_DAG_GAT_MIN` ontbrak.
+        """
+        waarom = ""
+        if dag.get("verwacht") is None or dag.get("van") is None:
+            waarom = "geen verwachting"
+        elif dag.get("begon") is None or dag["begon"] > dag["van"]:
+            waarom = "begon na de zon"
+        elif dag.get("laatst") is None or dag["laatst"] < dag["tot"]:
+            waarom = "hield op voor de zon onder was"
+        elif dag.get("gat", 0.0) > ZON_DAG_GAT_MIN:
+            waarom = f"{dag['gat']:.0f} minuten niet gemeten"
+        if waarom:
+            _LOGGER.info("zon van %s telt niet mee: %s", dag.get("dag"), waarom)
+            return None
+        _LOGGER.info("zon van %s: verwacht %.2f kWh, gemeten %.2f kWh", dag["dag"], dag["verwacht"], dag["gemeten"])
+        return [dag["dag"], round(dag["verwacht"], 2), round(dag["gemeten"], 2)]
+
+    async def _async_zon_dag_bewaren(self, settings: dict[str, Any], klaar: list) -> None:
+        """Een gemeten dag bij elke batterij, want die rekent ermee (`zon_marge`)."""
+        for apparaat in settings.get("devices") or []:
+            if apparaat.get("type") != "thuisbatterij":
+                continue
+            device_id = apparaat.get("id", "")
+            rij = self._batterij_rij(settings, device_id)
+            dagen = [d for d in (rij.get("zon_dagen") or []) if isinstance(d, list) and d and d[0] != klaar[0]]
+            await self._async_batterij_bewaren(settings, device_id, {
+                "zon_dagen": [*dagen, klaar][-ZON_DAGEN_BEWAAR:],
+            })
 
     def _zon_wakker_bijhouden(self, now: datetime) -> None:
         """Wanneer de zon vandaag boven `ZON_SLAAPT_ONDER` kwam, voor `_async_stil_herladen` (v0.190.0).
@@ -7415,9 +7524,16 @@ class ChargerCoach:
 
         prijzen = self._prices(settings)
         tarief = self._tarief(settings)
+        klaar = self._zon_dag_bijhouden(now, settings)
+        if klaar is not None:
+            await self._async_zon_dag_bewaren(settings, klaar)
+            rij = self._batterij_rij(settings, device_id)
+        gemeten_nu = self._zon_gemeten(now)
+        vergissing = zon_vergissing(now, prijzen, tarief, Forecast(solar_kwh=self._zon_kwh), b)
+        marge = zon_marge(rij.get("zon_dagen") or [], *(vergissing or (None, None)))
         verwachting = Forecast(
             solar_kwh=self._zon_kwh, house_kwh=self._huis_kwh, estimated=self._zon_geschat,
-            solar_factor=self._zon_gemeten(now), solar_day=now.date(),
+            solar_factor=gemeten_nu, solar_day=now.date(), solar_prior=marge,
         )
         # De som over de tijd kost met een lange prijslijst een tiende seconde,
         # en dat hoort niet in de lus van Home Assistant zelf.
@@ -7430,6 +7546,15 @@ class ChargerCoach:
                 laadruimte=self._laadruimte_plan(settings, device),
             )
         )
+
+        # Zolang hij vandaag nog niets van het dak gemeten heeft, zegt de kaart dat hij met meer
+        # zon rekent dan voorspeld, en waarom (v0.193.0).
+        if marge is not None and gemeten_nu is None and besluit.rule not in ("uit", "geen-prijs"):
+            besluit.reason = f"{besluit.reason} " + t(
+                "Hij rekent met {pct}% meer zon dan voorspeld: de voorspelling zat de afgelopen {dagen} "
+                "dagen vaak te laag.",
+                pct=round((marge - 1.0) * 100), dagen=len(zon_verhoudingen(rij.get("zon_dagen") or [])),
+            )
 
         vakantie = self._vakantie(device)
         if vakantie is not None:

@@ -46,6 +46,7 @@ from .planner import (
     echte_duur,
     echte_uren,
     in_evening_peak,
+    zon_factor,
     zon_tussen,
     piek_dicht,
     price_now,
@@ -1058,6 +1059,111 @@ def _rustig_vermogen(
 OCHTEND_UUR = 7
 
 
+# --- De zon die de verwachting niet zag (v0.193.0) ----------------------------
+#
+# In een klantwoning op 03-11-2026 (Growatt, teruglevering € 0, het goedkope blok € 0,166 tot 08:00 en daarna
+# € 0,272) laadde de coach de accu 's nachts van 15 naar 100%, want de verwachting zei 16,6 kWh zon.
+# Het dak gaf er ruim twee keer zoveel, en om 10:30 ging er 2,1 kW voor niets naar het net. Over
+# acht dagen gaf het dak 0,79 tot 2,33 keer de verwachting. Een vergissing naar de ene kant kost
+# daar ook meer dan naar de andere: te veel van het net kost € 0,185 per kWh (de zon had hem
+# gevuld), te weinig € 0,087 (het huis koopt het later). De afweging van de krantenjongen: laad
+# tot de kans dat de zon die kWh toch had gebracht gelijk is aan te weinig / (te veel + te weinig).
+
+# Vanaf zoveel gemeten dagen rekent hij met de marge, en zoveel bewaart hij.
+ZON_DAGEN_MIN = 7
+ZON_DAGEN_BEWAAR = 30
+# Een dag waarop minder zon verwacht werd telt niet: een verhouding van bijna niets is ruis.
+ZON_DAG_MIN_KWH = 1.0
+
+
+def kwantiel(waarden: list[float], kans: float) -> float:
+    """Het kwantiel van een gesorteerde lijst, tussen twee punten recht in."""
+    if len(waarden) == 1:
+        return waarden[0]
+    plek = max(0.0, min(1.0, kans)) * (len(waarden) - 1)
+    onder = int(plek)
+    boven = min(onder + 1, len(waarden) - 1)
+    return waarden[onder] + (waarden[boven] - waarden[onder]) * (plek - onder)
+
+
+def zon_verhoudingen(dagen: list) -> list[float]:
+    """Wat het dak gaf gedeeld door wat er verwacht werd, per bruikbare dag, oplopend.
+
+    `dagen` zoals ze bewaard worden: [dag, verwacht, gemeten], in kWh.
+    """
+    uit = []
+    for dag in dagen or []:
+        try:
+            verwacht, gemeten = float(dag[1]), float(dag[2])
+        except (TypeError, ValueError, IndexError):
+            continue
+        if verwacht >= ZON_DAG_MIN_KWH and gemeten >= 0:
+            uit.append(gemeten / verwacht)
+    return sorted(uit)
+
+
+def zon_marge(dagen: list, te_veel: float | None, te_weinig: float | None) -> float | None:
+    """Met hoeveel keer de verwachting de batterij rekent waar nog niets gemeten is, of None.
+
+    `te_veel`: wat een kWh van het net kost die de zon ook had gebracht. `te_weinig`: wat een
+    kWh kost die er niet in zit als de zon niet komt. Laden van het net loont tot de kans dat de
+    zon hem toch brengt `te_weinig / (te_veel + te_weinig)` is; de zon die daarbij hoort is het
+    kwantiel `1 - die kans` van wat het dak gaf tegenover de verwachting.
+
+    **Alleen naar boven.** Zat de verwachting te hoog, dan blijft het zoals het was: dat vangen
+    de meting van vandaag (`_zon_gemeten`, nooit boven één) en de bijstelling per nacht van een
+    Growatt al op, en minder zon rekenen dan voorspeld zou meer van het net laden op een gok.
+    Bij salderen is te veel bijna gratis, en komt het kwantiel daarom laag uit: dan verandert er
+    niets. Onder `ZON_DAGEN_MIN` dagen, of zonder twee prijzen, ook niets.
+    """
+    verhoudingen = zon_verhoudingen(dagen)
+    if len(verhoudingen) < ZON_DAGEN_MIN or not te_veel or not te_weinig or te_veel <= 0 or te_weinig <= 0:
+        return None
+    kans = te_weinig / (te_veel + te_weinig)
+    marge = kwantiel(verhoudingen, 1.0 - kans)
+    return round(marge, 3) if marge > 1.0 + 1e-6 else None
+
+
+def zon_vergissing(
+    now: datetime, prices: list[dict], tariff: Tariff, forecast: Forecast, b: Batterij
+) -> tuple[float, float] | None:
+    """Wat een kWh te veel en een kWh te weinig van het net kost, het komende etmaal, of None.
+
+    - Inkoop: het goedkoopste blok, want daarin laadt hij van het net.
+    - Later: het gemiddelde van de blokken die duurder zijn, want daar levert de batterij.
+    - Teruglevering: het gemiddelde in de uren met zon, want daar was de zon heen gegaan.
+
+    Te veel: (inkoop - teruglevering) / rendement heen en terug; die kWh zat er met de zon net zo
+    goed in, maar dan had de teruglevering ervoor gemist. Te weinig: later - inkoop / rendement.
+    Zonder een bekende terugleverprijs geen getal, want dan is te veel niet te zeggen.
+    """
+    eind = now + timedelta(hours=24)
+    blokken = [rij for rij in prices if rij["end"] > now and rij["start"] < eind] or _vlakke_blokken(now, eind, tariff)
+    koop = [float(rij["price"]) for rij in blokken if rij.get("price") is not None]
+    if not koop:
+        return None
+    inkoop = min(koop)
+    duur = [p for p in koop if p > inkoop + PRICE_MARGIN]
+    if not duur:
+        return None
+    later = sum(duur) / len(duur)
+    terug = [
+        float(rij["feed_in"]) for rij in blokken
+        if rij.get("feed_in") is not None and forecast.solar_kwh.get(
+            rij["start"].replace(minute=0, second=0, microsecond=0), 0.0) > 0
+    ]
+    if terug:
+        teruglevering = sum(terug) / len(terug)
+    elif tariff.feed_in is not None:
+        teruglevering = float(tariff.feed_in)
+    else:
+        return None
+    rte = eta_in(b) * eta_uit(b)
+    if rte <= 0:
+        return None
+    return (inkoop - teruglevering) / rte, later - inkoop / rte
+
+
 def _morgenvroeg(now: datetime) -> datetime:
     """Het eerstvolgende `OCHTEND_UUR`."""
     eind = now.replace(hour=OCHTEND_UUR, minute=0, second=0, microsecond=0)
@@ -1072,9 +1178,7 @@ def _nacht_uren(now: datetime, forecast: Forecast) -> list[tuple[float, float, f
     # de zomertijd heeft een uur minder huisverbruik, die van de wintertijd een meer.
     for uur, volgend in _klokuren(now, eind):
         deel = echte_uren(max(uur, now, key=_echt), volgend)
-        opbrengst = max(0.0, forecast.solar_kwh.get(uur, 0.0))
-        if forecast.solar_factor is not None and uur.date() == forecast.solar_day:
-            opbrengst *= forecast.solar_factor
+        opbrengst = max(0.0, forecast.solar_kwh.get(uur, 0.0)) * zon_factor(forecast, uur)
         uren.append((opbrengst * deel, forecast.house_kwh.get(uur.hour, 0.0) * deel, deel))
     return uren
 
