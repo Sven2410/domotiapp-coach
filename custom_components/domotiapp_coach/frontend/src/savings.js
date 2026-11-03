@@ -15,9 +15,18 @@
 
 import { getal, nt, t } from "./i18n.js";
 
-/** Het moment waarop een beurt in het overzicht valt: het eind, of nu als hij nog loopt. */
+/**
+ * Het moment waarop een beurt in het overzicht valt: wanneer er het laatst iets in
+ * ging (`charged_until`, v0.193.0), anders het eind, anders het inpluggen.
+ *
+ * Niet het eind: in een klantwoning op 03-11-2026 laadde de auto van 22:00 tot 00:12 en
+ * zat de kabel 's ochtends nog in. De beurt stond op de dag van het inpluggen, en
+ * "Van de coach" op de dag van het laden op nul; met de kabel eruit sprong hij naar
+ * de dag van het uittrekken. Een beurt die nog laadt staat zo op nu, want de coach
+ * schrijft hem elke vijf minuten weg.
+ */
 export function moment(beurt) {
-  const t = new Date(beurt?.ended ?? beurt?.plugged_at ?? "");
+  const t = new Date(beurt?.charged_until ?? beurt?.ended ?? beurt?.plugged_at ?? "");
   return Number.isNaN(t.getTime()) ? null : t;
 }
 

@@ -795,13 +795,14 @@ _, verstuurd20b = asyncio.run(ronde(coach20b, inst20, nu=dt.datetime(2026, 8, 25
 melding20b = [d[2]["message"] for d in verstuurd20b if d[0] == "notify"]
 print(f"  met een teller die springt: {melding20b}")
 # De teller zelf loopt achter op het moment dat hij springt: om 21:05 was er
-# zeven minuten geladen (0,7 kWh) en zei hij 0,6. Dat verschil blijft staan,
-# want de geijkte teller is de maat voor het stuk dat hij dekt. Wat telt is dat
-# de staart erbij komt en niets dubbel geteld wordt: 0,6 van de teller plus de
-# 0,3 die erna gemeten is.
+# zeven minuten geladen (0,7 kWh) en zei hij 0,6. Tot v0.193.0 bleef dat verschil
+# staan en zei het verslag 0,9 (0,6 van de teller plus de 0,3 erna), terwijl het
+# geld met 1,0 rekende. Sinds v0.193.0 is de eigen meting de ondergrens, zoals in een
+# klantwoning op 03-11-2026 (15,7 kWh in het verslag, 17,75 in het geld). Wat blijft
+# is dat niets dubbel telt: geen 1,3 en geen 1,6.
 controle(
-    "de sprong van de teller telt niet dubbel",
-    any("0,9 kWh" in m for m in melding20b),
+    "de sprong van de teller telt niet dubbel, en het verslag noemt wat het geld telt",
+    any("1,0 kWh" in m for m in melding20b),
     f"{melding20b}",
 )
 
@@ -14304,6 +14305,64 @@ ws232 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / 
          / "websocket.py").read_text(encoding="utf-8")
 controle("strategy/set, dat de bewoner mag, neemt het veld aan",
          'vol.Optional("fuse_margin_amps")' in ws232.split("_STRATEGY = _schema(")[1].split("\n)\n")[0], "")
+
+print("=== 233. een beurt staat op het moment dat hij laadde, en het verslag telt wat het geld telt (v0.193.0) ===")
+# Een klantwoning op 03-11-2026: ingeplugd om 14:42, geladen van 22:00 tot 00:12, de kabel er 's ochtends nog
+# in. Historie zette de beurt op de dag van het inpluggen, en "Van de coach" op de dag van het laden op nul. Het
+# verslag zei 15,7 kWh terwijl het geld met 17,75 rekende: de teller van de paal liep achter.
+klok233 = sys.modules["homeassistant.util.dt"]
+echte_klok233 = klok233.utcnow
+try:
+    inst233 = instellingen()
+    hass233, _, coach233 = bouw(huis(status="charging", stroom=11.6, vermogen=8000.0, teller=500.0), inst233)
+    BEGIN233 = dt.datetime(2026, 11, 2, 23, 40)
+    for minuut233 in range(0, 33):
+        nu233 = BEGIN233 + dt.timedelta(minutes=minuut233)
+        klok233.utcnow = lambda nu=nu233: nu.replace(tzinfo=dt.timezone.utc)
+        if minuut233 == 20:
+            # De teller stapt, maar met een stand van tien minuten oud: wat erna kwam staat er niet in.
+            hass233.states.zet("sensor.laadpaal_teller", str(500.0 + 8.0 * 10 / 60))
+        asyncio.run(ronde(coach233, inst233, nu233))
+    # Om 00:13 is hij vol (de minuut van 00:12 laadde nog): de paal staat op klaar, de kabel zit er nog in.
+    hass233.states.zet("sensor.laadpaal_status", "completed")
+    hass233.states.zet("sensor.laadpaal_vermogen", "0")
+    hass233.states.zet("sensor.laadpaal_stroom", "0")
+    for minuut233 in range(33, 50):
+        nu233 = BEGIN233 + dt.timedelta(minutes=minuut233)
+        klok233.utcnow = lambda nu=nu233: nu.replace(tzinfo=dt.timezone.utc)
+        asyncio.run(ronde(coach233, inst233, nu233))
+    s233 = coach233._sessie.get("dev-laadpaal") or {}
+    geld233 = float((s233.get("geld") or {}).get("kwh") or 0.0)
+    k233 = coach233._geladen(LAADPAAL, s233)
+    print(f"  geld {geld233:.2f} kWh, verslag {k233:.2f} kWh, laatst geladen {(s233.get('geld') or {}).get('laatst')}")
+    controle("een teller die achterloopt: het verslag noemt minstens wat het geld telt",
+             geld233 > 4.0 and abs(k233 - geld233) < 1e-9, f"{k233} {geld233}")
+    regel233 = coach233._beurt_regel(LAADPAAL, None, s233, BEGIN233 + dt.timedelta(minutes=50), klaar=False)
+    controle("de beurt weet tot wanneer er geladen werd: de minuut tot 00:13, niet het inpluggen of nu",
+             regel233.get("charged_until") == "2026-11-03T00:13:00" and regel233.get("ended") is None,
+             f"{regel233.get('charged_until')} {regel233.get('ended')}")
+    asyncio.run(hass233.afmaken())
+    opgeslagen233 = [b for b in asyncio.run(coachmod.async_get_beurten(hass233).async_list()) if not b.get("complete")]
+    controle("en zo staat hij in de opslag", opgeslagen233 and opgeslagen233[-1].get("charged_until")
+             == "2026-11-03T00:13:00", f"{[b.get('charged_until') for b in opgeslagen233]}")
+    # Een herstart om 08:13: de nieuwe coach leest de beurt terug, en schrijft hem weg met hetzelfde moment.
+    NU233 = dt.datetime(2026, 11, 3, 8, 13)
+    klok233.utcnow = lambda: NU233.replace(tzinfo=dt.timezone.utc)
+    hass233b, _, coach233b = bouw(huis(status="completed", stroom=0.0, vermogen=0.0, teller=509.0), inst233)
+    asyncio.run(coachmod.async_get_beurten(hass233b).async_upsert(opgeslagen233[-1]))
+    coach233b._restore(inst233)
+    asyncio.run(coach233b._async_beurten_laden())
+    asyncio.run(ronde(coach233b, inst233, NU233))
+    s233b = coach233b._sessie.get("dev-laadpaal") or {}
+    regel233b = coach233b._beurt_regel(LAADPAAL, None, s233b, NU233, klaar=True)
+    controle("na een herstart: hetzelfde moment, ook als de kabel er daarna uit gaat",
+             regel233b.get("charged_until") == "2026-11-03T00:13:00" and regel233b.get("ended") == "2026-11-03T08:13:00",
+             f"{regel233b.get('charged_until')} {regel233b.get('ended')}")
+    leeg233 = coachmod.ChargerCoach._geld_uit_regel({"plugged_at": "2026-11-02T14:42:39"}, NU233)
+    controle("een beurt van voor v0.193.0 heeft het niet, en dan ook niets verzonnen", leeg233.get("laatst") is None,
+             f"{leeg233.get('laatst')}")
+finally:
+    klok233.utcnow = echte_klok233
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

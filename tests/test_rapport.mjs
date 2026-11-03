@@ -4368,6 +4368,41 @@ proef("Historie: het pijltje van een uitklaplijst hoort bij de lijst, niet bij h
   assert.match(Historie.css, /\.kies \{[^}]*align-self: flex-start/);
 });
 
+// Een klantwoning op 03-11-2026: ingeplugd om 14:42, geladen van 22:00 tot 00:12, de kabel 's ochtends nog
+// erin. "Van de coach" stond die dag op nul, want de beurt stond op de dag van het inpluggen (v0.193.0).
+proef("een beurt staat op de dag dat hij laadde, niet op die van inpluggen of uittrekken", () => {
+  const open = { id: "p:1", device: "p", name: "Laadpaal", kind: "laden", plugged_at: "2026-11-02T14:42:39",
+    charged_until: "2026-11-03T00:13:00", ended: null, complete: false, kwh: 17.75, paid: 2.95, ref_cost: 4.82, saved: 1.87 };
+  const dag2 = [new Date(2026, 10, 2), new Date(2026, 10, 3)];
+  const dag3 = [new Date(2026, 10, 3), new Date(2026, 10, 4)];
+  assert.deepEqual(beurtenIn([open], ...dag2), [], "niet op de dag van het inpluggen");
+  assert.equal(totalen(beurtenIn([open], ...dag3)).saved, 1.87, "wel op de dag van het laden, met zijn besparing");
+  const uit = { ...open, ended: "2026-11-04T10:00:00", complete: true };
+  assert.equal(beurtenIn([uit], ...dag3).length, 1, "de kabel eruit op een andere dag: hij blijft staan");
+  const oud = { ...uit, charged_until: undefined };
+  assert.equal(beurtenIn([oud], new Date(2026, 10, 4), new Date(2026, 10, 5)).length, 1,
+    "een beurt van voor v0.193.0 staat op zijn eind, zoals hij stond");
+  // In Sessies op een dag de klok, en de datum erbij als hij de dag ervoor ingeplugd werd.
+  const el = Object.create(Historie.prototype);
+  const vak = { "#saved-note": nepEl("p"), "#saved-totals": nepEl(), "#saved-list": nepEl("table") };
+  el.$ = (sel) => vak[sel];
+  el.period_ = "day";
+  el.offset_ = 0;
+  const nu = new Date();
+  const gisteren = new Date(nu.getFullYear(), nu.getMonth(), nu.getDate() - 1, 14, 42);
+  const vannacht = new Date(nu.getFullYear(), nu.getMonth(), nu.getDate(), 0, 13);
+  const vandaag = new Date(nu.getFullYear(), nu.getMonth(), nu.getDate(), 0, 5);
+  el.beurten_ = [
+    { ...open, plugged_at: gisteren.toISOString(), charged_until: vannacht.toISOString() },
+    { ...open, id: "p:2", plugged_at: vandaag.toISOString(), charged_until: vannacht.toISOString() },
+  ];
+  metNepDocument(() => el.paintSaved_());
+  const tekst = JSON.stringify(vak["#saved-list"].kinderen.slice(1).map((r) => r.kinderen[0]?.textContent));
+  const dd = String(gisteren.getDate()).padStart(2, "0");
+  assert.ok(tekst.includes(`${dd}-`) && tekst.includes("14:42"), `de datum bij een beurt van gisteren: ${tekst}`);
+  assert.ok(tekst.includes('"00:05"'), `alleen de klok bij een beurt van vandaag: ${tekst}`);
+});
+
 proef("Sessies: de uitleg zegt eerst wat een sessie is", () => {
   const el = Object.create(Historie.prototype);
   const vak = { "#saved-note": nepEl("p"), "#saved-totals": nepEl(), "#saved-list": nepEl("table") };
@@ -5512,7 +5547,7 @@ proef("de vooruitblik: per uur de prijs, de zon, het huis en elk plan, in de vol
   assert.ok(ov.includes('data-card="vooruit"') && ov.includes('type: "domotiapp_coach/forecast"'));
 });
 
-// "Wat gaat hij doen" voor de boiler en een apparaat met een programma (v0.133.0), zoals bij
+// "Wat gaat hij doen" voor de boiler en een apparaat met een programma (v0.133.0), zoals in een
 // de laadpaal en de batterij. De eigenaar op 18-10-2026: "Zou bij zowel batterij, als ev
 // laden, als boiler, etc op dezelfde manier weergegeven mogen worden."
 proef("Wat gaat hij doen: de boiler en een programma in dezelfde prijsgrafiek (v0.133.0)", async () => {

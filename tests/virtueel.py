@@ -455,6 +455,11 @@ class Paal:
     # De echte Easee werkt zijn levensduurteller maar af en toe bij, in
     # sprongen. Zie `_geladen` in coach.py voor wat dat kostte.
     teller_interval_min: int = 60
+    # En die stap brengt een stand van een tijdje terug, niet die van het moment zelf.
+    # In een klantwoning op 03-11-2026 eindigde de beurt om 00:12 en kwam de teller pas om
+    # 01:08 bij; het verslag zei 15,7 kWh waar het geld 17,75 telde (v0.193.0).
+    teller_achter_min: int = 0
+    teller_reeks: list = field(default_factory=list)
     teller_zichtbaar: float = 100.0
     teller_bij: dt.datetime | None = None
     ontvangen: list = field(default_factory=list)
@@ -507,11 +512,15 @@ class Paal:
         return "awaiting_start"
 
     def teller(self, nu: dt.datetime) -> float:
+        self.teller_reeks.append((nu, self.teller_kwh))
+        grens = nu - dt.timedelta(minutes=self.teller_achter_min)
+        self.teller_reeks = [r for r in self.teller_reeks if r[0] >= grens - dt.timedelta(minutes=5)]
         if self.teller_bij is None or (nu - self.teller_bij) >= dt.timedelta(
             minutes=self.teller_interval_min
         ):
             self.teller_bij = nu
-            self.teller_zichtbaar = self.teller_kwh
+            oud = [stand for moment, stand in self.teller_reeks if moment <= grens]
+            self.teller_zichtbaar = max(self.teller_zichtbaar, oud[-1] if oud else self.teller_reeks[0][1])
         return self.teller_zichtbaar
 
 

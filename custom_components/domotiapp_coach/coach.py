@@ -12800,8 +12800,10 @@ class ChargerCoach:
         if ingeplugd is not None:
             ingeplugd = ingeplugd.replace(tzinfo=None)
         basis = open_beurt.get("baseline") or {}
+        laatst = _tijdstip(open_beurt.get("charged_until"))
         return {
             "ingeplugd": ingeplugd or now,
+            "laatst": None if laatst is None else laatst.replace(tzinfo=None),
             "ijk_prijs": open_beurt.get("ref_price"),
             "ijk_terug": open_beurt.get("ref_feed_in"),
             "kwh": float(open_beurt.get("kwh") or 0.0),
@@ -12985,6 +12987,9 @@ class ChargerCoach:
         net_kwh = kwh_stap - zon_kwh
         koop, terug = self._prijs_nu(settings, now)
         geld["kwh"] += kwh_stap
+        # Het laatste moment waarop er iets in ging (v0.193.0): daarop valt de
+        # beurt in Historie, en niet op het inpluggen of het uittrekken.
+        geld["laatst"] = now
         geld["zon_kwh"] += zon_kwh
         self._herkomst_bij(geld, settings, kwh_stap, zon_deel, koop)
         if koop is None:
@@ -13031,6 +13036,11 @@ class ChargerCoach:
             "plugged_at": ingeplugd.replace(microsecond=0).isoformat(),
             "started": begon.replace(microsecond=0).isoformat() if begon else None,
             "ended": now.replace(microsecond=0).isoformat() if klaar else None,
+            # Tot wanneer er geladen werd (v0.193.0). Het paneel zet de beurt op
+            # dat moment (`moment` in savings.js): in een klantwoning op 03-11-2026
+            # stond een beurt van 22:00 tot 00:12 met de kabel er nog in op de dag
+            # van het inpluggen, en "Van de coach" op die dag op nul.
+            "charged_until": geld["laatst"].replace(microsecond=0).isoformat() if geld.get("laatst") else None,
             "kwh": kwh,
             "solar_kwh": round(float(geld.get("zon_kwh") or 0.0), 3),
             "paid": betaald,
@@ -13559,6 +13569,8 @@ class ChargerCoach:
             zon = kwh * (min(1.0, over / paal_w) if paal_w > 0 else 0.0)
             uit["kwh"] += kwh
             uit["zon_kwh"] += zon
+            if kwh > 0:
+                uit["laatst"] = min(t1, tot)
             basis = cap_w / 1000.0 * sec / 3600.0
             uit["basis_kwh"] += basis
             if koop is None:
@@ -13620,6 +13632,8 @@ class ChargerCoach:
             [round(k + rk, 3), round(c + rc, 4)] for k, c in (geld.get("basis_punten") or [])
         ]
         geld["ingeplugd"] = terug["ingeplugd"]
+        if geld.get("laatst") is None and terug.get("laatst") is not None:
+            geld["laatst"] = terug["laatst"]
         geld["ijk_prijs"] = terug["ijk_prijs"]
         geld["ijk_terug"] = terug["ijk_terug"]
         geld["hervat_bekend"] = True
@@ -14102,7 +14116,16 @@ class ChargerCoach:
         if meter is None or sessie.get("meter") is None:
             return staart or None
         eerder = sessie.get("ijk_kwh", 0.0) if sessie.get("geijkt") else 0.0
-        return eerder + max(0.0, meter - float(sessie["meter"])) + staart
+        teller = eerder + max(0.0, meter - float(sessie["meter"])) + staart
+        # Een teller die zelf achterloopt (v0.193.0). In een klantwoning op 03-11-2026
+        # zei het verslag om 00:12 "15,7 kWh" terwijl het geld met 17,75 kWh
+        # rekende; de teller van de paal kwam pas om 01:08 bij, op 17,97. Een
+        # stap van de teller dekt dan niet alles tot het moment van die stap, en
+        # wat ertussen viel stond nergens. De eigen meting van deze beurt, die
+        # het geld ook telt, is dan de ondergrens: zo noemen het verslag en het
+        # geld dezelfde kWh.
+        gemeten = float((sessie.get("geld") or {}).get("kwh") or 0.0)
+        return max(teller, gemeten)
 
     def _staart(self, device_id: str, sessie: dict[str, Any]) -> float:
         """Wat de coach zelf telde sinds de laatste stap van de teller, voor de opslag.

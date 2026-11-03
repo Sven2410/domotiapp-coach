@@ -1539,3 +1539,25 @@ Proef 80 in test_planner.py, 34b en 232 in test_coach.py, de scenario's `eenfase
 `ford-geen-ruimte` en `eigen-marge` (6 A marge op 3x25 A: de drukste fase blijft tijdens de oven onder 19 A), en
 de proef "de marge onder de hoofdzekering" in test_rapport.mjs.
 
+
+## Het verslag noemt de kWh die het geld telt (v0.193.0)
+
+In een klantwoning op 03-11-2026 zei het verslag om 00:12 "15,7 kWh, 14:42 tot 00:12", terwijl het geld in hetzelfde
+verslag (€ 2,95) met 17,75 kWh rekende. De teller van de Easee kwam pas om 01:08 bij, op 17,97.
+
+`_geladen` nam de teller van de paal als maat, met de eigen meting alleen voor de staart na zijn laatste stap. Dat
+gaat goed zolang een stap van de teller alles tot het moment van die stap dekt. Bij een Easee is dat niet zo: de stap
+brengt een stand van een tijdje terug, en wat er tussen die stand en de stap in ging stond nergens, niet in de teller
+en niet in de staart. Proef 20 legde dat zelfs vast: zeven minuten laden (0,7 kWh), de teller zei 0,6, en het verslag
+0,9 waar het geld 1,0 telde.
+
+Nu is de eigen meting van de beurt, dezelfde die het geld telt (`geld["kwh"]`), de ondergrens van `_geladen`. Is de
+teller hoger, dan blijft de teller staan, want die is geijkt. Dat geldt voor het verslag bij een volle auto, bij het
+uittrekken en voor de kaart (`_beurt_kaart`, `charged_kwh`). Het vullen van het gat na een herstart rekent met
+hetzelfde verschil en verandert niet.
+
+Het virtuele huis heeft er een teller bij die zo achterloopt (`Paal(teller_achter_min=15)`, scenario
+`teller-achter`): v0.192.0 zei daar "14,5 kWh" bij 15,4 kWh in het geld, v0.193.0 zegt 15,4. Elk scenario met één
+laadbeurt controleert nu dat het verslag nooit minder noemt dan het geld, en niet meer dan het geld of de auto. Meer
+dan het geld kan wel: in `warmtepomp-nacht` (58 wissels van de limiet) loopt de eigen meting iets achter, en zegt het
+verslag met de teller 42,6 kWh bij 41,8 in het geld en 42,8 in de auto.
