@@ -13969,6 +13969,8 @@ def loop228(coach, van, tot):
 
 
 try:
+    # De coach draait al sinds 11:00 en de paal viel daarna stil: het uur van v0.188.0, niet de opstart (proef 235).
+    loop228(coach228, -45, -44)
     loop228(coach228, 0, 61)
     controle("een uur na de laatste die stilviel (11:45:45) nog niet", herladen228 == [], f"{herladen228}")
     loop228(coach228, 61, 80)
@@ -14442,6 +14444,130 @@ zin234 = _re.search(r"Hij rekent met (\d+)% meer zon dan voorspeld: de voorspell
                    b234d.get("reason") or "")
 controle("de kaart zegt dat hij met meer zon rekent, en waarom",
          zin234 is not None and 25 <= int(zin234.group(1)) <= 133, f"{b234d.get('reason')}")
+
+print("=== 235. een integratie die stil is sinds de opstart: herladen bij de eerste controle, niet na een uur (v0.195.0) ===")
+# Een klantwoning op 03-11-2026: Home Assistant startte om 16:02 na een stroomstoring voor de router; de paal kon
+# zijn server niet vinden en alles ervan was unavailable sinds 16:03:15. Om 12:51 diezelfde dag herlaadde de coach
+# hem pas om 14:06, 75 minuten zonder paal.
+D235 = dt.datetime(2026, 11, 3)
+inst235 = instellingen(devices=[LAADPAAL])
+inst235["sources"]["solar"] = "sensor.omv235_w"
+inst235["sources"]["extra"] = {"a": "sensor.paal235_status", "b": "sensor.paal235_w"}
+bij235 = {"sensor.paal235_status": "e-paal", "sensor.paal235_w": "e-paal", "sensor.omv235_w": "e-omv"}
+entries235 = {k: types.SimpleNamespace(domain=d, title=n, state="loaded", disabled_by=None)
+              for k, d, n in [("e-paal", "paal", "Paal"), ("e-omv", "omvormer", "Omvormer")]}
+er235 = types.ModuleType("homeassistant.helpers.entity_registry")
+er235.async_get = lambda hass: types.SimpleNamespace(
+    async_get=lambda eid: types.SimpleNamespace(config_entry_id=bij235[eid]) if eid in bij235 else None)
+oud235 = {k: sys.modules.get(k) for k in ("homeassistant.helpers.entity_registry", "homeassistant.loader")}
+
+
+def paal235(hass, moment, waarde="unavailable"):
+    for e in ("sensor.paal235_status", "sensor.paal235_w"):
+        hass.states.zet(e, waarde, last_updated=moment.replace(tzinfo=dt.timezone.utc))
+
+
+def huis235(paal_stil, omv=None, zon=30.0):
+    """Een coach met de paal stil vanaf `paal_stil` en de omvormer stil vanaf `omv` (anders 1500 W)."""
+    hass, _, coach = bouw(huis(), inst235)
+    asyncio.run(coach._async_geheugen_laden())
+    paal235(hass, paal_stil)
+    hass.states.zet("sensor.omv235_w", "unavailable" if omv else "1500",
+                    last_updated=(omv or paal_stil).replace(tzinfo=dt.timezone.utc))
+    hass.states.zet("sun.sun", {"state": "below_horizon" if zon < 0 else "above_horizon", "attributes": {"elevation": zon}})
+    hass.herladen = []
+
+    async def herlaad(entry_id):
+        hass.herladen.append((entry_id, hass.nu235))
+
+    hass.config_entries = types.SimpleNamespace(async_get_entry=lambda eid: entries235.get(eid), async_reload=herlaad,
+                                                flow=types.SimpleNamespace(async_progress=lambda: []))
+    return hass, coach
+
+
+def loop235(hass, coach, van, tot, gemeld):
+    async def tell(bericht, kritiek=False, telefoon=True):
+        gemeld.append((bericht, kritiek, telefoon))
+
+    coach._async_tell = tell
+    t = van
+    while t < tot:
+        hass.nu235 = t
+        asyncio.run(coach._async_integraties(inst235, t))
+        t += dt.timedelta(minutes=1)
+
+
+def herladen235(hass, entry="e-paal"):
+    return [f"{m:%H:%M}" for e, m in hass.herladen if e == entry]
+
+
+try:
+    sys.modules["homeassistant.helpers.entity_registry"] = er235
+    sys.modules["homeassistant.loader"] = None
+    # De start van 16:03: de paal stil sinds 16:03:15, twintig minuten lang.
+    hass235, coach235 = huis235(D235.replace(hour=16, minute=3, second=15))
+    gemeld235 = []
+    loop235(hass235, coach235, D235.replace(hour=16, minute=3), D235.replace(hour=16, minute=24), gemeld235)
+    print(f"  na de opstart van 16:03: herladen {herladen235(hass235)}")
+    controle("stil sinds de opstart: herladen bij de eerste controle (16:18), niet na een uur",
+             herladen235(hass235) == ["16:18"], f"{hass235.herladen}")
+    opslag235 = str(coachmod.async_get_geheugen(hass235)._store._data)
+    controle("het herladen staat in de opslag", "integratie_stil" in opslag235 and "e-paal" in opslag235, opslag235[:200])
+    # Helpt het niet, dan één kritieke melding, en niet nog eens herladen.
+    loop235(hass235, coach235, D235.replace(hour=16, minute=24), D235.replace(hour=17, minute=30), gemeld235)
+    kritiek235 = [g for g in gemeld235 if g[1]]
+    controle("helpt het niet: één kritieke melding en niet nog eens herladen",
+             herladen235(hass235) == ["16:18"] and len(kritiek235) == 1 and "Paal" in kritiek235[0][0], f"{gemeld235}")
+    # Een nieuwe stroomstoring om 17:30: Home Assistant start opnieuw, alles opnieuw neergezet om 17:31.
+    coach235._meldingen_onthouden()
+    coach235 = herstart213(hass235)
+    asyncio.run(coach235._async_geheugen_laden())
+    paal235(hass235, D235.replace(hour=17, minute=31))
+    loop235(hass235, coach235, D235.replace(hour=17, minute=30), D235.replace(hour=18, minute=30), gemeld235)
+    print(f"  na de tweede opstart van 17:30: herladen {herladen235(hass235)}, gemeld {gemeld235}")
+    controle("een nieuwe opstart: nog één keer herladen bij de eerste controle (17:45), en de melding niet nog eens",
+             herladen235(hass235) == ["16:18", "17:45"] and len([g for g in gemeld235 if g[1]]) == 1, f"{gemeld235}")
+    # De paal komt terug: doet het weer.
+    paal235(hass235, D235.replace(hour=18, minute=40), "disconnected")
+    loop235(hass235, coach235, D235.replace(hour=18, minute=30), D235.replace(hour=19), gemeld235)
+    controle("en komt hij terug, dan doet het weer", any("doet het weer" in g[0] for g in gemeld235), f"{gemeld235}")
+
+    # Een herstart midden in de vijftien minuten: het telt opnieuw vanaf de nieuwe start.
+    hass235b, coach235b = huis235(D235.replace(hour=12, minute=51, second=15))
+    loop235(hass235b, coach235b, D235.replace(hour=12, minute=51), D235.replace(hour=12, minute=59), [])
+    coach235b._meldingen_onthouden()
+    coach235b = herstart213(hass235b)
+    asyncio.run(coach235b._async_geheugen_laden())
+    paal235(hass235b, D235.replace(hour=13, minute=0, second=10))
+    loop235(hass235b, coach235b, D235.replace(hour=12, minute=59), D235.replace(hour=13, minute=20), [])
+    controle("een herstart halverwege: herladen een kwartier na de nieuwe start (13:14)",
+             herladen235(hass235b) == ["13:14"], f"{hass235b.herladen}")
+
+    # De coach later gestart dan de integratie: de paal stil sinds 16:02:30, de coach om 16:10.
+    hass235c, coach235c = huis235(D235.replace(hour=16, minute=2, second=30))
+    loop235(hass235c, coach235c, D235.replace(hour=16, minute=10), D235.replace(hour=16, minute=30), [])
+    controle("de coach na de integratie gestart: ook herladen bij de eerste controle (16:25)",
+             herladen235(hass235c) == ["16:25"], f"{hass235c.herladen}")
+
+    # Een paal die na de start nog iets meldde en daarna stilviel: het uur van v0.188.0.
+    hass235d, coach235d = huis235(D235.replace(hour=16, minute=40))
+    loop235(hass235d, coach235d, D235.replace(hour=16, minute=3), D235.replace(hour=18), [])
+    print(f"  stil na een waarde om 16:40: herladen {herladen235(hass235d)}")
+    controle("eerst wel een waarde en daarna stil: herladen na het uur (17:48), niet eerder",
+             herladen235(hass235d) == ["17:48"], f"{hass235d.herladen}")
+
+    # Een omvormer die 's nachts opstart: niet herladen, en overdag pas een uur nadat de zon op tien graden kwam.
+    hass235e, coach235e = huis235(D235.replace(hour=16, minute=3), omv=D235.replace(hour=2, minute=1), zon=-20.0)
+    paal235(hass235e, D235.replace(hour=2, minute=1), "disconnected")
+    loop235(hass235e, coach235e, D235.replace(hour=2), D235.replace(hour=7, minute=30), [])
+    controle("een omvormer die 's nachts opstart: niet herladen voor de zon op is", herladen235(hass235e, "e-omv") == [],
+             f"{hass235e.herladen}")
+    hass235e.states.zet("sun.sun", {"state": "above_horizon", "attributes": {"elevation": 12.0}})
+    loop235(hass235e, coach235e, D235.replace(hour=7, minute=30), D235.replace(hour=8, minute=29), [])
+    controle("en ook niet in het uur nadat de zon op tien graden kwam", herladen235(hass235e, "e-omv") == [],
+             f"{hass235e.herladen}")
+finally:
+    sys.modules.update(oud235)
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
