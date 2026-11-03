@@ -170,6 +170,7 @@ def zon_uit_opwek(
 def zon_dag_terug(
     dag: date, zone: tzinfo, kwartieren: dict[str, list[dict[str, float]]],
     standen: list[tuple[datetime, float | None]], breedte: float, lengte: float, gat_max: float,
+    nu: datetime | None = None,
 ) -> tuple[list | None, str]:
     """Eén dag van vóór de coach hem zelf mat, uit wat er al bewaard was (v0.196.0).
 
@@ -180,6 +181,8 @@ def zon_dag_terug(
     kwartieren van alle omvormers samen (`kwartieren`, de kwartieropslag van de coach), en wat
     er overdag (de zon boven de horizon) ontbrak telt als gat, net als bij het meten zelf: een
     kwartier waarin één omvormer niets zei, of de seconden die er niet gedekt waren.
+
+    Met `nu` (v0.196.1) telt een dag pas als de zon die dag onder is: zo kan vandaag erbij, 's avonds.
     """
     begin = datetime.combine(dag, time(), tzinfo=zone).astimezone(timezone.utc)
     eind = datetime.combine(dag + timedelta(days=1), time(), tzinfo=zone).astimezone(timezone.utc)
@@ -187,12 +190,14 @@ def zon_dag_terug(
         (zon_id, int(rij["start"])): rij
         for zon_id, lijst in kwartieren.items() for rij in lijst or []
     }
-    gemeten, gat, opkomst = 0.0, 0.0, None
+    gemeten, gat, opkomst, onder = 0.0, 0.0, None, None
     kwartier = begin
     while kwartier < eind:
         overdag = zonhoogte(kwartier + timedelta(minutes=7.5), breedte, lengte) > 0
         if overdag and opkomst is None:
             opkomst = kwartier
+        if overdag:
+            onder = kwartier + timedelta(minutes=15)
         stukken = [rijen.get((zon_id, int(kwartier.timestamp()))) for zon_id in kwartieren]
         if stukken and all(s is not None for s in stukken):
             gedekt = min(min(float(s.get("seconden") or 0.0), 900.0) for s in stukken)
@@ -207,6 +212,8 @@ def zon_dag_terug(
         kwartier += timedelta(minutes=15)
     if opkomst is None:
         return None, "de zon kwam niet op"
+    if nu is not None and onder is not None and onder > nu:
+        return None, "de zon is nog niet onder"
     opkomst_lokaal = opkomst.astimezone(zone).replace(tzinfo=None)
     middernacht = datetime.combine(dag, time())
     punten = [
