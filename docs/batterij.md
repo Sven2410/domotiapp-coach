@@ -2143,6 +2143,32 @@ herladen op één avond, voor iets dat met herladen niet te verhelpen is.
 Proef 231 in test_coach.py, met een herstart 's nachts en een 's ochtends, en zonder `sun.sun` en zonder
 integratietype (dan herlaadt hij zoals voorheen).
 
+### Stil sinds de opstart: bij de eerste controle (v0.195.0)
+
+In een klantwoning viel de stroom op 03-11-2026 twee keer weg, om 12:36 en om 16:00, en beide keren startte
+Home Assistant voordat de router het internet terug had. De paal kon zijn server niet vinden ("DNS server returned
+general failure"), bleef op `loaded` zonder apparaat, en alles ervan was `unavailable`. De eerste keer herlaadde de
+coach hem om 14:06, na het uur van v0.188.0: 75 minuten zonder paal. Om 14:06:09 was hij terug. Dat uur is er voor
+een cloud die even hapert en vanzelf terugkomt; een integratie die bij de start zijn apparaat niet kon aanmaken
+probeert dat niet opnieuw.
+
+- **Stil sinds de opstart:** de laatste entiteit die stilviel deed dat binnen een kwartier rond de start van de
+  coach (`INTEGRATIE_OPSTART`), ervoor of erna. Dan herlaadt hij hem bij de eerste controle, een kwartier na de
+  start, in plaats van een uur na het stilvallen. Ervoor telt mee, want de coach kan na de integratie starten.
+- **Eerst wel een waarde en daarna stil** (later dan dat kwartier): het uur van v0.188.0, zoals het was.
+- **Een omvormer die slaapt en een helper:** zoals v0.190.0. Ook na een opstart overdag wacht een omvormer het
+  uur vanaf het moment dat de coach de zon zag.
+- **Een nieuwe start mag weer één keer.** Een herladen van een vorige start telt dan niet meer: na elke
+  stroomstoring één keer herladen. De kritieke melding als het niet helpt blijft één keer, tot hij terugkomt.
+- **Een herstart halverwege:** het kwartier telt opnieuw vanaf de nieuwe start. De start zelf staat niet in de
+  opslag, want hij hoort bij deze start.
+- Wat de coach niet bijhoudt: of een entiteit in het eerste kwartier even een waarde had. Valt hij binnen dat
+  kwartier opnieuw stil, dan telt het als stil sinds de opstart.
+
+Proef 235 in test_coach.py: de start van 16:03 (herladen om 16:18 in plaats van 17:18), een tweede stroomstoring,
+een herstart halverwege, een coach die na de integratie start, een paal die na de start nog iets meldde (het uur),
+en een omvormer die 's nachts opstart. Proef 228 begint nu met een coach die al draaide.
+
 ## Een batterij die de coach niet volgt (v0.167.0)
 
 In een klantwoning laadde de batterij op 27-10-2026 van 16:00:54 tot 16:17 2,5 kW van het net, in het duurste

@@ -456,6 +456,12 @@ INTEGRATIE_HERLADEN = ("setup_error", "not_loaded")
 # voor DNS er was, de integratie bleef op loaded, en pas herladen met de hand bracht hem terug. De
 # eigenaar: "maak inderdaad dat de coach alles herlaadt". Eén keer per storing (`_async_stil_herladen`).
 INTEGRATIE_STIL = timedelta(hours=1)
+# Stil sinds de opstart (v0.195.0). In een klantwoning op 03-11-2026 startte Home Assistant twee keer na
+# een stroomstoring voor de router; de paal kon zijn server niet vinden, bleef op loaded zonder apparaat,
+# en lag 75 minuten stil. Zo'n integratie komt niet vanzelf terug, dus die herlaadt de coach bij de eerste
+# controle (`INTEGRATIE_CONTROLE` na de start). Stil sinds de opstart: de laatste die stilviel deed dat
+# binnen dit venster rond de start van de coach, ervoor of erna.
+INTEGRATIE_OPSTART = timedelta(minutes=15)
 # Integraties die zelf geen verbinding maken: een `utility_meter`, `template`, `derivative`, ...
 # (v0.190.0). Die zijn stil omdat hun bron stil is, en herladen helpt dan niet.
 INTEGRATIE_HELPER = "helper"
@@ -1748,6 +1754,8 @@ class ChargerCoach:
         self._integratie_om: datetime | None = None
         # Per geladen integratie die helemaal stil was: wanneer de coach hem herlaadde (v0.188.0).
         self._integratie_stil: dict[str, datetime] = {}
+        # De eerste controle van deze start (v0.195.0); hoort bij deze start, dus niet in de opslag.
+        self._integratie_start: datetime | None = None
         # Wanneer de zon vandaag boven `ZON_SLAAPT_ONDER` kwam, of None zolang hij eronder staat (v0.190.0).
         self._zon_wakker: datetime | None = None
         # De zon van vandaag: de verwachting van voor zonsopkomst naast wat het dak gaf (v0.193.0).
@@ -2796,6 +2804,7 @@ class ChargerCoach:
         self._zon_wakker_bijhouden(now)
         if self._integratie_om is None:
             self._integratie_om = now + INTEGRATIE_CONTROLE
+            self._integratie_start = now
             return
         if now < self._integratie_om:
             return
@@ -2891,6 +2900,11 @@ class ChargerCoach:
         een omvormer die bij zonsondergang van het netwerk ging, en die bleef daarna op
         `setup_retry`. Een helper herlaadt hij nooit (`INTEGRATIE_HELPER`), en een integratie van
         apparaten die hij alleen uitleest (`_alleen_uitlezen`) geeft geen kritieke melding.
+
+        Sinds v0.195.0 niet na een uur maar bij de eerste controle als hij stil is sinds de opstart
+        (`INTEGRATIE_OPSTART`): dan kon hij bij het starten zijn server niet vinden, en dat komt niet
+        vanzelf goed. Een herladen van een vorige start telt dan niet; elke start mag één keer, en de
+        melding blijft één keer.
         """
         staten = [s for s in (self.hass.states.get(e) for e in entity_ids) if s is not None]
         if not staten:
@@ -2915,7 +2929,13 @@ class ChargerCoach:
             for entity_id in self._eigen_entiteiten({"devices": [device]})
             if not (_temp_nodig(settings, device) and entity_id == (device.get("entities") or {}).get("temperature"))
         }
+        sinds = max(dt_util.as_local(s.last_changed).replace(tzinfo=None) for s in staten)
+        start = self._integratie_start
+        opstart = start is not None and abs(sinds - start) <= INTEGRATIE_OPSTART
         herladen = self._integratie_stil.get(entry_id)
+        if herladen is not None and opstart and herladen < start:
+            self._integratie_stil.pop(entry_id, None)
+            herladen = None
         if herladen is not None:
             if entry_id not in self._integratie_gemeld and now - herladen >= INTEGRATIE_CONTROLE:
                 self._integratie_gemeld.add(entry_id)
@@ -2925,8 +2945,9 @@ class ChargerCoach:
                     kritiek=not meelezen,
                 )
             return
-        sinds = max(dt_util.as_local(s.last_changed).replace(tzinfo=None) for s in staten)
-        if now - sinds < INTEGRATIE_STIL:
+        if opstart and now - start < INTEGRATIE_CONTROLE:
+            return
+        if not opstart and now - sinds < INTEGRATIE_STIL:
             return
         if await self._async_is_helper(entry.domain):
             _LOGGER.debug("de integratie %s (%s) is een helper; de coach herlaadt hem niet", naam, entry.domain)
@@ -2939,7 +2960,8 @@ class ChargerCoach:
             _LOGGER.exception("kon het herladen van %s niet bewaren", naam)
         (_LOGGER.info if meelezen else _LOGGER.warning)(
             "de integratie %s (%s) staat op loaded, maar alles wat de coach ervan gebruikt is sinds %s "
-            "unavailable; de coach herlaadt hem", naam, entry.domain, sinds.isoformat(timespec="minutes"),
+            "unavailable%s; de coach herlaadt hem", naam, entry.domain, sinds.isoformat(timespec="minutes"),
+            ", al sinds de opstart" if opstart else "",
         )
         try:
             async with asyncio.timeout(INTEGRATIE_WACHT.total_seconds()):
