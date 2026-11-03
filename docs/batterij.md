@@ -2447,3 +2447,41 @@ Proeven: 63 in test_batterij.py (de som met de getallen van de klantwoning: € 
 huis `growatt-zon-onzeker` tegen `growatt-zon-onzeker-zonder` (bewolkt voorspeld, helder geworden): 's nachts 4,86
 tegen 6,35 kWh van het net, de dag € 1,34 tegen € 1,59 (zonder batterij € 1,45); `growatt-zon-te-hoog` laadt precies
 als zonder.
+
+### De dagen van voor de coach, nagerekend (v0.196.0)
+
+Met v0.194.0 begon de reeks op de dag van de installatie, dus een batterij rekende pas na zeven dagen met de marge.
+In de klantwoning van 03-11-2026 stond alles wat nodig was er al: "vandaag nog" van Forecast.Solar in de recorder
+sinds 26-10, en de omvormer al weken in de kwartieropslag. De eigenaar koos op 03-11 uit drie wegen: "1, bouw de
+uitgave".
+
+- **Wanneer:** in de ronde van de batterij (`_async_zon_dagen_terug`), één keer per batterij, en alleen als er nog
+  minder dan zeven dagen zijn. Daarna staat `zon_terug` in `battery_state`, dus ook na een herstart niet nog eens.
+- **Verwacht:** "vandaag nog" (`remaining_today` bij Zonverwachting) uit de recorder, gemiddeld over de tijd van de
+  eerste stand na middernacht tot zonsopkomst. Voor de zon op is dat de hele dag. De recorder bewaart zijn
+  toestanden tien dagen, dus verder terug gaat het niet.
+- **Het gemiddelde over de nacht, ook bij het meten zelf.** In de klantwoning las de coach van die woning de recorder na voor deze uitgave: op
+  03-11 rekende de batterij om 04:45 met 16,6 kWh, en om 06:57 had Forecast.Solar het bijgesteld naar 11,2. Op 28-10
+  van 31,6 naar 20,9. Met de stand vlak voor zonsopkomst lijkt de voorspelling verder ernaast te zitten dan bij het
+  netladen, en wordt de marge te groot. Het meten zelf (`_zon_dag_bijhouden`, v0.194.0) nam die laatste stand ook; dat
+  is nu het gemiddelde van elke ronde tot het eerste uur met zon (`verwacht_som` en `verwacht_min` in het geheugen,
+  ook over een herstart).
+- **Gemeten:** de kwartieren van alle omvormers samen uit de eigen kwartieropslag, met alleen de seconden die er
+  gedekt zijn (`zon_dag_terug` in zon.py).
+- **Gat:** overdag (de zon boven de horizon, `zonhoogte`) telt elk kwartier waarin één omvormer niets zei als 15
+  minuten, en een kwartier dat niet helemaal gedekt is voor wat er ontbrak. Meer dan `ZON_DAG_GAT_MIN` en de dag
+  telt niet, zoals bij het meten zelf. Een tijd dat Home Assistant zelf uit stond zit soms niet in de seconden: de
+  kwartieropslag schrijft een kwartier dat half gedekt was met wat er wel was.
+- **Wat de coach zelf mat wint.** Een dag die al in de reeks staat blijft zoals hij is.
+- **Niet:** zonder "vandaag nog" ingevuld, of zonder omvormer. Lukt het lezen niet (de recorder is er na een start nog
+  niet), dan na een kwartier opnieuw (`ZON_TERUG_OPNIEUW`).
+- In de klantwoning (nagelezen op 03-11) staat "vandaag nog" in de recorder vanaf 26-10 20:20, en
+  zijn de kwartieren van 27-10 tot en met 03-11 er. Zeven dagen tellen; 29-10 niet (230 minuten gat). De
+  kwartieren gaven op 03-11 35,2 kWh tegen 33,2 uit de recorder met het gat doorgetrokken; op de andere dagen
+  scheelde het ongeveer 0,5 kWh.
+
+Proef 236 in test_coach.py: de som (het gemiddelde over de nacht, niet de stand van 11:00; een gat van 225
+minuten, twee en vier halve kwartieren; de dag dat de wintertijd ingaat), en in de coach negen dagen waarvan zes
+tellen naast een eigen dag, een recorder die er nog niet is, één keer ook over een herstart, zonder "vandaag nog",
+en de zin op de kaart in dezelfde ronde; en het meten zelf met een verwachting die om 04:00 van 16,6 naar 11,2 gaat,
+over een herstart om 02:00 (13,88).

@@ -102,6 +102,7 @@ from .batterij import (
     vol_voor,
     zon_in_accu,
     ZON_DAGEN_BEWAAR,
+    ZON_DAGEN_MIN,
     zon_marge,
     zon_verhoudingen,
     zon_vergissing,
@@ -193,7 +194,7 @@ from .storage import (
     async_get_berichten, async_get_beurten, async_get_geheugen, async_get_meldingen, async_get_store,
     async_get_zon,
 )
-from .zon import ZON_DAGEN, zon_uit_opwek
+from .zon import ZON_DAGEN, zon_dag_terug, zon_uit_opwek
 from .units import hour_to_watts, to_kwh, to_watts
 
 _LOGGER = logging.getLogger(__name__)
@@ -366,6 +367,10 @@ ZON_MEETTIJD_MIN = 30.0
 # dag waarop overdag meer dan zoveel minuten niet gemeten is telt niet mee in `zon_marge`.
 ZON_DAG_STAP_MIN = 5.0
 ZON_DAG_GAT_MIN = 30.0
+# De dagen van voor de coach ze zelf mat (v0.196.0, `_async_zon_dagen_terug`): de eigenaar op
+# 03-11-2026, over een klantwoning waar de reeks pas na de installatie begon: "1, bouw de uitgave".
+# Lukt het niet (de recorder is er nog niet), dan zoveel later opnieuw.
+ZON_TERUG_OPNIEUW = timedelta(minutes=15)
 ZON_MIN_VOORSPELD = 0.5
 ZON_MIN_BESTE_UUR = 0.5
 
@@ -1761,6 +1766,8 @@ class ChargerCoach:
         # De zon van vandaag: de verwachting van voor zonsopkomst naast wat het dak gaf (v0.193.0).
         # Zie `_zon_dag_bijhouden`.
         self._zon_dag: dict[str, Any] | None = None
+        # Wanneer hij de dagen van voor de coach weer probeert na te rekenen (v0.196.0).
+        self._zon_terug_om: datetime | None = None
         # Per laadpaal sinds wanneer een opdracht niet aankomt, en welke al gemeld zijn (v0.163.3).
         self._paal_weg: dict[str, datetime] = {}
         # Wat elke paal deze ronde in totaal trekt of gaat trekken, per fase (v0.164.1): voor een
@@ -2972,9 +2979,9 @@ class ChargerCoach:
     def _zon_dag_bijhouden(self, now: datetime, settings: dict[str, Any]) -> list | None:
         """De zonverwachting van vandaag naast wat het dak gaf, één keer per ronde (v0.193.0).
 
-        Verwacht: de som van de verwachting voor vandaag, tot het eerste uur waarin zon voorspeld
-        is. Dat is de verwachting waarmee hij 's nachts van het net laadde; daarna verandert hij
-        niet meer. Gemeten: wat de omvormers gaven (`_zon_w`), per ronde opgeteld zoals
+        Verwacht: de som van de verwachting voor vandaag, gemiddeld over de rondes tot het eerste uur
+        waarin zon voorspeld is (sinds v0.196.0; daarvoor de laatste). Dat is de verwachting waarmee
+        hij 's nachts van het net laadde; daarna verandert hij niet meer. Gemeten: wat de omvormers gaven (`_zon_w`), per ronde opgeteld zoals
         `_zon_bijhouden` dat doet. Wat er overdag niet gemeten is (een herstart, een omvormer die
         niets zegt, rondes die uitvielen) telt als gat; zie `_zon_dag_af`.
 
@@ -2994,13 +3001,18 @@ class ChargerCoach:
             dag = None
         if dag is None:
             dag = {"dag": now.date().isoformat(), "begon": now, "laatst": None, "verwacht": None,
-                   "van": None, "tot": None, "gemeten": 0.0, "gat": 0.0}
+                   "van": None, "tot": None, "gemeten": 0.0, "gat": 0.0, "verwacht_som": 0.0, "verwacht_min": 0.0}
+        stap = 1.0 if dag["laatst"] is None else max(0.0, (now - dag["laatst"]).total_seconds() / 60.0)
         uren = sorted(u for u, kwh in self._zon_kwh.items() if u.date() == now.date() and kwh > 0)
         if uren and (dag["van"] is None or now < dag["van"]):
-            # Nog voor de zon: de verwachting mag nog bijkomen, zoals de voorspeller hem bijwerkt.
-            dag["verwacht"] = round(sum(self._zon_kwh[u] for u in uren), 3)
+            # Nog voor de zon: het gemiddelde van de verwachting over de nacht (v0.196.0), want daarmee
+            # laadde de batterij. Vlak voor zonsopkomst is hij vaak al bijgesteld: in een klantwoning op
+            # 03-11-2026 om 04:45 16,6 kWh en om 06:57 11,2.
+            gewicht = max(min(stap, ZON_DAG_STAP_MIN), 1e-3)
+            dag["verwacht_som"] = dag.get("verwacht_som", 0.0) + sum(self._zon_kwh[u] for u in uren) * gewicht
+            dag["verwacht_min"] = dag.get("verwacht_min", 0.0) + gewicht
+            dag["verwacht"] = round(dag["verwacht_som"] / dag["verwacht_min"], 3)
             dag["van"], dag["tot"] = uren[0], uren[-1] + timedelta(hours=1)
-        stap = 1.0 if dag["laatst"] is None else max(0.0, (now - dag["laatst"]).total_seconds() / 60.0)
         overdag = dag["van"] is not None and dag["van"] <= now <= dag["tot"] + timedelta(minutes=ZON_DAG_STAP_MIN)
         opbrengst = self._zon_w(settings)
         if overdag and stap > ZON_DAG_STAP_MIN:
@@ -3016,6 +3028,7 @@ class ChargerCoach:
             "dag": dag["dag"], "begon": _naar_geheugen(dag["begon"]), "laatst": _naar_geheugen(now),
             "verwacht": dag["verwacht"], "van": _naar_geheugen(dag["van"]), "tot": _naar_geheugen(dag["tot"]),
             "gemeten": round(dag["gemeten"], 4), "gat": round(dag["gat"], 2),
+            "verwacht_som": round(dag.get("verwacht_som", 0.0), 4), "verwacht_min": round(dag.get("verwacht_min", 0.0), 3),
         })
         return klaar
 
@@ -3029,6 +3042,11 @@ class ChargerCoach:
                 "verwacht": None if data.get("verwacht") is None else float(data["verwacht"]),
                 "van": _uit_geheugen(data.get("van")), "tot": _uit_geheugen(data.get("tot")),
                 "gemeten": float(data.get("gemeten") or 0.0), "gat": float(data.get("gat") or 0.0),
+                # Van voor v0.196.0 stond er alleen de laatste verwachting: die telt dan als één minuut.
+                "verwacht_som": float(data["verwacht_som"]) if data.get("verwacht_min")
+                else float(data.get("verwacht") or 0.0),
+                "verwacht_min": float(data["verwacht_min"]) if data.get("verwacht_min")
+                else (1.0 if data.get("verwacht") is not None else 0.0),
             }
         except (KeyError, TypeError, ValueError):
             return None
@@ -3066,6 +3084,77 @@ class ChargerCoach:
             await self._async_batterij_bewaren(settings, device_id, {
                 "zon_dagen": [*dagen, klaar][-ZON_DAGEN_BEWAAR:],
             })
+
+    async def _async_zon_dagen_terug(self, settings: dict[str, Any], now: datetime) -> bool:
+        """De dagen van voor de coach ze zelf mat, één keer nagerekend (v0.196.0).
+
+        Een batterij rekent pas met `zon_marge` na `ZON_DAGEN_MIN` dagen, en die reeks begon bij
+        v0.194.0 op de dag van de installatie. De verwachting staat al in de recorder ("vandaag nog",
+        `remaining_today`, gemiddeld over de nacht; tien dagen) en wat het dak gaf in de
+        eigen kwartieropslag. `zon_dag_terug` in zon.py maakt er dezelfde dagen van als het meten
+        zelf, met dezelfde regel voor een gat.
+
+        Eén keer per batterij (`zon_terug` in de opslag, dus ook over een herstart), en alleen als
+        er nog te weinig dagen zijn. Wat de coach zelf mat wint. Zonder "vandaag nog" of zonder
+        omvormer niets; lukt het lezen niet, dan na `ZON_TERUG_OPNIEUW` opnieuw. Geeft True als
+        er iets bewaard is.
+        """
+        if self._zon_terug_om is not None and now < self._zon_terug_om:
+            return False
+        open_ = []
+        for apparaat in settings.get("devices") or []:
+            if apparaat.get("type") != "thuisbatterij":
+                continue
+            rij = self._batterij_rij(settings, apparaat.get("id", ""))
+            if not rij.get("zon_terug") and len(zon_verhoudingen(rij.get("zon_dagen") or [])) < ZON_DAGEN_MIN:
+                open_.append(apparaat.get("id", ""))
+        bron = ((settings.get("sources") or {}).get("solar_forecast") or {}).get("remaining_today")
+        zonnen = zonsensoren(settings)
+        breedte = getattr(self.hass.config, "latitude", None)
+        lengte = getattr(self.hass.config, "longitude", None)
+        if not open_ or not bron or not zonnen or breedte is None or lengte is None:
+            return False
+        self._zon_terug_om = now + ZON_TERUG_OPNIEUW
+        vandaag = now.date()
+        van = datetime.combine(vandaag - timedelta(days=ZON_DAGEN_BEWAAR), datetime.min.time())
+        standen = await self._async_geschiedenis(bron, van, now)
+        if not standen:
+            return False
+        zone = dt_util.get_default_time_zone()
+        try:
+            kwartieren = await async_get_archive(self.hass).async_lees(
+                zonnen, van.replace(tzinfo=zone), now.replace(tzinfo=zone)
+            )
+        except Exception:  # noqa: BLE001 - dan straks opnieuw
+            _LOGGER.debug("geen kwartieren voor de zon van voor de coach", exc_info=True)
+            return False
+        eenheid = _unit(self.hass, bron)
+        kwh: list[tuple[datetime, float | None]] = []
+        for moment, stand in standen:
+            try:
+                kwh.append((moment, to_kwh(float(stand), eenheid)))
+            except (TypeError, ValueError):
+                kwh.append((moment, None))
+        dagen = []
+        dag = van.date()
+        while dag < vandaag:
+            uitkomst, waarom = zon_dag_terug(dag, zone, kwartieren, kwh, breedte, lengte, ZON_DAG_GAT_MIN)
+            if uitkomst is not None:
+                _LOGGER.info("zon van %s nagerekend: verwacht %.2f kWh, gemeten %.2f kWh", *uitkomst)
+                dagen.append(uitkomst)
+            elif waarom != "geen verwachting van voor zonsopkomst":
+                _LOGGER.info("zon van %s telt niet mee bij het narekenen: %s", dag.isoformat(), waarom)
+            dag += timedelta(days=1)
+        for device_id in open_:
+            rij = self._batterij_rij(settings, device_id)
+            eigen = [d for d in (rij.get("zon_dagen") or []) if isinstance(d, list) and d]
+            al = {d[0] for d in eigen}
+            samen = sorted([*eigen, *(d for d in dagen if d[0] not in al)], key=lambda d: d[0])
+            await self._async_batterij_bewaren(settings, device_id, {
+                "zon_dagen": samen[-ZON_DAGEN_BEWAAR:], "zon_terug": now.isoformat(timespec="minutes"),
+            })
+        _LOGGER.info("de zon van voor de coach: %d dagen nagerekend", len(dagen))
+        return True
 
     def _zon_wakker_bijhouden(self, now: datetime) -> None:
         """Wanneer de zon vandaag boven `ZON_SLAAPT_ONDER` kwam, voor `_async_stil_herladen` (v0.190.0).
@@ -7549,6 +7638,8 @@ class ChargerCoach:
         klaar = self._zon_dag_bijhouden(now, settings)
         if klaar is not None:
             await self._async_zon_dag_bewaren(settings, klaar)
+            rij = self._batterij_rij(settings, device_id)
+        if await self._async_zon_dagen_terug(settings, now):
             rij = self._batterij_rij(settings, device_id)
         gemeten_nu = self._zon_gemeten(now)
         vergissing = zon_vergissing(now, prijzen, tarief, Forecast(solar_kwh=self._zon_kwh), b)
