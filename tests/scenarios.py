@@ -1736,6 +1736,33 @@ growatt_ochtend_zonder_grens = growatt_ochtend.kopie(
     uitleg="dezelfde ochtend met de ondergrens op nul: dan laadt hij voor die paar cent wel bij",
     batterij=Batterij(**{**GROWATT_SPH, "soc": 15.0}, min_winst=0.0),
 )
+# De zon die de verwachting niet zag (v0.193.0). In een klantwoning op 03-11-2026 (Growatt, bi-horário,
+# teruglevering € 0) laadde de coach 's nachts van 15 naar 100%, want de verwachting zei 16,6 kWh. Het dak
+# gaf er ruim twee keer zoveel, en de zon ging voor niets naar het net. Over acht dagen gaf het dak 0,79 tot
+# 2,33 keer de verwachting; hier dezelfde reeks in de opslag. De voorspeller zegt bewolkt, het wordt helder.
+ZON_DAGEN_KLANT = [
+    [f"2026-10-{14 + i}", 20.0, round(20.0 * r, 2)]
+    for i, r in enumerate([1.28, 1.16, 2.33, 0.92, 0.80, 0.79, 1.80, 1.10])
+]
+growatt_zon_onzeker_zonder = growatt_ochtend.kopie(
+    naam="growatt-zon-onzeker-zonder",
+    uitleg="dezelfde Growatt leeg om 21:30, bewolkt voorspeld en een heldere dag, zonder gemeten dagen: zoals tot v0.193.0",
+    zon=Zon(wolken="helder", voorspeld="bewolkt", piek_kw=2.5),
+    batterij=Batterij(**{**GROWATT_SPH, "soc": 15.0}, min_winst=0.0),
+    duur_uren=24,
+)
+growatt_zon_onzeker = growatt_zon_onzeker_zonder.kopie(
+    naam="growatt-zon-onzeker",
+    uitleg="hetzelfde, met acht dagen waarop het dak 0,79 tot 2,33 keer de verwachting gaf: minder van het net",
+    batterij_stand={**growatt_ochtend.batterij_stand, "zon_dagen": ZON_DAGEN_KLANT},
+)
+growatt_zon_te_hoog = growatt_zon_onzeker_zonder.kopie(
+    naam="growatt-zon-te-hoog",
+    uitleg="hetzelfde, met acht dagen waarop de verwachting te hoog zat: hij laadt niet minder dan zonder",
+    batterij_stand={**growatt_ochtend.batterij_stand,
+                    "zon_dagen": [[d, v, round(v * 0.8, 2)] for d, v, _ in ZON_DAGEN_KLANT]},
+)
+
 # Een Growatt die ook de 10% van de coach weigert (v0.163.0). In de klantwoning op 26-10-2026 nam de
 # API 8% niet aan, hield hij 100 en zette hij de rest wel; de coach schreef daarna om de paar minuten
 # weer 8. Hier weigert hij alles onder 30%: de coach leert het na één keer teruglezen.
@@ -1849,6 +1876,7 @@ ALLE = [
     planning_auto_eerst, planning_accu_eerst,
     *HERSTART,
     growatt_bihorario, growatt_zon, growatt_eigen_zon, growatt_schaduw, growatt_vasthouden,
+    growatt_zon_onzeker_zonder, growatt_zon_onzeker, growatt_zon_te_hoog,
     growatt_ochtend, growatt_ochtend_zonder_grens, growatt_herstart, growatt_weigert, growatt_terug_100,
     batterij_volgt_niet, batterij_volgt_niet_zelf, batterij_volgt_even_niet,
 ]

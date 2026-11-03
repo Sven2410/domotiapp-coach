@@ -2138,6 +2138,56 @@ controle("met 0,01 laadde hij van het net, zoals in de klantwoning", ochtend62(0
 controle("zonder oordeel niet: de zon van de dag vult hem", ochtend62(None)[1] < 0.005 and ochtend62(None)[0].stand != NETLADEN, "")
 controle("een dak dat twee uur bijna niets gaf (0,17) laadt wel bij", ochtend62(0.17)[1] > 1.0, "")
 
+print("=== 63. de zon die de verwachting niet zag: netladen met de prijs van een vergissing (v0.193.0) ===")
+# Een klantwoning op 03-11-2026 (Growatt, bi-horário, teruglevering € 0, rendement 0,898): de accu ging 's nachts van
+# het net naar 100% op een verwachting van 16,6 kWh, het dak gaf er ruim twee keer zoveel. Over acht dagen gaf het
+# dak 0,79 tot 2,33 keer de verwachting. Te veel kost € 0,185 per kWh, te weinig € 0,087.
+from domotiapp_coach.batterij import kwantiel, zon_marge, zon_vergissing  # noqa: E402
+
+controle("kwantiel: recht tussen twee punten", kwantiel([1.0, 2.0, 3.0], 0.25) == 1.5 and kwantiel([4.0], 0.7) == 4.0, "")
+D63 = dt.datetime(2026, 11, 3)
+P63 = prijzen([0.166] * 8 + [0.272] * 14 + [0.166] * 2, terug=0.0, dag=D63) + prijzen(
+    [0.166] * 8 + [0.272] * 14 + [0.166] * 2, terug=0.0, dag=D63 + dt.timedelta(days=1))
+Z63 = {u: kwh * 0.2 for u, kwh in Z62.items()}
+B63 = anker(15.0, soc_min=15.0, soc_max=100.0, rte=0.898)
+verg63 = zon_vergissing(D63.replace(hour=4, minute=45), P63, Tariff(), verwachting(Z63, huis=0.8, dag=D63), B63)
+print(f"  te veel € {verg63[0]:.4f}, te weinig € {verg63[1]:.4f} per kWh")
+controle("de prijs van een vergissing zoals in de klantwoning: € 0,185 en € 0,087",
+         abs(verg63[0] - 0.166 / 0.898) < 1e-6 and abs(verg63[1] - (0.272 - 0.166 / 0.898)) < 1e-6, f"{verg63}")
+controle("met teruglevering wordt te veel goedkoper: (inkoop - teruglevering) / rendement",
+         abs(zon_vergissing(D63.replace(hour=4), prijzen([0.166] * 8 + [0.272] * 16, terug=0.06, dag=D63), Tariff(),
+                            verwachting(Z63, huis=0.8, dag=D63), B63)[0] - (0.166 - 0.06) / 0.898) < 1e-6, "")
+controle("zonder bekende teruglevering geen getal", zon_vergissing(
+    D63.replace(hour=4), prijzen([0.166] * 8 + [0.272] * 16, dag=D63), Tariff(), verwachting(Z63, dag=D63), B63) is None, "")
+controle("één prijs de hele dag: niets te vergissen", zon_vergissing(
+    D63.replace(hour=4), prijzen([0.25] * 24, terug=0.0, dag=D63), Tariff(), verwachting(Z63, dag=D63), B63) is None, "")
+DAGEN63 = [[f"2026-10-{20 + i}", 20.0, round(20.0 * r, 2)] for i, r in enumerate([1.28, 1.16, 2.33, 0.92, 0.80, 0.79, 1.80, 1.10])]
+marge63 = zon_marge(DAGEN63, *verg63)
+print(f"  marge uit de acht dagen: {marge63}")
+controle("de krantenjongen: het kwantiel 0,68 van 0,79 tot 2,33 is 1,25", marge63 is not None and abs(marge63 - 1.251) < 0.002,
+         f"{marge63}")
+controle("minder dan zeven dagen: niets", zon_marge(DAGEN63[:6], *verg63) is None, "")
+controle("een verwachting die te hoog zat: niets, dus niet meer van het net dan nu",
+         zon_marge([[d, v, round(v * 0.8, 2)] for d, v, _ in DAGEN63], *verg63) is None, "")
+controle("te veel bijna gratis, zoals bij salderen: het kwantiel komt onder één en er verandert niets",
+         zon_marge(DAGEN63, 0.02, verg63[1]) is None, "")
+controle("een dag met minder dan 1 kWh verwacht telt niet", zon_marge(
+    [*DAGEN63[:6], ["2026-10-28", 0.5, 2.0]], *verg63) is None, "")
+
+
+def nacht63(prior, factor=None):
+    v = verwachting(Z63, huis=0.8, dag=D63)
+    v.solar_prior = prior
+    v.solar_factor, v.solar_day = factor, D63.date()
+    b = plan_batterij(D63.replace(hour=4, minute=45), P63, Tariff(feed_in=0.0), v, B63)
+    return sum(u.net_kwh for u in b.uren if u.stand == NETLADEN and u.start < D63.replace(hour=8))
+
+
+print(f"  van het net voor 08:00: zonder marge {nacht63(None):.2f} kWh, met 1,25 {nacht63(1.251):.2f} kWh")
+controle("met de marge laadt hij minder van het net", nacht63(1.251) < nacht63(None) - 0.5, f"{nacht63(1.251)} {nacht63(None)}")
+controle("heeft hij vandaag al gemeten, dan geldt die meting en niet de marge",
+         abs(nacht63(1.251, factor=1.0) - nacht63(None, factor=1.0)) < 1e-9, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

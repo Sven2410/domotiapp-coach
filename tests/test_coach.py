@@ -14364,6 +14364,85 @@ try:
 finally:
     klok233.utcnow = echte_klok233
 
+print("=== 234. de zon per dag: de verwachting van voor zonsopkomst naast het dak, ook over een herstart (v0.193.0) ===")
+# Een klantwoning op 03-11-2026: de verwachting zei 16,6 kWh, het dak gaf er ruim twee keer zoveel. Per dag de
+# verwachting van voor het netladen naast wat het dak gaf, in de opslag; daaruit rekent `zon_marge` (proef 63 in
+# test_batterij.py).
+inst234 = instellingen(devices=[LAADPAAL, BATTERIJ])
+inst234["sources"]["solar"] = "sensor.zon"
+hass234, store234, coach234 = bouw(huis75(), inst234)
+asyncio.run(coach234._async_geheugen_laden())
+D234 = dt.datetime(2026, 11, 2)
+VERWACHT234 = {D234 + dt.timedelta(hours=u): 1.0 for u in range(8, 18)}
+
+
+def dag234(coach, van, tot, verwachting=None):
+    """Elke vijf minuten een ronde, met 2 kW zon van 08:00 tot 18:00. Geeft wat er afgesloten werd."""
+    klaar = []
+    nu = van
+    while nu < tot:
+        coach._zon_kwh = dict(verwachting if verwachting is not None else VERWACHT234)
+        hass234.states.zet("sensor.zon", "2000" if 8 <= nu.hour < 18 else "0")
+        uit = coach._zon_dag_bijhouden(nu, inst234)
+        if uit is not None:
+            klaar.append(uit)
+        nu += dt.timedelta(minutes=5)
+    return klaar
+
+
+dag234(coach234, D234, D234.replace(hour=12))
+# Om 07:00 werd de verwachting nog bijgesteld; daarna niet meer, want toen kwam de zon op.
+coach234 = herstart213(hass234)
+asyncio.run(coach234._async_geheugen_laden())
+klaar234 = dag234(coach234, D234.replace(hour=12, minute=10), D234 + dt.timedelta(days=1, minutes=10),
+                  verwachting={**VERWACHT234, D234.replace(hour=13): 5.0})
+print(f"  afgesloten: {klaar234}")
+controle("over een herstart van tien minuten: verwacht 10 kWh, gemeten 20 min dat gat",
+         len(klaar234) == 1 and klaar234[0][0] == "2026-11-02" and klaar234[0][1] == 10.0
+         and 19.5 < klaar234[0][2] < 19.9, f"{klaar234}")
+asyncio.run(coach234._async_zon_dag_bewaren(inst234, klaar234[0]))
+rij234 = coach234._batterij_rij(inst234, "dev-batterij")
+controle("de dag staat bij de batterij in de opslag", rij234.get("zon_dagen") == [klaar234[0]]
+         and any(r.get("zon_dagen") for r in store234.instellingen.get("battery_state") or []), f"{rij234.get('zon_dagen')}")
+asyncio.run(coach234._async_zon_dag_bewaren(inst234, klaar234[0]))
+controle("dezelfde dag twee keer bewaren geeft hem één keer",
+         len(coach234._batterij_rij(inst234, "dev-batterij").get("zon_dagen") or []) == 1, "")
+# Een dag met een gat van een uur midden op de dag telt niet, en een dag die pas na zonsopkomst begon ook niet.
+coach234b = herstart213(hass234)
+asyncio.run(coach234b._async_geheugen_laden())
+coach234b._geheugen_terug.clear()
+D234b = D234 + dt.timedelta(days=2)
+VERWACHT234b = {D234b + dt.timedelta(hours=u): 1.0 for u in range(8, 18)}
+dag234(coach234b, D234b, D234b.replace(hour=11), VERWACHT234b)
+gat234 = dag234(coach234b, D234b.replace(hour=12), D234b + dt.timedelta(days=1, minutes=5), VERWACHT234b)
+controle("een uur niet gemeten overdag: de dag telt niet", gat234 == [], f"{gat234}")
+coach234c = herstart213(hass234)
+asyncio.run(coach234c._async_geheugen_laden())
+coach234c._geheugen_terug.clear()
+D234c = D234 + dt.timedelta(days=4)
+laat234 = dag234(coach234c, D234c.replace(hour=10), D234c + dt.timedelta(days=1, minutes=5),
+                 {D234c + dt.timedelta(hours=u): 1.0 for u in range(8, 18)})
+controle("pas na zonsopkomst begonnen: de dag telt niet", laat234 == [], f"{laat234}")
+
+# De marge op de kaart, met acht gemeten dagen en de prijzen van bi-horário.
+inst234d = instellingen(devices=[LAADPAAL, BATTERIJ])
+inst234d["contract"] = {**inst234d["contract"], "type": "fixed", "periods": None}
+DAGEN234 = [[f"2026-10-{20 + i}", 20.0, round(20.0 * r, 2)] for i, r in enumerate([1.28, 1.16, 2.33, 0.92, 0.80, 0.79, 1.80, 1.10])]
+inst234d["battery_state"] = [{"device": "dev-batterij", "zon_dagen": DAGEN234}]
+hass234d, _, coach234d = bouw(huis75(), inst234d)
+NU234d = dt.datetime(2026, 11, 3, 4, 45)
+P234d = [{"start": dt.datetime(2026, 11, 3) + dt.timedelta(hours=i), "end": dt.datetime(2026, 11, 3) + dt.timedelta(hours=i + 1),
+          "price": 0.166 if i < 8 or i >= 22 else 0.272, "feed_in": 0.0} for i in range(48)]
+coach234d._prices = lambda settings: P234d
+b234d = asyncio.run(ronde75(hass234d, coach234d, NU234d))
+print(f"  {b234d.get('reason')}")
+# Met het lagere rendement van deze batterij kost te veel meer dan bij de klantwoning (89,8%), en rekent hij ruimer
+# dan de 25% van proef 63 in test_batterij.py.
+zin234 = _re.search(r"Hij rekent met (\d+)% meer zon dan voorspeld: de voorspelling zat de afgelopen 8 dagen vaak te laag\.",
+                   b234d.get("reason") or "")
+controle("de kaart zegt dat hij met meer zon rekent, en waarom",
+         zin234 is not None and 25 <= int(zin234.group(1)) <= 133, f"{b234d.get('reason')}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

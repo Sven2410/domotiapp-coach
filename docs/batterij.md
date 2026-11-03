@@ -2364,3 +2364,60 @@ Proeven:
 - test_coach.py, proef 222: dezelfde zoektocht als proef 220 (b). Met de zon vindt hij het vak van 27-10, en
   rekent hij −8 en +2,1 na. Zonder de zon vindt hij 29-10 08:00, zoals in de klantwoning.
 
+
+## Netladen met een zon die de verwachting niet zag (v0.194.0)
+
+In een klantwoning op 03-11-2026 (Growatt, bi-horário, teruglevering € 0, rendement 0,898) laadde de coach de
+accu 's nachts van het net van 15 naar 100% (04:50-07:51, ~13 kWh op € 0,166). De verwachting zei 16,6 kWh zon;
+het dak gaf er ruim twee keer zoveel, en om 10:30 ging er 2,1 kW voor niets naar het net. De eigenaar: "de accu
+heeft naar mijn idee teveel geladen."
+
+Over acht dagen gaf het dak daar 0,79 tot 2,33 keer de verwachting: op een heldere dag zat Forecast.Solar ~20% te
+hoog, op een dag die hij bewolkt noemde ver te laag. De coach rekende met de verwachting alsof die zeker was. Maar een
+vergissing naar de ene kant kost daar meer dan naar de andere:
+
+- **te veel van het net** (de zon had hem gevuld): (inkoop − teruglevering) / rendement, daar € 0,185 per kWh;
+- **te weinig** (de zon vulde hem niet, het huis koopt het later): later − inkoop / rendement, daar € 0,087.
+
+**De afweging van de krantenjongen.** Van het net laden loont tot de kans dat de zon die kWh toch had gebracht
+gelijk is aan te weinig / (te veel + te weinig), daar 0,32. De zon die daarbij hoort is het kwantiel 0,68 van wat het
+dak gaf tegenover de verwachting: daar 1,25. De batterij rekent dan met 25% meer zon dan voorspeld, in de uren waar
+hij vandaag nog niets van het dak gemeten heeft (`solar_prior` in `Forecast`, `zon_factor` in planner.py). Zodra
+`_zon_gemeten` vandaag oordeelt, geldt die meting weer.
+
+- **Meten**: per dag de verwachting tot het eerste uur met zon (daarmee laadde hij 's nachts), en wat de omvormers
+  gaven (`_zon_dag_bijhouden` in coach.py). Elke ronde in het geheugen (`zon_dag`), dus een herstart midden op de dag
+  kost alleen de minuten dat hij weg was. Een dag telt niet als de coach de zon niet van begin tot eind zag, of als
+  er overdag meer dan `ZON_DAG_GAT_MIN` (30 minuten) ontbrak. Een dag die telt gaat als [dag, verwacht, gemeten]
+  naar `zon_dagen` bij elke batterij in `battery_state` (de laatste 30), en het log zegt welke dag telde of waarom
+  niet.
+- **Rekenen**: `zon_vergissing` in batterij.py haalt de twee prijzen uit het komende etmaal: het goedkoopste blok,
+  het gemiddelde van de duurdere blokken, en de teruglevering in de uren met zon. `zon_marge` neemt het kwantiel van
+  de verhoudingen, vanaf zeven dagen (`ZON_DAGEN_MIN`), en dagen met minder dan 1 kWh verwacht tellen niet.
+- **Alleen naar boven.** Komt het kwantiel onder één, dan verandert er niets: minder zon rekenen dan voorspeld zou
+  meer van het net laden op een gok, en een verwachting die te hoog zit vangen de meting van vandaag (nooit boven één)
+  en bij een Growatt de bijstelling per nacht al op. Bij salderen of een hoge teruglevering is te veel bijna gratis;
+  het kwantiel komt dan laag uit, en er verandert ook niets. Zonder bekende terugleverprijs (Portugal op "onbekend")
+  is te veel niet te zeggen, en verandert er niets.
+- **Op de kaart**, zolang hij vandaag nog niets gemeten heeft: "Hij rekent met 25% meer zon dan voorspeld: de
+  voorspelling zat de afgelopen 8 dagen vaak te laag."
+
+Alleen voor de thuisbatterij. De paal, de boiler en de programma's rekenen met de verwachting zoals hij is: een auto
+heeft een klaar-tijd, en daar is te weinig duurder.
+
+Wat er niet in zit: één marge voor alle dagen, niet apart voor een dag die de voorspeller helder of bewolkt noemt.
+In de klantwoning zat de verwachting op heldere dagen te hoog en op bewolkte te laag. Op een heldere dag laadt hij
+toch niet van het net, dus daar doet de marge weinig; op een bewolkte dag rekent hij nog voorzichtig. Een marge per
+soort dag kan erbij zodra er genoeg dagen van elk zijn. Een dynamisch contract rekent met het goedkoopste blok en het
+gemiddelde van de rest, niet per uur.
+
+Open, gevonden met deze scenario's en al zo in v0.193.0: in alle drie zakt Opgeleverd op de kaart om 10:01 van
+€ 0,22 naar € 0,21, terwijl de batterij laadt. Om 10:00 houdt het zware apparaat in het huisprofiel op, en de
+batterij gaat van 2,3 kW ontladen naar 1 kW laden op zon. De controle daarop staat voor deze drie uit.
+
+Proeven: 63 in test_batterij.py (de som met de getallen van de klantwoning: € 0,1849 en € 0,0871, marge 1,251; om
+04:45 3,93 kWh van het net zonder en 1,64 met), 234 in test_coach.py (een dag over een herstart: 10 kWh verwacht,
+19,67 gemeten; een uur gat en een dag die na zonsopkomst begon tellen niet; de zin op de kaart). In het virtuele
+huis `growatt-zon-onzeker` tegen `growatt-zon-onzeker-zonder` (bewolkt voorspeld, helder geworden): 's nachts 4,86
+tegen 6,35 kWh van het net, de dag € 1,34 tegen € 1,59 (zonder batterij € 1,45); `growatt-zon-te-hoog` laadt precies
+als zonder.
