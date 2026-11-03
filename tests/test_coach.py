@@ -14569,6 +14569,217 @@ try:
 finally:
     sys.modules.update(oud235)
 
+print("=== 236. de zon van voor de coach: één keer nagerekend uit de recorder en de kwartieren (v0.196.0) ===")
+# Een klantwoning op 03-11-2026: de reeks van v0.194.0 begon pas bij de installatie, terwijl "vandaag nog" van de
+# voorspeller al tien dagen in de recorder stond en de omvormer al weken in de kwartieropslag. De eigenaar: "1, bouw
+# de uitgave".
+from domotiapp_coach.zon import zon_dag_terug, zonhoogte  # noqa: E402
+
+ZONE236 = dt.timezone(dt.timedelta(hours=1))
+ZONNEN236 = ("sensor.zon236_a", "sensor.zon236_b")
+
+
+def kwartieren236(dagen, zone=ZONE236, gat=None, gedeeltelijk=None):
+    """Per dag een zon van `k` keer 4 kW maal de zonnehoogte, 60/40 over twee omvormers. `gat` is een
+    (dag, van, tot) in lokale uren waarin de tweede niets zegt; `gedeeltelijk` (dag, [lokale uren]) kwartieren
+    van die omvormer met maar 300 seconden. Geeft de rijen en per dag wat het dak gaf waar ze er allebei waren."""
+    rijen = {z: [] for z in ZONNEN236}
+    gemeten = {}
+    for dag, k in dagen.items():
+        t = dt.datetime.combine(dag, dt.time(), tzinfo=zone).astimezone(dt.timezone.utc)
+        eind = dt.datetime.combine(dag + dt.timedelta(days=1), dt.time(), tzinfo=zone).astimezone(dt.timezone.utc)
+        som = 0.0
+        while t < eind:
+            h = zonhoogte(t + dt.timedelta(minutes=7.5), 52.0, 5.0)
+            lokaal = t.astimezone(zone)
+            uur = lokaal.hour + lokaal.minute / 60
+            if h > 0:
+                weg = gat is not None and gat[0] == dag and gat[1] <= uur < gat[2]
+                kort = gedeeltelijk is not None and gedeeltelijk[0] == dag and uur in gedeeltelijk[1]
+                stukken = []
+                for zon_id, deel in zip(ZONNEN236, (0.6, 0.4)):
+                    if zon_id == ZONNEN236[1] and weg:
+                        continue
+                    sec = 300.0 if zon_id == ZONNEN236[1] and kort else 900.0
+                    rij = {"start": int(t.timestamp()), "gemiddeld": k * 4000.0 * deel * h, "seconden": sec}
+                    rijen[zon_id].append(rij)
+                    stukken.append(rij)
+                if len(stukken) == 2:
+                    som += sum(r["gemiddeld"] * r["seconden"] for r in stukken) / 3_600_000.0
+            t += dt.timedelta(minutes=15)
+        gemeten[dag] = som
+    return rijen, gemeten
+
+
+# De som zelf.
+D236 = dt.date(2026, 11, 1)
+rijen236, gem236 = kwartieren236({D236: 1.0})
+standen236 = [(dt.datetime(2026, 11, 1, 0, 5), 8.0), (dt.datetime(2026, 11, 1, 6, 0), 10.0),
+              (dt.datetime(2026, 11, 1, 11, 0), 5.0)]
+dag236, waarom236 = zon_dag_terug(D236, ZONE236, rijen236, standen236, 52.0, 5.0, 30.0)
+opkomst236 = next(dt.datetime(2026, 11, 1, 0, 0) + dt.timedelta(minutes=15 * i) for i in range(96)
+                  if zonhoogte((dt.datetime(2026, 11, 1, 0, 0) + dt.timedelta(minutes=15 * i + 7.5)).replace(tzinfo=ZONE236),
+                               52.0, 5.0) > 0)
+nacht236 = round((8.0 * (6 * 60 - 5) + 10.0 * (opkomst236 - dt.datetime(2026, 11, 1, 6, 0)).total_seconds() / 60)
+                 / ((opkomst236 - dt.datetime(2026, 11, 1, 0, 5)).total_seconds() / 60), 2)
+print(f"  {dag236} {waarom236}, zon op {opkomst236:%H:%M}, het dak gaf {gem236[D236]:.3f}")
+controle("verwacht: het gemiddelde over de nacht (8 vanaf 00:05, 10 vanaf 06:00, niet 5 van 11:00); gemeten: de "
+         "kwartieren", dag236 == ["2026-11-01", nacht236, round(gem236[D236], 2)], f"{dag236} {nacht236}")
+dag236b, waarom236b = zon_dag_terug(D236, ZONE236, rijen236, standen236[2:], 52.0, 5.0, 30.0)
+controle("zonder stand van voor zonsopkomst telt de dag niet", dag236b is None and "verwachting" in waarom236b,
+         f"{dag236b} {waarom236b}")
+rijen236c, _ = kwartieren236({D236: 1.0}, gat=(D236, 10.5, 14.25))
+dag236c, waarom236c = zon_dag_terug(D236, ZONE236, rijen236c, standen236, 52.0, 5.0, 30.0)
+controle("een omvormer die van 10:30 tot 14:15 niets zei: 225 minuten gat, telt niet",
+         dag236c is None and waarom236c == "225 minuten niet gemeten", f"{dag236c} {waarom236c}")
+rijen236d, gem236d = kwartieren236({D236: 1.0}, gedeeltelijk=(D236, [12.0, 12.25]))
+dag236d, _ = zon_dag_terug(D236, ZONE236, rijen236d, standen236, 52.0, 5.0, 30.0)
+rijen236e, _ = kwartieren236({D236: 1.0}, gedeeltelijk=(D236, [12.0, 12.25, 12.5, 12.75]))
+dag236e, waarom236e = zon_dag_terug(D236, ZONE236, rijen236e, standen236, 52.0, 5.0, 30.0)
+controle("twee kwartieren met 300 seconden is 20 minuten gat en telt, met alleen de gedekte seconden",
+         dag236d is not None and abs(dag236d[2] - round(gem236d[D236], 2)) < 0.011 and dag236d[2] < dag236[2],
+         f"{dag236d}")
+controle("vier is 40 minuten en telt niet", dag236e is None and waarom236e == "40 minuten niet gemeten", f"{waarom236e}")
+try:
+    from zoneinfo import ZoneInfo as _Zone236
+
+    AMS236 = _Zone236("Europe/Amsterdam")
+except Exception:  # noqa: BLE001 - zonder tzdata geen wintertijd
+    AMS236 = None
+if AMS236 is not None:
+    W236 = dt.date(2026, 10, 25)
+    rijen236w, gem236w = kwartieren236({W236: 1.0}, zone=AMS236)
+    dag236w, _ = zon_dag_terug(W236, AMS236, rijen236w, [(dt.datetime(2026, 10, 25, 5, 0), 12.0)], 52.0, 5.0, 30.0)
+    controle("de dag dat de wintertijd ingaat (25 uur): elk kwartier één keer",
+             dag236w == ["2026-10-25", 12.0, round(gem236w[W236], 2)], f"{dag236w} {gem236w}")
+
+# In de coach: negen dagen in de recorder en de kwartieren, twee die niet tellen, en één dag die de coach zelf mat.
+VERHOUDING236 = {dt.date(2026, 10, 26): 1.28, dt.date(2026, 10, 27): 1.16, dt.date(2026, 10, 28): 2.33,
+                 dt.date(2026, 10, 29): 1.0, dt.date(2026, 10, 30): 1.0, dt.date(2026, 10, 31): 0.92,
+                 dt.date(2026, 11, 1): 0.80, dt.date(2026, 11, 2): 0.79, dt.date(2026, 11, 3): 2.07}
+SCHAAL236 = {d: 1.0 + 0.1 * i for i, d in enumerate(VERHOUDING236)}
+RIJEN236, GEMETEN236 = kwartieren236(SCHAAL236, gat=(dt.date(2026, 10, 29), 10.5, 14.25))
+STANDEN236 = []
+for d, r in VERHOUDING236.items():
+    verwacht = GEMETEN236[d] / r
+    if d != dt.date(2026, 10, 30):
+        STANDEN236.append((dt.datetime.combine(d, dt.time(0, 5)), str(round(verwacht * 1000.0, 1))))
+        STANDEN236.append((dt.datetime.combine(d, dt.time(6, 0)), str(round(verwacht * 1000.0, 1))))
+    STANDEN236.append((dt.datetime.combine(d, dt.time(11, 0)), str(round(verwacht * 500.0, 1))))
+VERWACHT236 = {d: round(GEMETEN236[d] / r, 2) for d, r in VERHOUDING236.items()}
+
+
+def huis236(remaining="sensor.rest236"):
+    inst = instellingen(devices=[LAADPAAL, BATTERIJ])
+    inst["contract"] = {**inst["contract"], "type": "fixed", "periods": None}
+    inst["sources"]["solar"] = ZONNEN236[0]
+    inst["sources"]["solar_extra"] = [ZONNEN236[1]]
+    inst["sources"]["solar_forecast"] = {"remaining_today": remaining}
+    inst["battery_state"] = [{"device": "dev-batterij", "zon_dagen": [["2026-11-02", 30.0, 33.0]]}]
+    hass, store, coach = bouw({**huis75(), "sensor.rest236": {"state": "0", "attributes": {"unit_of_measurement": "Wh"}},
+                               ZONNEN236[0]: "0", ZONNEN236[1]: "0"}, inst)
+    hass.config.latitude, hass.config.longitude = 52.0, 5.0
+    hass.vragen236, hass.antwoord236 = [], True
+    return hass, store, coach
+
+
+def bedraad236(hass, coach):
+    async def geschiedenis(entity_id, start, einde):
+        if entity_id != "sensor.rest236":
+            return []
+        hass.vragen236.append(start)
+        return [(m, w) for m, w in STANDEN236 if start <= m <= einde] if hass.antwoord236 else []
+
+    coach._async_geschiedenis = geschiedenis
+    coach._prices = lambda settings: P236
+
+
+P236 = [{"start": dt.datetime(2026, 11, 4) + dt.timedelta(hours=i), "end": dt.datetime(2026, 11, 4) + dt.timedelta(hours=i + 1),
+         "price": 0.166 if i < 8 or i >= 22 else 0.272, "feed_in": 0.0} for i in range(48)]
+class Archief236:
+    """De kwartieropslag zoals hij is, met de zon van RIJEN236."""
+
+    def __init__(self, echt):
+        self._echt = echt
+
+    def __getattr__(self, naam):
+        return getattr(self._echt, naam)
+
+    async def async_lees(self, ids, start, einde):
+        return {e: list(RIJEN236.get(e, [])) for e in ids}
+
+
+zone236 = coachmod.dt_util.get_default_time_zone
+coachmod.dt_util.get_default_time_zone = lambda: ZONE236
+archief236 = coachmod.async_get_archive
+coachmod.async_get_archive = lambda hass: Archief236(archief236(hass))
+try:
+    hass236, store236, coach236 = huis236()
+    bedraad236(hass236, coach236)
+    hass236.antwoord236 = False
+    asyncio.run(ronde75(hass236, coach236, dt.datetime(2026, 11, 4, 4, 45)))
+    asyncio.run(ronde75(hass236, coach236, dt.datetime(2026, 11, 4, 4, 50)))
+    rij236 = coach236._batterij_rij(asyncio.run(coachmod.async_get_store(hass236).async_load()), "dev-batterij")
+    controle("de recorder heeft nog niets: niets bewaard, en pas na een kwartier opnieuw",
+             len(hass236.vragen236) == 1 and not rij236.get("zon_terug") and len(rij236.get("zon_dagen")) == 1,
+             f"{hass236.vragen236} {rij236}")
+    hass236.antwoord236 = True
+    b236 = asyncio.run(ronde75(hass236, coach236, dt.datetime(2026, 11, 4, 5, 0)))
+    rij236 = coach236._batterij_rij(asyncio.run(coachmod.async_get_store(hass236).async_load()), "dev-batterij")
+    dagen236 = {d[0]: d for d in rij236.get("zon_dagen") or []}
+    print(f"  nagerekend: {sorted(dagen236.values())}")
+    print(f"  {b236.get('reason')}")
+    verwacht236 = {d.isoformat(): [d.isoformat(), VERWACHT236[d], round(GEMETEN236[d], 2)] for d in VERHOUDING236
+                   if d not in (dt.date(2026, 10, 29), dt.date(2026, 10, 30), dt.date(2026, 11, 2))}
+    controle("zes dagen nagerekend: verwacht de stand van de nacht, gemeten de kwartieren",
+             all(k in dagen236 and dagen236[k][0] == v[0] and abs(dagen236[k][1] - v[1]) < 0.011
+                 and abs(dagen236[k][2] - v[2]) < 0.011 for k, v in verwacht236.items()), f"{dagen236} {verwacht236}")
+    controle("de dag met een gat van 225 minuten en de dag zonder stand voor zonsopkomst niet",
+             "2026-10-29" not in dagen236 and "2026-10-30" not in dagen236, f"{sorted(dagen236)}")
+    controle("de dag die de coach zelf mat wint", dagen236.get("2026-11-02") == ["2026-11-02", 30.0, 33.0],
+             f"{dagen236.get('2026-11-02')}")
+    controle("en het staat in de opslag, met wanneer", len(dagen236) == 7 and rij236.get("zon_terug") == "2026-11-04T05:00",
+             f"{rij236.get('zon_terug')}")
+    zin236 = _re.search(r"Hij rekent met (\d+)% meer zon dan voorspeld: de voorspelling zat de afgelopen 7 dagen vaak te "
+                        r"laag\.", b236.get("reason") or "")
+    controle("dezelfde ronde rekent er al mee: de zin op de kaart", zin236 is not None, f"{b236.get('reason')}")
+    # Eén keer: ook na een herstart niet nog eens.
+    asyncio.run(ronde75(hass236, coach236, dt.datetime(2026, 11, 4, 5, 20)))
+    coach236b = herstart213(hass236)
+    bedraad236(hass236, coach236b)
+    asyncio.run(ronde75(hass236, coach236b, dt.datetime(2026, 11, 4, 5, 40)))
+    controle("één keer, ook na een herstart", len(hass236.vragen236) == 2, f"{hass236.vragen236}")
+    # Zonder "vandaag nog" kijkt hij niet.
+    hass236c, _, coach236c = huis236(remaining="")
+    bedraad236(hass236c, coach236c)
+    asyncio.run(ronde75(hass236c, coach236c, dt.datetime(2026, 11, 4, 5, 0)))
+    rij236c = coach236c._batterij_rij(asyncio.run(coachmod.async_get_store(hass236c).async_load()), "dev-batterij")
+    controle("zonder 'vandaag nog' niets nagerekend", hass236c.vragen236 == [] and not rij236c.get("zon_terug"),
+             f"{hass236c.vragen236} {rij236c}")
+finally:
+    coachmod.dt_util.get_default_time_zone = zone236
+    coachmod.async_get_archive = archief236
+
+# En het meten zelf (v0.193.0) neemt sindsdien ook het gemiddelde over de nacht, ook over een herstart om 02:00:
+# tot 04:00 16,6 kWh verwacht, daarna 11,2, zoals in de klantwoning op 03-11-2026.
+inst236l = instellingen(devices=[LAADPAAL, BATTERIJ])
+hass236l, _, coach236l = bouw(huis75(), inst236l)
+asyncio.run(coach236l._async_geheugen_laden())
+D236l = dt.datetime(2026, 11, 3)
+nu236l = D236l
+while nu236l < D236l.replace(hour=8, minute=5):
+    if nu236l == D236l.replace(hour=2):
+        coach236l = herstart213(hass236l)
+        asyncio.run(coach236l._async_geheugen_laden())
+    totaal = 16.6 if nu236l.hour < 4 else 11.2
+    coach236l._zon_kwh = {D236l.replace(hour=u): totaal / 10 for u in range(8, 18)}
+    coach236l._zon_dag_bijhouden(nu236l, inst236l)
+    nu236l += dt.timedelta(minutes=5)
+verwacht236l = (coach236l._zon_dag or {}).get("verwacht")
+print(f"  het meten zelf: verwacht {verwacht236l}")
+controle("het meten zelf: het gemiddelde over de nacht (13,88), niet de 11,2 van vlak voor de zon",
+         verwacht236l is not None and abs(verwacht236l - 13.877) < 0.01, f"{verwacht236l}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

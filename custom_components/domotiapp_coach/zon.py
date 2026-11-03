@@ -25,7 +25,7 @@ de coach daarnaast zoals altijd bij (`_zon_gemeten`).
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone, tzinfo
 from math import asin, cos, pi, radians, sin
 
 # Hoeveel dagen terug de heldere dag gezocht wordt, en hoeveel dagen "de laatste dagen" zijn.
@@ -165,3 +165,67 @@ def zon_uit_opwek(
             continue
         uit[uur] = round(h * factor, 4)
     return uit
+
+
+def zon_dag_terug(
+    dag: date, zone: tzinfo, kwartieren: dict[str, list[dict[str, float]]],
+    standen: list[tuple[datetime, float | None]], breedte: float, lengte: float, gat_max: float,
+) -> tuple[list | None, str]:
+    """Eén dag van vóór de coach hem zelf mat, uit wat er al bewaard was (v0.196.0).
+
+    Zoals `_zon_dag_bijhouden` in coach.py hem 's avonds afsluit: [dag, verwacht, gemeten] in kWh,
+    of None met de reden. Verwacht is "vandaag nog" (`standen`, lokale tijd zonder zone) gemiddeld over
+    de tijd tussen middernacht en zonsopkomst, vanaf de eerste stand na middernacht: dan is dat de hele
+    dag, en daarmee laadde de batterij die nacht. Gemeten zijn de
+    kwartieren van alle omvormers samen (`kwartieren`, de kwartieropslag van de coach), en wat
+    er overdag (de zon boven de horizon) ontbrak telt als gat, net als bij het meten zelf: een
+    kwartier waarin één omvormer niets zei, of de seconden die er niet gedekt waren.
+    """
+    begin = datetime.combine(dag, time(), tzinfo=zone).astimezone(timezone.utc)
+    eind = datetime.combine(dag + timedelta(days=1), time(), tzinfo=zone).astimezone(timezone.utc)
+    rijen = {
+        (zon_id, int(rij["start"])): rij
+        for zon_id, lijst in kwartieren.items() for rij in lijst or []
+    }
+    gemeten, gat, opkomst = 0.0, 0.0, None
+    kwartier = begin
+    while kwartier < eind:
+        overdag = zonhoogte(kwartier + timedelta(minutes=7.5), breedte, lengte) > 0
+        if overdag and opkomst is None:
+            opkomst = kwartier
+        stukken = [rijen.get((zon_id, int(kwartier.timestamp()))) for zon_id in kwartieren]
+        if stukken and all(s is not None for s in stukken):
+            gedekt = min(min(float(s.get("seconden") or 0.0), 900.0) for s in stukken)
+            gemeten += sum(
+                max(0.0, float(s.get("gemiddeld") or 0.0)) * min(float(s.get("seconden") or 0.0), 900.0)
+                for s in stukken
+            ) / 3_600_000.0
+            if overdag:
+                gat += (900.0 - gedekt) / 60.0
+        elif overdag:
+            gat += 15.0
+        kwartier += timedelta(minutes=15)
+    if opkomst is None:
+        return None, "de zon kwam niet op"
+    opkomst_lokaal = opkomst.astimezone(zone).replace(tzinfo=None)
+    middernacht = datetime.combine(dag, time())
+    punten = [
+        (moment.replace(tzinfo=zone).astimezone(timezone.utc), kwh)
+        for moment, kwh in standen if middernacht <= moment <= opkomst_lokaal
+    ]
+    som = duur = 0.0
+    verwacht = None
+    for i, (moment, kwh) in enumerate(punten):
+        if kwh is None or kwh <= 0:
+            continue
+        tot = punten[i + 1][0] if i + 1 < len(punten) else opkomst
+        som += kwh * max(0.0, (tot - moment).total_seconds())
+        duur += max(0.0, (tot - moment).total_seconds())
+        verwacht = kwh
+    if duur > 0:
+        verwacht = som / duur
+    if verwacht is None or verwacht <= 0:
+        return None, "geen verwachting van voor zonsopkomst"
+    if gat > gat_max:
+        return None, f"{gat:.0f} minuten niet gemeten"
+    return [dag.isoformat(), round(verwacht, 2), round(gemeten, 2)], ""
