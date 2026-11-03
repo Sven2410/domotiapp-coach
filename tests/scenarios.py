@@ -404,6 +404,11 @@ paal_traag = vast_zonnig.kopie(
     auto=replace(BUS, meldt_soc=False),
     gebeurtenissen=[("07:05", "soc_opgeven", 30)],
 )
+teller_achter = vast_zonnig.kopie(
+    naam="teller-achter",
+    uitleg="de teller van de paal stapt eens per uur, met een stand van een kwartier oud (v0.193.0)",
+    paal=Paal(teller_interval_min=60, teller_achter_min=15),
+)
 
 # --- de klantwoning, het weekend van 04-09-2026 -----------------------------------
 #
@@ -1815,7 +1820,7 @@ ALLE = [
     vast_geen_klaar_tijd, vast_krap, vast_onhaalbaar,
     dyn_zonnig, dyn_bewolkt, dyn_geen_zon, dyn_markt, dyn_salderen, dyn_avond, dyn_grote_auto,
     dyn_negatief, dyn_kwartier_later, dyn_geen_klaar_tijd,
-    meter_teken, meter_teken_om, een_fase_krap, ford_geen_ruimte, eigen_marge, oven, puls_snelladen, auto_neemt_minder, lastbewaker, warmtepomp, ford_bijkomen, ford_oude_opslag, warmtepomp_uit,
+    meter_teken, meter_teken_om, een_fase_krap, ford_geen_ruimte, eigen_marge, teller_achter, oven, puls_snelladen, auto_neemt_minder, lastbewaker, warmtepomp, ford_bijkomen, ford_oude_opslag, warmtepomp_uit,
     geen_soc, soc_opgegeven, soc_traag, laadgrens, laadgrens_ingesteld,
     doel_onder_auto, soc_stappen, bijna_vol, auto_slaapt,
     pauze, pauze_vergeten, snelladen, kabel_eruit, oude_tijden,

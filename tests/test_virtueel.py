@@ -162,6 +162,21 @@ for naam, vl in V.items():
         controle(f"{naam}: zon in de beurten is niet meer dan het huis aan zon zag",
                  sum(b["solar_kwh"] for b in vl.beurten) <= vl.uit_zon_kwh + max(0.5, 0.05 * vl.geladen_kwh),
                  f"{sum(b['solar_kwh'] for b in vl.beurten):.1f} tegen {vl.uit_zon_kwh:.1f}")
+        # Het verslag noemt nooit minder dan het geld telt (v0.193.0). In een klantwoning
+        # op 03-11-2026 zei het "15,7 kWh" en rekende het geld met 17,75: de teller van
+        # de paal liep achter. Meer mag wel, tot wat er werkelijk in ging: de geijkte
+        # teller wint als hij hoger is (warmtepomp-nacht: 42,6 in het verslag, 41,8 in
+        # het geld, 42,8 in de auto), of het geld als dat er zelf al iets boven zit
+        # (easee-fasekeuze: 51,55 tegen 51,36). Alleen bij één laadbeurt, want dan is duidelijk
+        # welke regel bij welk verslag hoort.
+        laden = [b for b in vl.beurten if b.get("kind", "laden") == "laden"]
+        vol = [m for m in meldingen(vl, "is vol") if " kWh, " in m]
+        if len(laden) == 1 and len(vol) == 1:
+            getal = re.search(r"(\d+(?:,\d+)?) kWh, ", vol[0])
+            gezegd = float(getal.group(1).replace(",", ".")) if getal else None
+            controle(f"{naam}: het verslag noemt minstens de kWh van het geld, en niet meer dan geld of auto",
+                     gezegd is not None and laden[0]["kwh"] - 0.05 <= gezegd <= max(laden[0]["kwh"], vl.geladen_kwh) + 0.1,
+                     f"verslag {gezegd} tegen {laden[0]['kwh']:.2f} in de beurt, {vl.geladen_kwh:.2f} geladen")
         # Bespaard is de maat (vanaf het inpluggen op vol vermogen) min wat er
         # betaald is, en nooit onder nul. De eigenaar: "een min getal bij besparen
         # kan helemaal niet."

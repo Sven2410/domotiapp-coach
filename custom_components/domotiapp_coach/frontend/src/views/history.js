@@ -2750,10 +2750,12 @@ class DacViewHistory extends DacElement {
     const wanneer = (b) => {
       const op = new Date(b.plugged_at);
       if (Number.isNaN(op.getTime())) return "";
-      // 19-10 of 19/10, naar de taal.
+      // 19-10 of 19/10, naar de taal. Op een dag alleen de klok, behalve voor een
+      // beurt die de dag ervoor ingeplugd werd (v0.193.0): die staat op de dag
+      // dat hij laadde (`moment` in savings.js).
       const dag = datum(op, { day: "2-digit", month: "2-digit" });
       const klok = `${String(op.getHours()).padStart(2, "0")}:${String(op.getMinutes()).padStart(2, "0")}`;
-      return this.period_ === "day" ? klok : `${dag} ${klok}`;
+      return this.period_ === "day" && op >= this.periodeStart_() ? klok : `${dag} ${klok}`;
     };
     lijst.append(rij([t(w.wanneer), t("Apparaat"), t(w.hoeveel), t("Betaald"), t("Bespaard")], true));
     for (const b of items) {

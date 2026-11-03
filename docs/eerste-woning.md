@@ -835,3 +835,31 @@ Wat er al in de opslag staat, blijft staan: thuis de 41 A van 29-10 19:00, bij d
 aanvroeg de pieken sinds 19-10. Proef 12 in test_archive.py heeft de melding van thuis, een echte minuut op
 30 A, de twee meters, tien seconden tegen negen, een kwartiergrens, een herstart halverwege en de recorder.
 
+
+## Een laadbeurt staat op de dag dat hij laadde (v0.193.0)
+
+In een klantwoning op 03-11-2026 ging de auto om 14:42 aan de kabel, laadde hij van 22:00 tot 00:12 in de goedkope uren,
+en zat de kabel 's ochtends nog in. Historie gaf die ochtend "Van de coach € 0,00", terwijl de beurt € 1,87
+bespaarde. De eigenaar: "Ik heb hem ingeplugd in de duurdere uren en geladen in de goedkope uren. Dat verschil is
+dan toch je besparing."
+
+De beurt stond op de dag van het inpluggen. `moment` in savings.js nam het eind van de beurt, en een beurt met de
+kabel er nog in heeft geen eind, dus viel hij terug op het inpluggen. Ging de kabel eruit, dan sprong hij naar de dag
+van het uittrekken. Op welke dag een besparing stond hing dus af van wanneer de bewoner de kabel uittrok, en een dag
+die hij al bekeken had kon achteraf veranderen.
+
+Nu schrijft de coach bij elke beurt `charged_until`: de laatste minuut waarin er iets in ging (`geld["laatst"]`,
+bijgehouden in `_geld_bij`). Daarop valt de beurt in Historie, in In geld en in Sessies, en in het rapport. Een beurt
+die nog laadt staat zo op nu, want de coach schrijft hem elke vijf minuten weg. Een beurt die nog niet geladen heeft
+staat op het inpluggen, met nul erin. Een beurt van voor v0.193.0 heeft het veld niet en staat op zijn eind, zoals
+hij stond.
+
+Het veld overleeft een herstart: `_geld_uit_regel` leest het terug uit de opslag, en het terugrekenen uit de
+kwartieropslag (`_async_terugrekenen`) zet het op het laatste kwartier waarin de paal iets trok. Een beurt over
+middernacht wordt niet per dag gesplitst; hij telt helemaal op de dag dat hij klaar was met laden.
+
+In Sessies staat bij een dag de klok van het inpluggen. Werd de beurt de dag ervoor ingeplugd, dan staat de datum
+erbij, anders leest "14:42" als vanmiddag.
+
+Proeven: 233 in test_coach.py (de beurt tot 00:13, ná het laden en na een herstart om 08:13), en "een beurt staat op
+de dag dat hij laadde" in test_rapport.mjs.
