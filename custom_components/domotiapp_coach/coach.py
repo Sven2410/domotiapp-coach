@@ -858,6 +858,12 @@ FOREVER_RULES = frozenset({"no-room", "user-hold"})
 # moet die 0 er wél heen. Zie daar.
 NO_WRITE_RULES = frozenset({"disconnected", "complete"})
 
+# Hervat de bewoner een Easee in de app terwijl de coach hem pauzeert, dan is dat Snel voor de beurt
+# (v0.197.0, `_app_hervat`). De app zet de dynamische limiet van 0 op het maximum van de paal; een
+# pauze met een houdbaarheid die afloopt doet in de paal hetzelfde. Dus telt het alleen zolang de
+# pauze van de coach nog ruim geldt: tot een minuut voor zijn einde.
+APP_HERVAT_MARGE = timedelta(minutes=1)
+
 # Hoe lang het verslag wacht op een accustand die bij deze laadbeurt hoort.
 # Een auto meldt zijn percentage niet op commando: de eigen Ford stopte op
 # 25-08-2026 om 14:44 op 80% terwijl de app nog 70% zei, en werkte pas ruim een
@@ -1845,6 +1851,17 @@ class ChargerCoach:
         # herstart heen en afgelopen zodra de kabel eruit gaat: snelladen is
         # iets voor nu, niet iets wat stilletjes blijft staan.
         self._boost: set[str] = set()
+        # Welke van die Snel de bewoner in de app van de paal aanzette (v0.197.0, `_app_hervat`), voor
+        # `modus_bron` op de kaart. Bewaard met de rest van de knoppen.
+        self._snel_app: set[str] = set()
+        # Waar de coach zelf een 0 in een Easee schreef (`_pause`), en waar hij die 0 daarna ook echt
+        # terugzag. Alleen in het geheugen: na een herstart weet de coach niet wie de limiet zette.
+        self._nul_geschreven: set[str] = set()
+        self._nul_gezien: set[str] = set()
+        # Van welke paal een dynamische limiet of een status is, en welke daarvan de limiet zijn, voor
+        # `_async_state_changed`.
+        self._limiet_van: dict[str, str] = {}
+        self._limieten: set[str] = set()
         # Tot welke accustand "Nu vol laden" bij een thuisbatterij gaat (v0.141.0),
         # als de bewoner dat in de pop-up koos; zonder is het de laadgrens.
         self._vol_tot: dict[str, float] = {}
@@ -4004,6 +4021,20 @@ class ChargerCoach:
             self._async_phase_changed(new)
             return
 
+        # Een limiet of status die even wegviel: een Easee die opnieuw opstart begint op zijn
+        # maximum, en dat is geen hervat in de app (`_app_hervat`). Een limiet die van de 0 van de
+        # coach omhooggaat krijgt meteen een ronde; elke andere wisseling van de limiet niet, want
+        # die schrijft de coach meestal zelf.
+        paal = self._limiet_van.get(entity)
+        if paal is not None:
+            weg = ("unavailable", "unknown", "", "offline")
+            if new.state in weg or old is None or old.state in weg or "error" in new.state:
+                self._nul_gezien.discard(paal)
+            if entity in self._limieten:
+                if paal in self._nul_gezien and old is not None and old.state != new.state:
+                    self.async_refresh()
+                return
+
         if old is None or old.state == new.state:
             return
         self.async_refresh()
@@ -4143,6 +4174,16 @@ class ChargerCoach:
             and device.get("brand") not in BATTERIJ_ALLEEN_LEZEN + BATTERIJ_SCHEMA
         ]
         self._watch_batterij(settings, batterijen)
+        # De dynamische limiet en de status van een paal erbij, voor `_app_hervat` (v0.197.0).
+        self._limiet_van = {
+            entity: device.get("id", "")
+            for device in chargers
+            for sleutel in ("dynamic_limit", "status")
+            if (entity := (device.get("entities") or {}).get(sleutel))
+        }
+        self._limieten = {
+            entity for device in chargers if (entity := (device.get("entities") or {}).get("dynamic_limit"))
+        }
         self._watch(
             {
                 entity
@@ -4150,6 +4191,7 @@ class ChargerCoach:
                 for sleutel in ("status", "connected", "charging")
                 if (entity := (device.get("entities") or {}).get(sleutel))
             }
+            | set(self._limiet_van)
             # De startknop erbij: bij Home Connect Local komt die pas terug
             # als de deur dichtgaat, en dan hoort de coach meteen te drukken.
             | {
@@ -9599,6 +9641,9 @@ class ChargerCoach:
         """
         device_id = device.get("id", "")
         grid, car, charger, window = self._read(now, settings, device, reserved)
+        if self._app_hervat(device, charger, now):
+            await self._async_app_hervat(device)
+            charger = replace(charger, boost=True, paused_by_user=False, modus=self._modus_van(device))
         await self._async_soc_vast_melden(device, car)
         try:
             await self._async_auto_wekken(now, settings, device, charger.connected)
@@ -9851,6 +9896,9 @@ class ChargerCoach:
         if not charger.connected and self._echt_los.get(device_id, True):
             self._approved.discard(device_id)
             self._boost.discard(device_id)
+            self._snel_app.discard(device_id)
+            self._nul_geschreven.discard(device_id)
+            self._nul_gezien.discard(device_id)
             self._modus.pop(device_id, None)
             self._doel.pop(device_id, None)
             self._rend_start.pop(device_id, None)
@@ -9887,6 +9935,7 @@ class ChargerCoach:
         self.state[device_id]["applied"] = may_act
         self.state[device_id]["approved"] = device_id in self._approved
         self.state[device_id]["boost"] = device_id in self._boost
+        self.state[device_id]["boost_app"] = device_id in self._boost and device_id in self._snel_app
         self.state[device_id]["paused"] = device_id in self._paused
         # Of de paal op dit moment werkelijk laadt. Niet voor een besluit maar
         # voor de kaart: een akkoord vragen leest anders als de auto al loopt.
@@ -10170,6 +10219,60 @@ class ChargerCoach:
         if limiet is None:
             return not charger.charging
         return limiet < 0.5
+
+    def _app_hervat(self, device: dict[str, Any], charger: Charger, now: datetime) -> bool:
+        """Of de bewoner een Easee in de app hervatte terwijl de coach hem pauzeerde (v0.197.0).
+
+        Sven op 04-11-2026: "als de lader zichzelf pauzeert. En de klant drukt op de hervat knop in
+        easee. Dan moet de coach dat zien en dan moet de coach hem gaan laden. Ondanks dat het een
+        duur moment is want de klant kiest er immers zelf voor om hem te starten." Tot dan zette
+        `_following` de limiet binnen een ronde terug op 0, en deed de knop in de app niets.
+
+        De app zet de dynamische limiet van 0 op het maximum van de paal. Dat telt alleen als:
+        - de coach die 0 zelf schreef en hem daarna ook zag staan, zodat een paal die zijn oude
+          limiet nog even meldt niet voor een hervat doorgaat;
+        - de pauze van de coach nog ruim geldt (`APP_HERVAT_MARGE`), want een pauze met een
+          houdbaarheid die afloopt zet de limiet net zo goed terug;
+        - de limiet en de status er al die tijd waren (`_async_state_changed`): een Easee die
+          opnieuw opstart begint ook op zijn maximum.
+        Na een herstart van de coach weet hij niet wie de limiet zette, en doet hij niets. Een Alfen
+        krijgt zijn limiet elke ronde opnieuw en heeft geen app die dit doet.
+        """
+        device_id = device.get("id", "")
+        control = CHARGER_CONTROL.get(device.get("brand", "")) or {}
+        if (not control or control.get("limit_entity") or control.get("refresh")
+                or not charger.connected or device_id not in self._nul_geschreven):
+            self._nul_gezien.discard(device_id)
+            return False
+        limiet = _number(self.hass, (device.get("entities") or {}).get("dynamic_limit"))
+        if limiet is None:
+            self._nul_gezien.discard(device_id)
+            return False
+        if limiet < 0.5:
+            self._nul_gezien.add(device_id)
+            return False
+        gezien = device_id in self._nul_gezien
+        self._nul_gezien.discard(device_id)
+        einde = self._pause_until.get(device_id)
+        geldt = einde is None or now < einde - APP_HERVAT_MARGE
+        return gezien and geldt and limiet >= MIN_AMPS and device_id not in self._boost
+
+    async def _async_app_hervat(self, device: dict[str, Any]) -> None:
+        """Snel voor deze beurt, omdat de bewoner in de app op hervatten drukte."""
+        device_id = device.get("id", "")
+        _LOGGER.info("%s: hervat in de app van de paal terwijl de coach pauzeerde; Snel voor deze beurt", device_id)
+        self._modus.pop(device_id, None)
+        self._boost.add(device_id)
+        self._paused.discard(device_id)
+        self._snel_app.add(device_id)
+        self._nul_geschreven.discard(device_id)
+        self._remember(device_id)
+        naam = device.get("name") or t("De laadpaal")
+        await self._async_tell(
+            t("{naam}: je startte het laden in de Easee-app. Hij laadt nu door tot de auto vol is.",
+              naam=_hoofdletter(naam)),
+            telefoon=False,
+        )
 
     def _pause_expiring(self, device_id: str, now: datetime) -> bool:
         """Of de pauze die er staat bijna verlopen is en opnieuw moet.
@@ -15333,6 +15436,8 @@ class ChargerCoach:
                 self._approved.add(device_id)
             if row.get("boost"):
                 self._boost.add(device_id)
+                if row.get("boost_app"):
+                    self._snel_app.add(device_id)
             if row.get("paused"):
                 self._paused.add(device_id)
             if row.get("mode") in MODI_ZONDER_SOM:
@@ -15667,6 +15772,7 @@ class ChargerCoach:
         aan = {
             "approved": device_id in self._approved,
             "boost": device_id in self._boost,
+            "boost_app": device_id in self._boost and device_id in self._snel_app,
             "paused": device_id in self._paused,
             "drain_to": self._drain.get(device_id),
             "boost_to": self._vol_tot.get(device_id),
@@ -15732,6 +15838,7 @@ class ChargerCoach:
             self._paused.discard(device_id)
         else:
             self._boost.discard(device_id)
+        self._snel_app.discard(device_id)
         self._remember(device_id)
         self.async_refresh()
 
@@ -15768,6 +15875,7 @@ class ChargerCoach:
             self.async_boost(device_id, True)
             return
         self._boost.discard(device_id)
+        self._snel_app.discard(device_id)
         if mode in MODI_ZONDER_SOM or mode == "goedkoopst":
             self._modus[device_id] = mode
         else:
@@ -15851,6 +15959,8 @@ class ChargerCoach:
             return await self._pause(device, control, charger, decision, now)
 
         self._pause_until.pop(device.get("id", ""), None)
+        self._nul_geschreven.discard(device.get("id", ""))
+        self._nul_gezien.discard(device.get("id", ""))
         await self._limit(device, control, decision.amps, 0)
 
         if charger.paused_by_balancer:
@@ -16035,6 +16145,8 @@ class ChargerCoach:
             self._ververst(device) and charger.connected
         ):
             self._pause_until.pop(device_id, None)
+            self._nul_geschreven.discard(device_id)
+            self._nul_gezien.discard(device_id)
             return True
 
         # Houdt de coach zelf op terwijl de paal nog laadt (`_niets_schrijven`
@@ -16046,6 +16158,8 @@ class ChargerCoach:
         blijvend = decision.rule in FOREVER_RULES or decision.rule in NO_WRITE_RULES
         minutes = 0 if blijvend else (decision.hold_minutes or 0)
         await self._limit(device, control, 0, minutes)
+        if not control.get("limit_entity"):
+            self._nul_geschreven.add(device_id)
 
         if minutes:
             self._pause_until[device_id] = now + timedelta(minutes=minutes)

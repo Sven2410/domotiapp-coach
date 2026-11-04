@@ -40,6 +40,7 @@ from .const import BATTERIJ_SCHEMA, EVENT_DECISION, EVENT_SETTINGS_UPDATED, HOLI
 from .entiteit import (
     CONTRACT, CoachEntiteit, apparaat_info, async_per_apparaat, entiteiten_van, met_zone,
     oude_coach_opruimen, paal_apparaat, paal_blokken, paal_modus_actief, paal_modus_keuzes, paal_schema, paal_sessie,
+    paal_velden,
     paal_stand, paal_tekst, accu_alleen_lezen, accu_apparaat, accu_capaciteit, accu_opgeleverd, accu_plan,
     accu_stand, programma_alleen_lezen,
     AIRCO_STAND_NAMEN, airco_stand, ruimte_naam,
@@ -310,6 +311,11 @@ class LaadpaalCoachSensor(CoachEntiteit, SensorEntity):
             # planning wint van Continu en Zon.
             "modus_actief": paal_modus_actief(st),
             "modus_keuzes": paal_modus_keuzes(st),
+            # Snel uit de app van de paal (v0.197.0): de bewoner drukte daar op hervatten terwijl de
+            # coach wachtte. Leeg als Snel van de kaart of het paneel kwam, of als er geen Snel is.
+            "modus_bron": "app" if st.get("boost_app") and paal_modus_actief(st) == "snel" else "",
+            # Wat de bewoner bij deze paal kan zetten (v0.197.0, `paal_velden`).
+            "velden": paal_velden(self._device),
             "planning_nu": bool(st.get("planned")),
             "pauze": bool(st.get("paused")),
             "expected_done": met_zone(plan.get("expected_done")),
