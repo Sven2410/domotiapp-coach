@@ -14802,6 +14802,164 @@ print(f"  het meten zelf: verwacht {verwacht236l}")
 controle("het meten zelf: het gemiddelde over de nacht (13,88), niet de 11,2 van vlak voor de zon",
          verwacht236l is not None and abs(verwacht236l - 13.877) < 0.01, f"{verwacht236l}")
 
+
+print("=== 237. hervat in de Easee-app terwijl de coach pauzeert: Snel voor de beurt (v0.197.0) ===")
+# Sven op 04-11-2026: "als de lader zichzelf pauzeert. En de klant drukt op de hervat knop in easee. Dan moet
+# de coach dat zien en dan meot de coach hem gaan laden. Ondanks dat het een duur moment is want de klant
+# kiest er immers zelf voor om hem te starten." De app zet de dynamische limiet van 0 op het maximum.
+T237 = dt.datetime(2026, 8, 18, 18, 20)
+
+
+def bouw237(paal=None):
+    inst = instellingen(devices=[paal or LAADPAAL])
+    inst["car_soc"] = [{"device": "dev-laadpaal", "car": "car-1", "percent": 40.0, "meter": 100.0}]
+    hass, _, coach = bouw(huis(status="awaiting_start", teruglevering=0.0, afname=800.0), inst)
+    return hass, inst, coach
+
+
+def gang237(hass, coach, inst, van, tot, paal=None):
+    uit = []
+    for m in range(van, tot):
+        b, v = asyncio.run(ronde(coach, inst, T237 + dt.timedelta(minutes=m), paal=paal))
+        uit.append((m, b["rule"], b.get("charge"), [d[2].get("current") for d in v if d[1] == "set_charger_dynamic_limit"],
+                    [d[2].get("message") for d in v if d[0] == "notify"]))
+    return uit
+
+
+def app237(hass, stand="14"):
+    # Wat de app doet: de limiet op het maximum, en de paal staat klaar.
+    hass.states.zet("sensor.laadpaal_dyn", stand)
+    hass.states.zet("sensor.laadpaal_status", "ready_to_charge")
+
+
+# 1. In de avondpiek wacht hij tot 20:00; de bewoner hervat om 18:28 in de app.
+hass237, inst237, coach237 = bouw237()
+voor237 = gang237(hass237, coach237, inst237, 0, 8)
+controle("eerst een pauze van de coach tot 20:00, met de 0 in de paal",
+         all(not r[2] for r in voor237) and voor237[0][3] == [0]
+         and coach237._pause_until.get("dev-laadpaal") == dt.datetime(2026, 8, 18, 20, 0), f"{voor237[:2]}")
+app237(hass237)
+na237 = gang237(hass237, coach237, inst237, 8, 14)
+b237 = coach237.state["dev-laadpaal"]
+print(f"  18:28 {na237[0][1]} {na237[0][3]}; 18:33 {b237['rule']}, boost {b237['boost']}, app {b237['boost_app']}")
+controle("de coach ziet het en laadt door op Snel, ook in de avondpiek",
+         all(r[2] and r[1].startswith("boost") for r in na237) and b237["boost"] and b237["boost_app"], f"{na237}")
+controle("en schrijft er geen 0 meer overheen", all(0 not in r[3] for r in na237), f"{[r[3] for r in na237]}")
+geschiedenis237 = [m["message"] for m in asyncio.run(hass237.data["domotiapp_coach"]["meldingen"].async_list())]
+controle("één regel in de geschiedenis, niet op de telefoon",
+         sum("Easee-app" in m for m in geschiedenis237) == 1 and not any("Easee-app" in m for r in na237 for m in r[4]),
+         f"{geschiedenis237}")
+controle("het staat bij de knoppen in de opslag, voor na een herstart",
+         any(r.get("device") == "dev-laadpaal" and r.get("boost") and r.get("boost_app")
+             for r in inst237.get("sessions") or []), f"{inst237.get('sessions')}")
+
+# Na een herstart blijft het Snel, en weet de kaart nog dat het uit de app kwam.
+coach237h = herstart213(hass237)
+coach237h._restore(inst237)
+h237 = gang237(hass237, coach237h, inst237, 15, 17)
+controle("na een herstart laadt hij door, nog steeds uit de app",
+         all(r[2] for r in h237) and coach237h.state["dev-laadpaal"]["boost_app"], f"{h237}")
+# Snel van de kaart uit en weer aan: dan is het niet meer uit de app.
+coach237h.async_mode("dev-laadpaal", "")
+coach237h.async_mode("dev-laadpaal", "snel")
+controle("Snel van de kaart is niet uit de app", "dev-laadpaal" not in coach237h._snel_app, "")
+
+
+# 2. Een pauze met een houdbaarheid die afloopt: de paal zet zijn eigen limiet terug, en dat is geen hervat.
+# Zo ging het in een klantwoning op 02-11-2026: om 21:58:37 een pauze van een minuut tot het blok van
+# 22:00, om 21:59:50 de limiet op 32 en om 21:59:54 de 0 van de coach weer.
+hass237b, inst237b, coach237b = bouw237()
+gang237(hass237b, coach237b, inst237b, 0, 3)
+coach237b._pause_until["dev-laadpaal"] = T237 + dt.timedelta(minutes=4)
+app237(hass237b)
+af237 = gang237(hass237b, coach237b, inst237b, 3, 6)
+controle("een pauze die (bijna) afloopt: geen Snel, en de 0 gaat er weer in",
+         not coach237b.state["dev-laadpaal"]["boost"] and 0 in af237[0][3], f"{af237}")
+
+
+# 3. Een herstart midden in de pauze: de coach weet niet wie de limiet zette.
+hass237c, inst237c, coach237c = bouw237()
+gang237(hass237c, coach237c, inst237c, 0, 3)
+coach237c = herstart213(hass237c)
+app237(hass237c)
+herst237 = gang237(hass237c, coach237c, inst237c, 3, 5)
+controle("na een herstart midden in de pauze: geen Snel", not coach237c.state["dev-laadpaal"]["boost"], f"{herst237}")
+
+
+# 4. De limiet viel even weg (een Easee die opnieuw opstart begint op zijn maximum).
+hass237d, inst237d, coach237d = bouw237()
+coach237d._limiet_van = {"sensor.laadpaal_dyn": "dev-laadpaal", "sensor.laadpaal_status": "dev-laadpaal"}
+coach237d._limieten = {"sensor.laadpaal_dyn"}
+gang237(hass237d, coach237d, inst237d, 0, 3)
+
+
+class Wissel237:
+    def __init__(self, entity, oud, nieuw):
+        self.data = {"entity_id": entity, "old_state": type("S", (), {"state": oud})(),
+                     "new_state": type("S", (), {"state": nieuw})()}
+
+
+coach237d._async_state_changed(Wissel237("sensor.laadpaal_dyn", "0", "unavailable"))
+coach237d._async_state_changed(Wissel237("sensor.laadpaal_dyn", "unavailable", "14"))
+app237(hass237d)
+weg237 = gang237(hass237d, coach237d, inst237d, 3, 5)
+controle("een limiet die even weg was en op het maximum terugkomt: geen Snel",
+         not coach237d.state["dev-laadpaal"]["boost"] and 0 in weg237[0][3], f"{weg237}")
+# Zonder dat wegvallen geeft dezelfde wissel meteen een ronde.
+coach237d._nul_gezien.add("dev-laadpaal")
+ververst237 = []
+coach237d.async_refresh = lambda: ververst237.append(1)
+coach237d._async_state_changed(Wissel237("sensor.laadpaal_dyn", "0", "14"))
+controle("de wissel van 0 naar het maximum geeft meteen een ronde", ververst237 == [1], f"{ververst237}")
+
+
+# 5. Een paal die zijn oude limiet nog even meldt: de coach pauzeert terwijl hij laadt, en de ronde erna staat
+# er nog 14. Dat is geen hervat, want de coach zag zijn 0 nooit.
+hass237e, inst237e, coach237e = bouw237()
+coach237e._nul_geschreven.add("dev-laadpaal")
+coach237e._pause_until["dev-laadpaal"] = T237 + dt.timedelta(minutes=90)
+hass237e.states.zet("sensor.laadpaal_dyn", "14")
+oud237 = gang237(hass237e, coach237e, inst237e, 0, 1)
+controle("een limiet die de 0 nog niet liet zien: geen Snel", not coach237e.state["dev-laadpaal"]["boost"], f"{oud237}")
+
+
+# 6. Een Alfen krijgt zijn limiet elke ronde, en heeft geen app die dit doet.
+ALFEN237 = dict(LAADPAAL, brand="alfen", entities=dict(LAADPAAL["entities"], limit="number.alfen_limiet"))
+hass237f, inst237f, coach237f = bouw237(ALFEN237)
+gang237(hass237f, coach237f, inst237f, 0, 3, ALFEN237)
+app237(hass237f)
+alfen237 = gang237(hass237f, coach237f, inst237f, 3, 5, ALFEN237)
+controle("een Alfen merkt er niets van", not coach237f.state["dev-laadpaal"]["boost"]
+         and "dev-laadpaal" not in coach237f._nul_geschreven, f"{alfen237}")
+
+
+# 7. De coach laadt zelf en iemand zet de limiet op 32: niets.
+hass237g, inst237g, coach237g = bouw237()
+hass237g.states.zet("sensor.laadpaal_status", "charging")
+hass237g.states.zet("sensor.laadpaal_stroom", "14")
+hass237g.states.zet("sensor.afname", "0")
+hass237g.states.zet("sensor.teruglevering", "5000")
+zelf237 = gang237(hass237g, coach237g, inst237g, -360, -357)
+hass237g.states.zet("sensor.laadpaal_dyn", "32")
+zelf237 += gang237(hass237g, coach237g, inst237g, -357, -355)
+controle("laadt de coach zelf, dan is een hogere limiet geen hervat",
+         zelf237[0][2] and not coach237g.state["dev-laadpaal"]["boost"], f"{zelf237}")
+
+
+# 8. Wat de kaart leest: modus_bron en velden.
+ent237 = sys.modules["domotiapp_coach.entiteit"]
+controle("velden: met Zonder accustand alleen de modus en de pauze, anders ook klaar-tijd, doel en schema",
+         ent237.paal_velden(dict(LAADPAAL, goedkoop_blok=True)) == ["modus", "pauze"]
+         and ent237.paal_velden(LAADPAAL) == ["klaar_tijd", "doel", "schema", "modus", "pauze"], "")
+hass237.data["domotiapp_coach"]["coach"] = coach237
+sensoren237 = []
+asyncio.run(sensormod.async_setup_entry(hass237, Invoer110(), lambda nieuw: sensoren237.extend(nieuw)))
+a237 = next(s for s in sensoren237 if s._attr_translation_key == "coach").extra_state_attributes
+print(f"  kaart: modus_actief {a237['modus_actief']}, modus_bron {a237['modus_bron']!r}, velden {a237['velden']}")
+controle("de kaart ziet Snel uit de app", a237["modus_actief"] == "snel" and a237["modus_bron"] == "app"
+         and a237["contract"] == 1, f"{a237['modus_actief']} {a237['modus_bron']}")
+
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

@@ -397,6 +397,20 @@ def paal_modus_keuzes(stand: dict[str, Any] | None) -> list[str]:
     return ["snel", "continu", "zon"]
 
 
+def paal_velden(device: dict[str, Any] | None) -> list[str]:
+    """Wat de bewoner bij deze paal kan zetten, voor de laadpaalkaart (v0.197.0).
+
+    Met Zonder accustand, in de goedkope uren (`goedkoop_blok`, v0.185.0) telt de klaar-tijd niet,
+    plant de coach niet naar een doel en geldt een schema niet; dan blijven alleen de modus (Snel,
+    Continu, Zon) en de pauze. Sven op 04-11-2026, over een kaart met een klaar-tijd en "laden tot":
+    "ik wil er niet in hebben dat ik dat kan aanvinken. alleen nu starten bijvoorbeeld." Dezelfde
+    grens als `klaarTijdTelt` in toepassing.js.
+    """
+    if (device or {}).get("goedkoop_blok"):
+        return ["modus", "pauze"]
+    return ["klaar_tijd", "doel", "schema", "modus", "pauze"]
+
+
 def paal_blokken(stand: dict[str, Any] | None) -> list[dict[str, Any]]:
     """De tijdlijn van de coachkaart, met tijden met zone."""
     blokken = ((stand or {}).get("plan_ahead") or {}).get("blocks") or []

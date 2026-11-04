@@ -1561,3 +1561,45 @@ Het virtuele huis heeft er een teller bij die zo achterloopt (`Paal(teller_achte
 laadbeurt controleert nu dat het verslag nooit minder noemt dan het geld, en niet meer dan het geld of de auto. Meer
 dan het geld kan wel: in `warmtepomp-nacht` (58 wissels van de limiet) loopt de eigen meting iets achter, en zegt het
 verslag met de teller 42,6 kWh bij 41,8 in het geld en 42,8 in de auto.
+
+## Hervat in de Easee-app: Snel voor de beurt (v0.197.0)
+
+De eigenaar op 04-11-2026: "als de lader zichzelf pauzeert. En de klant drukt op de hervat knop in easee. Dan moet de
+coach dat zien en dan moet de coach hem gaan laden. Ondanks dat het een duur moment is want de klant kiest er immers
+zelf voor om hem te starten." Tot dan zag `_following` een limiet boven de 0 terwijl het besluit "niet laden" was, en
+schreef hij binnen een ronde weer 0. De knop in de app deed dus niets.
+
+Hervatten in de app zet de dynamische limiet van de 0 van de coach op het maximum van de paal. `_app_hervat` ziet dat,
+en dan is het Snel voor deze beurt, net als de knop op de kaart: op vol vermogen, ook op een duur uur en in de
+avondpiek, tot de auto vol is of de kabel eruit gaat. De zekering en de groep gaan voor, zoals bij Snel altijd. Het
+staat bij de knoppen in de opslag (`boost_app`), dus na een herstart laadt hij door. In de geschiedenis één regel,
+niet op de telefoon: "Laadpaal: je startte het laden in de Easee-app. Hij laadt nu door tot de auto vol is."
+
+Een limiet die omhooggaat is niet altijd de app. Het telt alleen als:
+- **de coach die 0 zelf schreef en hem daarna ook zag staan** (`_nul_geschreven`, `_nul_gezien`). Een paal die na
+  een pauze nog een ronde zijn oude limiet meldt, is geen hervat.
+- **de pauze van de coach nog ruim geldt**: tot een minuut voor `_pause_until` (`APP_HERVAT_MARGE`). Een pauze met
+  een houdbaarheid die afloopt zet de limiet in de paal net zo goed op het maximum. In een klantwoning op
+  02-11-2026 ging het zo: om 21:58:37 een pauze van één minuut tot het blok van 22:00, om 21:59:50 de limiet op 32
+  en om 21:59:54 weer de 0 van de coach. Dat was de houdbaarheid, niet de app, en het blijft zo.
+- **de limiet en de status er al die tijd waren** (`_async_state_changed`). Een Easee die opnieuw opstart begint
+  ook op zijn maximum; een limiet of status die even `unavailable` was, of een status met een storing, telt dan niet.
+
+Na een herstart van de coach midden in een pauze weet hij niet wie de limiet zette, en doet hij wat hij altijd deed.
+Een Alfen krijgt zijn limiet elke ronde opnieuw en heeft geen app die dit doet; daar verandert niets. Een limiet die
+van de 0 omhooggaat krijgt meteen een ronde, dus de auto begint binnen een paar seconden.
+
+**Wat er overblijft:** start een Easee opnieuw zonder dat Home Assistant een `unavailable` ziet, dan leest dat als een
+hervat in de app, en laadt hij die beurt op Snel. Gezien is dat nog niet.
+
+Voor de laadpaalkaart van DomotiApp Lovelace twee attributen erbij op de sensor van de paal, `CONTRACT` blijft 1:
+- `modus_bron`: `"app"` als Snel uit de app kwam, anders leeg.
+- `velden`: wat de bewoner bij deze paal kan zetten (`paal_velden` in entiteit.py). Met Zonder accustand, in de
+  goedkope uren (`goedkoop_blok`) alleen `modus` en `pauze`: geen klaar-tijd, geen doel en geen schema, want die
+  gelden dan niet. Anders `klaar_tijd`, `doel`, `schema`, `modus`, `pauze`. Dezelfde grens als `klaarTijdTelt` in
+  toepassing.js. De eigenaar op 04-11-2026, over een kaart die bij zo'n paal een klaar-tijd en "laden tot" liet zien:
+  "ik wil er niet in hebben dat ik dat kan aanvinken. alleen nu starten bijvoorbeeld."
+
+Proef 237 in test_coach.py: hervat in de avondpiek, een herstart erna, Snel van de kaart, een pauze die afloopt, een
+herstart midden in de pauze, een limiet die even weg was, een paal die zijn 0 nog niet liet zien, een Alfen, een
+coach die zelf laadt, en wat de kaart leest.

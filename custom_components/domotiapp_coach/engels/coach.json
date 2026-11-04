@@ -271,5 +271,6 @@
   "De accustand van {auto} blijft op {stand}% staan, terwijl er {kwh} kWh in ging. Waarschijnlijk wordt hij niet meer bijgewerkt. Tot hij weer iets meldt, rekent de coach zonder.": "The battery level of {auto} stays at {stand}%, while {kwh} kWh went in. It is probably no longer being updated. Until it reports again, the coach works without it.",
   "De integratie {naam} vraagt om opnieuw in te loggen. Doe dat in Home Assistant bij Instellingen, Apparaten en diensten.": "The {naam} integration asks you to sign in again. Do that in Home Assistant under Settings, Devices & services.",
   "Dit is geen leesbaar bestand.": "This is not a readable file.",
-  "Hij rekent met {pct}% meer zon dan voorspeld: de voorspelling zat de afgelopen {dagen} dagen vaak te laag.": "It counts on {pct}% more sun than forecast: the forecast was often too low over the past {dagen} days."
+  "Hij rekent met {pct}% meer zon dan voorspeld: de voorspelling zat de afgelopen {dagen} dagen vaak te laag.": "It counts on {pct}% more sun than forecast: the forecast was often too low over the past {dagen} days.",
+  "{naam}: je startte het laden in de Easee-app. Hij laadt nu door tot de auto vol is.": "{naam}: you started charging in the Easee app. It now charges until the car is full."
 }
