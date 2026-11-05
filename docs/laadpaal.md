@@ -1589,6 +1589,22 @@ Na een herstart van de coach midden in een pauze weet hij niet wie de limiet zet
 Een Alfen krijgt zijn limiet elke ronde opnieuw en heeft geen app die dit doet; daar verandert niets. Een limiet die
 van de 0 omhooggaat krijgt meteen een ronde, dus de auto begint binnen een paar seconden.
 
+**Alleen het maximum, en niet als er iets anders meestuurt (v0.197.1).** In de woning van de eigenaar op 05-11-2026, op v0.197.0, zette slim
+laden van Easee zelf (de schakelaar in de app) de limiet om 09:22:23 op 6 A, 14 s na het inpluggen, en daarna steeds
+binnen 3 tot 35 s na elke 16 van de coach. v0.197.0 las de sprong van zijn 0 naar 6 als een hervat in de app en zette
+twee keer Snel aan, de tweede keer 18 s nadat de eigenaar het uitzette: "Ik had snelladen uitgezet en wordt automatisch
+weer aangezet en nu laad hij 1 fases en allemaal ongein check alles en repareer". Nu:
+- telt alleen een sprong naar het maximum van de paal (`max_limit`, op een halve ampère). Zonder dat maximum telt het
+  niet.
+- verschijnt er deze beurt een limiet die niet van de coach is (niet bij zijn laatste drie opdrachten, `_geschreven`),
+  geen 0 en niet het maximum, dan stuurt er iets anders mee (`_vreemde_limiet`, met een regel in het log). Dan is ook
+  het maximum geen hervat meer, tot de kabel eruit gaat.
+- zet de bewoner Snel uit, dan telt pas een 0 die de coach daarna ziet staan, en dan het maximum. Een limiet die nog
+  van voor zijn keuze is zet Snel niet terug.
+
+Proef 238 in test_coach.py. Wat er thuis verder gebeurde (de coach en slim laden die om de limiet vechten, de
+fasemelding die de groep niet noemt) staat op de werkbon voor een volgende uitgave.
+
 **Wat er overblijft:** start een Easee opnieuw zonder dat Home Assistant een `unavailable` ziet, dan leest dat als een
 hervat in de app, en laadt hij die beurt op Snel. Gezien is dat nog niet.
 

@@ -1858,6 +1858,12 @@ class ChargerCoach:
         # terugzag. Alleen in het geheugen: na een herstart weet de coach niet wie de limiet zette.
         self._nul_geschreven: set[str] = set()
         self._nul_gezien: set[str] = set()
+        # De laatste limieten die de coach zelf in een Easee schreef, en de palen waar deze beurt een limiet
+        # verscheen die niet van de coach was en niet het maximum (v0.197.1): daar stuurt iets anders mee,
+        # zoals slim laden van Easee zelf, en dan is een limiet die omhooggaat geen hervat in de app.
+        self._geschreven: dict[str, list[float]] = {}
+        self._vreemde_limiet: set[str] = set()
+        self._paal_max: dict[str, str] = {}
         # Van welke paal een dynamische limiet of een status is, en welke daarvan de limiet zijn, voor
         # `_async_state_changed`.
         self._limiet_van: dict[str, str] = {}
@@ -4031,6 +4037,7 @@ class ChargerCoach:
             if new.state in weg or old is None or old.state in weg or "error" in new.state:
                 self._nul_gezien.discard(paal)
             if entity in self._limieten:
+                self._vreemde_limiet_zien(paal, new.state)
                 if paal in self._nul_gezien and old is not None and old.state != new.state:
                     self.async_refresh()
                 return
@@ -4183,6 +4190,9 @@ class ChargerCoach:
         }
         self._limieten = {
             entity for device in chargers if (entity := (device.get("entities") or {}).get("dynamic_limit"))
+        }
+        self._paal_max = {
+            device.get("id", ""): entity for device in chargers if (entity := (device.get("entities") or {}).get("max_limit"))
         }
         self._watch(
             {
@@ -9899,6 +9909,8 @@ class ChargerCoach:
             self._snel_app.discard(device_id)
             self._nul_geschreven.discard(device_id)
             self._nul_gezien.discard(device_id)
+            self._geschreven.pop(device_id, None)
+            self._vreemde_limiet.discard(device_id)
             self._modus.pop(device_id, None)
             self._doel.pop(device_id, None)
             self._rend_start.pop(device_id, None)
@@ -10234,7 +10246,9 @@ class ChargerCoach:
         - de pauze van de coach nog ruim geldt (`APP_HERVAT_MARGE`), want een pauze met een
           houdbaarheid die afloopt zet de limiet net zo goed terug;
         - de limiet en de status er al die tijd waren (`_async_state_changed`): een Easee die
-          opnieuw opstart begint ook op zijn maximum.
+          opnieuw opstart begint ook op zijn maximum;
+        - de limiet naar het maximum van de paal gaat, en er deze beurt geen limiet verscheen die niet
+          van de coach was (`_vreemde_limiet`, v0.197.1): dan stuurt er iets anders mee.
         Na een herstart van de coach weet hij niet wie de limiet zette, en doet hij niets. Een Alfen
         krijgt zijn limiet elke ronde opnieuw en heeft geen app die dit doet.
         """
@@ -10251,11 +10265,38 @@ class ChargerCoach:
         if limiet < 0.5:
             self._nul_gezien.add(device_id)
             return False
+        self._vreemde_limiet_zien(device_id, str(limiet), (device.get("entities") or {}).get("max_limit"))
         gezien = device_id in self._nul_gezien
         self._nul_gezien.discard(device_id)
         einde = self._pause_until.get(device_id)
         geldt = einde is None or now < einde - APP_HERVAT_MARGE
-        return gezien and geldt and limiet >= MIN_AMPS and device_id not in self._boost
+        # Alleen het maximum van de paal (v0.197.1). Bij de eigenaar op 05-11-2026 zette slim laden van Easee zelf de
+        # limiet op 6 A, en v0.197.0 las dat als een hervat: twee keer Snel, de tweede keer 18 s nadat de
+        # eigenaar het uitzette. Zonder een maximum om naast te leggen telt het niet.
+        maximum = _number(self.hass, (device.get("entities") or {}).get("max_limit"))
+        return (gezien and geldt and maximum is not None and limiet >= max(MIN_AMPS, maximum - 0.5)
+                and device_id not in self._vreemde_limiet and device_id not in self._boost)
+
+    @callback
+    def _vreemde_limiet_zien(self, device_id: str, stand: str, max_entiteit: str | None = None) -> None:
+        """Een limiet in een Easee die de coach niet schreef en die niet het maximum is (v0.197.1).
+
+        Een 0 is een pauze, en het maximum kan de app zijn of een houdbaarheid die afloopt; alles daartussen
+        dat niet bij de laatste drie opdrachten van de coach hoort, zette iets anders erin. Thuis op
+        05-11-2026 was dat slim laden van Easee: 6 A, binnen 3 tot 35 s na elke 16 van de coach.
+        """
+        try:
+            waarde = float(stand)
+        except (TypeError, ValueError):
+            return
+        maximum = _number(self.hass, max_entiteit or self._paal_max.get(device_id))
+        geschreven = self._geschreven.get(device_id)
+        if (waarde < 0.5 or not geschreven or (maximum is not None and waarde >= maximum - 0.5)
+                or any(abs(waarde - eigen) < 0.5 for eigen in geschreven)):
+            return
+        if device_id not in self._vreemde_limiet:
+            _LOGGER.info("%s: de limiet staat op %s A, en die schreef de coach niet; iets anders stuurt mee", device_id, stand)
+        self._vreemde_limiet.add(device_id)
 
     async def _async_app_hervat(self, device: dict[str, Any]) -> None:
         """Snel voor deze beurt, omdat de bewoner in de app op hervatten drukte."""
@@ -15838,6 +15879,7 @@ class ChargerCoach:
             self._paused.discard(device_id)
         else:
             self._boost.discard(device_id)
+            self._nul_gezien.discard(device_id)
         self._snel_app.discard(device_id)
         self._remember(device_id)
         self.async_refresh()
@@ -15876,6 +15918,9 @@ class ChargerCoach:
             return
         self._boost.discard(device_id)
         self._snel_app.discard(device_id)
+        # Wat de bewoner kiest wint (v0.197.1): pas een 0 die de coach daarna ziet staan, en dan een sprong
+        # naar het maximum, is weer een hervat in de app.
+        self._nul_gezien.discard(device_id)
         if mode in MODI_ZONDER_SOM or mode == "goedkoopst":
             self._modus[device_id] = mode
         else:
@@ -16016,6 +16061,8 @@ class ChargerCoach:
                 {"entity_id": self._stuuradres(device, control), control["limit_field"]: amps},
             )
             return
+        geschreven = self._geschreven.setdefault(device.get("id", ""), [])
+        geschreven[:] = [*geschreven[-2:], float(amps)]
         await self._paal_dienst(
             domain,
             service,
