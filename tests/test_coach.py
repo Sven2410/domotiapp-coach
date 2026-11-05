@@ -14960,6 +14960,93 @@ controle("de kaart ziet Snel uit de app", a237["modus_actief"] == "snel" and a23
          and a237["contract"] == 1, f"{a237['modus_actief']} {a237['modus_bron']}")
 
 
+
+print("=== 238. slim laden van Easee zet de limiet op 6 A: geen hervat in de app (v0.197.1) ===")
+# In de woning van de eigenaar op 05-11-2026, op v0.197.0. De eigenaar: "Ik had snelladen uitgezet en wordt automatisch weer aangezet en
+# nu laad hij 1 fases en allemaal ongein check alles en repareer". Slim laden van Easee ging om 09:22:22 aan en
+# zette de limiet op 6 A, binnen 3 tot 35 s na elke 16 van de coach; `_app_hervat` las 0 -> 6 als een hervat.
+
+# 1. Een 0 van de coach, dan 6 A van buiten: geen Snel.
+hass238, inst238, coach238 = bouw237()
+gang237(hass238, coach238, inst238, 0, 3)
+app237(hass238, "6")
+zes238 = gang237(hass238, coach238, inst238, 3, 5)
+controle("een 0 van de coach en dan 6 A van buiten: geen Snel, en de 0 gaat er weer in",
+         not coach238.state["dev-laadpaal"]["boost"] and 0 in zes238[0][3], f"{zes238}")
+controle("en de coach weet dat er iets anders meestuurt", "dev-laadpaal" in coach238._vreemde_limiet, "")
+# Komt daarna in dezelfde beurt het maximum, dan is dat ook geen hervat: er stuurt iets anders mee.
+app237(hass238, "14")
+max238 = gang237(hass238, coach238, inst238, 5, 7)
+controle("daarna het maximum in dezelfde beurt: nog steeds geen Snel", not coach238.state["dev-laadpaal"]["boost"],
+         f"{max238}")
+# Kabel eruit en weer erin: een nieuwe beurt, en dan telt een hervat weer.
+hass238.states.zet("sensor.laadpaal_status", "disconnected")
+gang237(hass238, coach238, inst238, 7, 9)
+hass238.states.zet("sensor.laadpaal_status", "awaiting_start")
+hass238.states.zet("sensor.laadpaal_dyn", "6")
+gang237(hass238, coach238, inst238, 9, 13)
+app237(hass238, "14")
+nieuw238 = gang237(hass238, coach238, inst238, 13, 15)
+controle("een nieuwe beurt begint schoon: het maximum is dan weer een hervat",
+         coach238.state["dev-laadpaal"]["boost"] and "dev-laadpaal" not in coach238._vreemde_limiet, f"{nieuw238}")
+
+# 2. Zoals thuis: de coach schrijft 14, Easee zet 6, de coach pauzeert, en Easee zet weer 6.
+hass238b, inst238b, coach238b = bouw237()
+coach238b._limiet_van = {"sensor.laadpaal_dyn": "dev-laadpaal", "sensor.laadpaal_status": "dev-laadpaal"}
+coach238b._limieten = {"sensor.laadpaal_dyn"}
+coach238b._paal_max = {"dev-laadpaal": "sensor.laadpaal_max"}
+coach238b._geschreven["dev-laadpaal"] = [14.0]
+coach238b._async_state_changed(Wissel237("sensor.laadpaal_dyn", "14", "6"))
+controle("de wissel van 14 naar 6 die de coach niet schreef wordt gezien", "dev-laadpaal" in coach238b._vreemde_limiet, "")
+coach238b._vreemde_limiet.clear()
+coach238b._async_state_changed(Wissel237("sensor.laadpaal_dyn", "0", "14"))
+coach238b._async_state_changed(Wissel237("sensor.laadpaal_dyn", "14", "0"))
+controle("het maximum en een 0 zijn geen andere sturing", "dev-laadpaal" not in coach238b._vreemde_limiet, "")
+coach238b._geschreven["dev-laadpaal"] = [14.0, 9.0]
+coach238b._async_state_changed(Wissel237("sensor.laadpaal_dyn", "0", "9"))
+controle("een limiet die de coach zelf schreef ook niet", "dev-laadpaal" not in coach238b._vreemde_limiet, "")
+
+# 3. De bewoner zet Snel uit: de coach zet het niet uit zichzelf weer aan.
+hass238c, inst238c, coach238c = bouw237()
+gang237(hass238c, coach238c, inst238c, 0, 3)
+app237(hass238c)
+gang237(hass238c, coach238c, inst238c, 3, 5)
+controle("eerst een echte hervat: Snel", coach238c.state["dev-laadpaal"]["boost"], "")
+coach238c.async_mode("dev-laadpaal", "")
+uit238 = gang237(hass238c, coach238c, inst238c, 5, 6)
+controle("de bewoner zet Snel uit: dan is Snel uit", not coach238c.state["dev-laadpaal"]["boost"]
+         and not uit238[0][1].startswith("boost"), f"{uit238}")
+# Staat er nog het maximum op het moment van zijn keuze (de paal meldt de 0 pas later), dan geen Snel: pas een
+# 0 die de coach ná zijn keuze ziet telt weer.
+coach238c.async_mode("dev-laadpaal", "snel")
+coach238c._boost.discard("dev-laadpaal")
+coach238c._nul_geschreven.add("dev-laadpaal")
+coach238c._nul_gezien.add("dev-laadpaal")
+coach238c.async_mode("dev-laadpaal", "")
+hass238c.states.zet("sensor.laadpaal_dyn", "14")
+nu238 = T237 + dt.timedelta(minutes=7)
+paal238 = coach238c._read(nu238, inst238c, LAADPAAL)[2]
+controle("het maximum dat er nog stond na zijn keuze: geen hervat",
+         coach238c._app_hervat(LAADPAAL, paal238, nu238) is False, "")
+
+# 5. De coach laadde eerder zelf op 6 A, pauzeerde, en dan zet iets anders weer 6: dat is geen maximum, dus geen Snel.
+hass238e, inst238e, coach238e = bouw237()
+gang237(hass238e, coach238e, inst238e, 0, 3)
+coach238e._geschreven["dev-laadpaal"] = [6.0, 0.0]
+app237(hass238e, "6")
+eigen238 = gang237(hass238e, coach238e, inst238e, 3, 4)
+controle("een limiet die de coach eerder zelf schreef, maar niet het maximum: geen Snel",
+         not coach238e.state["dev-laadpaal"]["boost"], f"{eigen238}")
+
+# 4. Een paal zonder maximum om naast te leggen: geen Snel.
+ZONDER238 = dict(LAADPAAL, entities={k: v for k, v in LAADPAAL["entities"].items() if k != "max_limit"})
+hass238d, inst238d, coach238d = bouw237(ZONDER238)
+gang237(hass238d, coach238d, inst238d, 0, 3, ZONDER238)
+app237(hass238d, "16")
+zonder238 = gang237(hass238d, coach238d, inst238d, 3, 5, ZONDER238)
+controle("zonder het maximum van de paal: geen Snel", not coach238d.state["dev-laadpaal"]["boost"], f"{zonder238}")
+
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
