@@ -2491,3 +2491,29 @@ tellen naast een eigen dag, een recorder die er nog niet is, één keer ook over
 en de zin op de kaart in dezelfde ronde; de klantwoning van 03-11 (zes dagen en `zon_terug` al gezet: om 15:00
 nog niet, om 20:10 wel, en niet elk kwartier); en het meten zelf met een verwachting die om 04:00 van 16,6 naar 11,2 gaat,
 over een herstart om 02:00 (13,88).
+
+
+## Even weg is geen andere sturing (v0.199.0)
+
+Bij de eigenaar op 29-10-2026 om 03:12 en opnieuw op 05-11-2026 om 03:52 viel het netwerk ruim een minuut weg. De
+Anker deed zelf nul op de meter. Zijn accustand, zijn modus en zijn stuurknop werden `unavailable`, de coach besloot
+standby ("De coach weet niet hoe vol de batterij is") en nam hem over, "want het plan zegt standby". Die overname
+schreef de modus aan een onbereikbare select, en Home Assistant slaat zo'n dienst zonder melding over. Toen de Anker
+terugkwam op zijn eigen stand, telde de coach dat na twee ronden als een andere sturing: een kritieke melding "Iets
+anders stuurt Batterij" om kwart voor vier, en een uur niet gestuurd. Er stuurde niets anders.
+
+Nu:
+- **Een batterij die zelf nul doet en even helemaal weg is, houdt haar eigen stand.** Zolang de accustand weg is, of
+  het besluit van de ronde nog zonder accustand is genomen (`geen-accustand`), neemt de coach haar niet over
+  (`_async_regel`). Er valt dan toch niets te schrijven. Daarna beslist hij gewoon opnieuw. Blijft de accustand weg,
+  dan doet de batterij wat ze zelf doet: nul op de meter.
+- **"Iets anders stuurt" telt alleen als de modus van de coach aankwam.** Schreef hij zijn modus terwijl de select
+  onbereikbaar was (`modus_gezien` in de sessie, gezet in `_async_batterij_modus`), dan is een andere stand daarna
+  geen andere sturing. Hij schrijft de modus dan opnieuw zodra de select er weer is, met een regel in het log, hooguit
+  `VREEMD_RONDEN` keer. Zet iets anders hem daarna nog steeds terug, dan telt het zoals altijd.
+- Na een herstart weet de coach niet wat hij zag, en telt het zoals voorheen (proef 86, 140 en 214).
+
+Proef 240 in test_coach.py: een Anker die zelf nul doet en een minuut helemaal weg is (geen overname, niets
+geschreven, ook niet bij een tik van de meter met de accustand terug terwijl het besluit nog zonder is), een modus die
+niet aankwam en opnieuw geschreven wordt zonder melding, en iets anders dat hem steeds terugzet (wel de melding). Elke
+beveiliging is met een mutatie nagekeken.

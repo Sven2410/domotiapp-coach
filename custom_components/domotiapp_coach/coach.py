@@ -8027,6 +8027,21 @@ class ChargerCoach:
             wil = ((device.get("battery") or {}).get(welke) or "").strip()
             staat = self.hass.states.get(modus_entity) if modus_entity else None
             anders = bool(wil) and staat is not None and staat.state not in ("unknown", "unavailable") and staat.state != wil
+            # Alleen als de coach zijn modus sinds zijn laatste opdracht ook zag staan (v0.199.0). Bij de eigenaar
+            # op 29-10 en 05-11-2026 viel het netwerk ruim een minuut weg; de coach nam de Anker over terwijl de
+            # select onbereikbaar was, die opdracht kwam nooit aan, en toen de Anker op zijn eigen stand terugkwam
+            # telde dat als een andere sturing: een kritieke melding om kwart voor vier en een uur niet gestuurd.
+            # Kwam de modus niet aan, dan schrijft hij hem opnieuw; pas als hij na `VREEMD_RONDEN` keer
+            # opnieuw schrijven nog niet blijft staan, telt het.
+            if bool(wil) and staat is not None and staat.state == wil:
+                sessie["modus_gezien"] = True
+                sessie["modus_opnieuw"] = 0
+            elif anders and not sessie.get("modus_gezien", True) and sessie.get("modus_opnieuw", 0) < VREEMD_RONDEN:
+                sessie["modus_opnieuw"] = sessie.get("modus_opnieuw", 0) + 1
+                _LOGGER.info("%s: de modus %s kwam niet aan, hij staat op %s; de coach schrijft hem opnieuw",
+                             device_id, wil, staat.state)
+                await self._async_batterij_modus(device, welke)
+                anders = False
             sessie["modus_anders"] = sessie.get("modus_anders", 0) + 1 if anders else 0
             if sessie["modus_anders"] >= VREEMD_RONDEN:
                 sessie["stuurt"] = False
@@ -8274,13 +8289,23 @@ class ChargerCoach:
             ruimte_w = self._laadruimte_w(settings, device, batterij_w, hoger)
             if self._zelf_instelling(device) or sessie.get("zelf"):
                 extern_tot = sessie.get("volgt_extern_tot")
-                waarom = t("hij volgde zijn eigen stand niet") if extern_tot is not None and nu < extern_tot else self._zelf_niet(
-                    device, besluit, b, batterij_w, ruimte_w,
-                    # Zonder wat een ander toezegde, en of dat een laadpaal was:
-                    # dan is het niet de zekering maar de paal die gaat laden.
-                    kaal_w=self._laadruimte_w(settings, device, batterij_w) if hoger else None,
-                    paal_belooft=self._paal_belooft(settings),
-                )
+                if extern_tot is not None and nu < extern_tot:
+                    waarom = t("hij volgde zijn eigen stand niet")
+                elif (sessie.get("zelf") and (soc is None or besluit.rule == "geen-accustand")
+                      and self._zelf_instelling(device)):
+                    # Een batterij die zelf nul doet en even helemaal weg is (v0.199.0), houdt haar eigen stand
+                    # tot de accustand er weer is, en tot de ronde daarna opnieuw besliste: er valt dan toch niets
+                    # te schrijven, en wat de coach schrijft komt niet aan. Bij de eigenaar op 29-10 en 05-11-2026 nam hij de Anker zo over, "want het
+                    # plan zegt standby", en las hij de terugkomst als een andere sturing.
+                    waarom = None
+                else:
+                    waarom = self._zelf_niet(
+                        device, besluit, b, batterij_w, ruimte_w,
+                        # Zonder wat een ander toezegde, en of dat een laadpaal was:
+                        # dan is het niet de zekering maar de paal die gaat laden.
+                        kaal_w=self._laadruimte_w(settings, device, batterij_w) if hoger else None,
+                        paal_belooft=self._paal_belooft(settings),
+                    )
                 await self._async_zelf_wissel(device, sessie, nu, waarom)
                 if sessie.get("zelf"):
                     return
@@ -8590,6 +8615,11 @@ class ChargerCoach:
         if not entity or not keuze:
             return
         staat = self.hass.states.get(entity)
+        # Een keuze aan een onbereikbare select slaat Home Assistant zonder melding over (v0.199.0). Dan is wat er
+        # later staat geen andere sturing, tot de coach zijn modus wel ziet staan; zie `_one_batterij`.
+        sessie = self._batterij.get(device.get("id", ""))
+        if sessie is not None:
+            sessie["modus_gezien"] = staat is not None and staat.state not in ("unavailable", "unknown")
         if staat is not None and staat.state == keuze:
             return
         await self.hass.services.async_call(
