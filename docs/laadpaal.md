@@ -1602,8 +1602,8 @@ weer aangezet en nu laad hij 1 fases en allemaal ongein check alles en repareer"
 - zet de bewoner Snel uit, dan telt pas een 0 die de coach daarna ziet staan, en dan het maximum. Een limiet die nog
   van voor zijn keuze is zet Snel niet terug.
 
-Proef 238 in test_coach.py. Wat er thuis verder gebeurde (de coach en slim laden die om de limiet vechten, de
-fasemelding die de groep niet noemt) staat op de werkbon voor een volgende uitgave.
+Proef 238 in test_coach.py. Wat er bij de eigenaar verder gebeurde (de coach en slim laden die om de limiet vechten, de
+fasemelding die de groep niet noemt) kwam in v0.198.0, hieronder.
 
 **Wat er overblijft:** start een Easee opnieuw zonder dat Home Assistant een `unavailable` ziet, dan leest dat als een
 hervat in de app, en laadt hij die beurt op Snel. Gezien is dat nog niet.
@@ -1619,3 +1619,51 @@ Voor de laadpaalkaart van DomotiApp Lovelace twee attributen erbij op de sensor 
 Proef 237 in test_coach.py: hervat in de avondpiek, een herstart erna, Snel van de kaart, een pauze die afloopt, een
 herstart midden in de pauze, een limiet die even weg was, een paal die zijn 0 nog niet liet zien, een Alfen, een
 coach die zelf laadt, en wat de kaart leest.
+
+
+## Iets anders stuurt de Easee ook: één melding, en de coach vecht niet (v0.198.0)
+
+In de woning van de eigenaar op 05-11-2026 ging slim laden van Easee aan, 14 s na het inpluggen. Dat kwam via de cloud
+van Easee: in Home Assistant zonder gebruiker en zonder dienst, en de knop op de paal stond uit. Wie het aanzette is
+niet te zien. Daarna zette Easee de limiet van de paal binnen 3 tot 35 s terug op 6 A, elke keer dat de coach 16 A
+schreef, en de dynamische limiet van de groep op 16, 0 en 0 A. De auto laadde op één fase met ongeveer 1,3 kW, met
+elke minuut een paar seconden 16 A, en de coach meldde "zet de auto op eenfasig". Twee sturingen die om dezelfde
+limiet vechten, en een advies dat niet klopte.
+
+Nu doet de coach bij een Easee wat hij bij een batterij al deed (`VREEMD_RONDEN`, `VREEMD_PAUZE`):
+- **Slim laden van de paal zelf staat aan** (`_slim_laden`: een switch aan hetzelfde apparaat met `smart_charging` als
+  `translation_key` of aan het eind van de unique_id): dan laat de coach de paal los zolang het aanstaat. Staat het
+  uit, dan stuurt hij in de volgende ronde weer. Aan of uit geeft meteen een ronde.
+- **Een limiet van de coach wordt overschreven** door een die niet van hem is (niet bij zijn laatste drie opdrachten,
+  geen 0 en niet het maximum), twee keer (`_vreemd_aantal`, één keer per opdracht van de coach), of zo'n limiet
+  blijft `VREEMD_PROEF` (10 minuten) staan zonder dat de coach opnieuw schrijft: dan laat hij de paal een uur los.
+  Daarna schrijft hij weer. Wordt hij weer overschreven, dan weer een uur; blijft zijn limiet 10 minuten staan, dan
+  is het over en verdwijnt de tip.
+- **Loslaten** is: niets schrijven, ook geen 0. Behalve voor de zekering: is er geen ruimte (`no-room`), of geeft de
+  ander meer dan er onder de zekering en de groep past (`ceiling_amps` zonder het maximum van de auto), dan zet de
+  coach zijn besluit er toch in. Na het loslaten schrijft hij meteen, ook als zijn besluit niet veranderde.
+- **Eén kritieke melding per beurt** (de tip, `tipsoort` "vreemd"), zonder entiteit-id. Hij zegt wat er gebeurt en
+  niet wie het deed: "Slim laden staat aan in de Easee-app en stuurt hem ook. De coach laat hem los tot het uit
+  staat." of "Iets anders stuurt hem ook: de limiet gaat steeds naar 6 A, en dat doet de coach niet. De coach laat
+  hem los en probeert het elk uur opnieuw. Zet de andere sturing uit, zoals slim laden in de Easee-app." Deze tip gaat
+  voor de fasemelding: dan is het profiel van de auto niet de oorzaak.
+- Een keuze van de bewoner in de coach (de modus, Snel, de pauze) krijgt meteen een nieuwe poging, behalve tegen slim
+  laden van de paal zelf.
+- Geen hervat in de app (`_app_hervat`) zolang er iets anders meestuurt.
+- Het overleeft een herstart: wat de coach zag, sinds wanneer hij loslaat en de limiet staan bij de knoppen in de
+  opslag (`foreign`, `foreign_since`, `foreign_probe`, `foreign_amps`), en de melding gaat niet opnieuw.
+- Een Alfen krijgt zijn limiet elke ronde opnieuw en kent dit niet.
+
+**De fasemelding noemt de groep.** Geeft de dynamische limiet van de groep van een Easee maar op één fase stroom
+(`state_dynamicCircuitCurrentP1` tot en met `P3` op de entiteit van `circuit_limit`, `_groep_een_fase`), en laadt de
+auto op één fase terwijl het profiel driefasig zegt, dan zegt de coach: "Hij laadt op één fase, want de groep van de
+paal krijgt in de Easee maar op één fase stroom. Aan de auto ligt het niet; laat het profiel zoals het is." Zonder die
+attributen blijft de melding zoals hij was.
+
+Proef 239 in test_coach.py: de reeks van de eigenaar (twee keer overschreven, één melding, daarna niets geschreven), een
+herstart terwijl hij loslaat, een nieuwe poging na een uur, een keuze van de bewoner, de ander die weg is, een limiet
+die blijft staan, de zekering die voorgaat, slim laden aan en uit, een Alfen, en de fasemelding met en zonder de
+fasen van de groep. Elke beveiliging is met een mutatie nagekeken.
+
+**Wat er overblijft:** stuurt iets anders de paal alleen naar het maximum, dan ziet de coach dat niet als een tweede
+sturing (dat kan ook de app of een houdbaarheid die afloopt zijn). Gezien is dat nog niet.

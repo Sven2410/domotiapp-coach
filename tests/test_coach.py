@@ -15047,6 +15047,193 @@ zonder238 = gang237(hass238d, coach238d, inst238d, 3, 5, ZONDER238)
 controle("zonder het maximum van de paal: geen Snel", not coach238d.state["dev-laadpaal"]["boost"], f"{zonder238}")
 
 
+
+print("=== 239. iets anders stuurt de Easee ook: één melding, en de coach vecht niet om de limiet (v0.198.0) ===")
+# In de woning van de eigenaar op 05-11-2026 ging slim laden van Easee aan, via de cloud van Easee, en zette Easee
+# de limiet binnen 3 tot 35 s terug op 6 A, elke keer dat de coach 16 A schreef. Een minuut 16, dan weer 6.
+
+
+def ronde239(coach, inst, nu, paal=None, ander="6"):
+    # Zoals bij de eigenaar: wat de coach ook schrijft, de ander zet zijn eigen limiet er weer in.
+    b, v = asyncio.run(ronde(coach, inst, nu, paal=paal))
+    if ander is not None:
+        geschreven = [d for d in v if d[1] == "set_charger_dynamic_limit"]
+        if geschreven:
+            coach.hass.states.zet("sensor.laadpaal_dyn", ander)
+            coach._async_state_changed(Wissel237("sensor.laadpaal_dyn", str(geschreven[-1][2].get("current")), ander))
+    return b, v
+
+
+def gang239(coach, inst, van, tot, paal=None, ander="6"):
+    uit = []
+    for m in range(van, tot):
+        b, v = ronde239(coach, inst, T237 + dt.timedelta(minutes=m), paal, ander)
+        uit.append((m, b["rule"], [d[2].get("current") for d in v if d[1] == "set_charger_dynamic_limit"],
+                    [d[2].get("message") for d in v if d[0] == "notify"], b.get("tip") or ""))
+    return uit
+
+
+def bouw239(paal=None):
+    hass, inst, coach = bouw237(paal)
+    # Geen ronde op de echte klok tussendoor: elke ronde hier heeft zijn eigen tijd.
+    coach.async_refresh = lambda *a, **k: None
+    hass.states.zet("sensor.afname", "0")
+    hass.states.zet("sensor.teruglevering", "5000")
+    coach._limiet_van = {"sensor.laadpaal_dyn": "dev-laadpaal", "sensor.laadpaal_status": "dev-laadpaal"}
+    coach._limieten = {"sensor.laadpaal_dyn"}
+    coach._paal_max = {"dev-laadpaal": "sensor.laadpaal_max"}
+    coach.async_mode("dev-laadpaal", "snel")
+    return hass, inst, coach
+
+
+# 1. Snel: de coach schrijft 14, de ander zet 6. Na twee keer laat de coach los, met één melding.
+hass239, inst239, coach239 = bouw239()
+asyncio.run(coach239._async_geheugen_laden())
+ronde239(coach239, inst239, T237)
+hass239.states.zet("sensor.laadpaal_status", "charging")
+hass239.states.zet("sensor.laadpaal_stroom", "6")
+begin239 = gang239(coach239, inst239, 1, 16)
+los239 = next((r[0] for r in begin239 if r[4].startswith("Iets anders")), 0)
+for r in begin239[:3] + begin239[-2:]:
+    print(f"  {r[0]:>3} {r[1]} {r[2]} {r[3]} {r[4][:60]!r}")
+los239 = next((r[0] for r in begin239 if r[4].startswith("Iets anders")), None)
+meldingen239 = [m for r in begin239 for m in r[3] if "Iets anders" in m]
+controle("de coach ziet een tweede sturing en zegt het één keer, kritiek",
+         los239 is not None and len(meldingen239) == 1 and "dev-laadpaal" in coach239._vreemd_los, f"{begin239}")
+controle("de melding noemt de limiet en geen entiteit", "6 A" in meldingen239[0] and "sensor." not in meldingen239[0]
+         if meldingen239 else False, f"{meldingen239}")
+controle("daarna schrijft de coach niets meer: geen gevecht",
+         los239 is not None and all(not r[2] for r in begin239 if r[0] > los239), f"{[(r[0], r[2]) for r in begin239]}")
+controle("en geen Snel uit de app", "dev-laadpaal" not in coach239._snel_app, "")
+geschiedenis239 = [m["message"] for m in asyncio.run(hass239.data["domotiapp_coach"]["meldingen"].async_list())]
+controle("in de geschiedenis één keer", sum("Iets anders stuurt" in m for m in geschiedenis239) == 1, f"{geschiedenis239}")
+controle("bewaard voor na een herstart", any(r.get("device") == "dev-laadpaal" and r.get("foreign") == "limiet"
+                                              and r.get("foreign_since") for r in inst239.get("sessions") or []),
+         f"{inst239.get('sessions')}")
+
+# 2. Een herstart terwijl hij loslaat: hij blijft loslaten en meldt het niet opnieuw.
+coach239._meldingen_onthouden()
+coach239h = herstart213(hass239)
+asyncio.run(coach239h._async_geheugen_laden())
+coach239h._restore(inst239)
+coach239h.async_refresh = lambda *a, **k: None
+coach239h._limiet_van, coach239h._limieten, coach239h._paal_max = coach239._limiet_van, coach239._limieten, coach239._paal_max
+herst239 = gang239(coach239h, inst239, 20, 25)
+controle("na een herstart: nog steeds los, geen limiet en geen nieuwe melding",
+         all(not r[2] and not any("Iets anders" in m for m in r[3]) for r in herst239)
+         and herst239[-1][4].startswith("Iets anders"), f"{herst239}")
+
+# 3. Na een uur probeert hij het opnieuw; de ander zet weer 6, en dan weer los, zonder tweede melding.
+uur239 = gang239(coach239h, inst239, los239 + 60, los239 + 75)
+schrijf239 = [r for r in uur239 if r[2]]
+print(f"  na een uur: geschreven om {[(r[0], r[2]) for r in schrijf239]}")
+controle("na een uur schrijft hij weer", bool(schrijf239) and schrijf239[0][0] == los239 + 60, f"{uur239}")
+controle("en laat hij weer los, zonder een tweede melding",
+         "dev-laadpaal" in coach239h._vreemd_los and not any("Iets anders" in m for r in uur239 for m in r[3]),
+         f"{uur239}")
+
+# 4. Een keuze van de bewoner in de coach krijgt een nieuwe poging.
+controle("voor de keuze van de bewoner laat hij nog los", "dev-laadpaal" in coach239h._vreemd_los, "")
+coach239h.async_mode("dev-laadpaal", "")
+coach239h.async_mode("dev-laadpaal", "snel")
+keuze239 = gang239(coach239h, inst239, los239 + 80, los239 + 81)
+controle("Snel van de kaart: de coach schrijft meteen weer", bool(keuze239[0][2]), f"{keuze239}")
+
+# 5. De ander is weg: na een nieuwe poging blijft de limiet van de coach staan, en dan gaat de tip weg.
+coach239h._vreemd_los["dev-laadpaal"] = T237 + dt.timedelta(minutes=los239 + 30)
+weg239 = gang239(coach239h, inst239, los239 + 90, los239 + 102, ander=None)
+controle("de ander is weg: de coach stuurt weer en de tip verdwijnt",
+         bool(weg239[0][2]) and "dev-laadpaal" not in coach239h._vreemd_gezien and not weg239[-1][4].startswith("Iets"),
+         f"{weg239}")
+
+# 6. Een limiet die niet van de coach is en blijft staan, zonder dat de coach opnieuw schrijft, telt ook.
+hass239b, inst239b, coach239b = bouw239()
+asyncio.run(ronde(coach239b, inst239b, T237))
+hass239b.states.zet("sensor.laadpaal_status", "charging")
+hass239b.states.zet("sensor.laadpaal_stroom", "6")
+hass239b.states.zet("sensor.laadpaal_dyn", "6")
+stil239 = gang239(coach239b, inst239b, 1, 15, ander=None)
+controle("een vreemde limiet die blijft staan: na een poos ook los",
+         "dev-laadpaal" in coach239b._vreemd_los or any(r[4].startswith("Iets") for r in stil239), f"{stil239}")
+
+# 7. De zekering gaat voor: geeft de ander meer dan er past, dan schrijft de coach toch.
+hass239c, inst239c, coach239c = bouw239()
+ronde239(coach239c, inst239c, T237)
+hass239c.states.zet("sensor.laadpaal_status", "charging")
+hass239c.states.zet("sensor.laadpaal_stroom", "6")
+gang239(coach239c, inst239c, 1, 16)
+controle("eerst los", "dev-laadpaal" in coach239c._vreemd_los, "")
+hass239c.states.zet("sensor.laadpaal_dyn", "13")
+hass239c.states.zet("sensor.laadpaal_stroom", "13")
+for fase in ("sensor.l1", "sensor.l2", "sensor.l3"):
+    hass239c.states.zet(fase, "30")
+zek239 = gang239(coach239c, inst239c, 20, 22, ander=None)
+print(f"  zekering: {[(r[1], r[2]) for r in zek239]}")
+controle("de ander geeft meer dan onder de zekering past: de coach schrijft toch",
+         any(r[2] and min(r[2]) < 13 for r in zek239), f"{zek239}")
+
+# 8. Slim laden van Easee zelf: de schakelaar staat aan, dan los tot hij uit staat.
+er239 = types.ModuleType("homeassistant.helpers.entity_registry")
+rij239 = types.SimpleNamespace(entity_id="switch.laadpaal_slim", translation_key="smart_charging",
+                               unique_id="SERIE_smart_charging")
+er239.async_get = lambda hass: None
+er239.async_entries_for_device = lambda register, apparaat: [rij239] if apparaat == "abc" else []
+oud239 = sys.modules.get("homeassistant.helpers.entity_registry")
+sys.modules["homeassistant.helpers.entity_registry"] = er239
+try:
+    controle("de schakelaar van slim laden wordt gevonden", coachmod.ChargerCoach._slim_laden_entiteit(
+        coach239, LAADPAAL) == "switch.laadpaal_slim", "")
+    controle("niet bij een Alfen", coachmod.ChargerCoach._slim_laden_entiteit(coach239, ALFEN237) is None, "")
+    hass239d, inst239d, coach239d = bouw239()
+    coach239d._slim_laden = {"dev-laadpaal": coach239d._slim_laden_entiteit(LAADPAAL)}
+    hass239d.states.zet("switch.laadpaal_slim", "on")
+    slim239 = gang239(coach239d, inst239d, 0, 3, ander=None)
+    controle("slim laden aan: meteen los, met de melding over slim laden, en niets geschreven",
+             coach239d._slim_laden == {"dev-laadpaal": "switch.laadpaal_slim"}
+             and all(not r[2] for r in slim239) and slim239[0][4].startswith("Slim laden")
+             and sum("Slim laden" in m for r in slim239 for m in r[3]) == 1, f"{slim239}")
+    hass239d.states.zet("switch.laadpaal_slim", "off")
+    uit239 = gang239(coach239d, inst239d, 3, 5, ander=None)
+    controle("slim laden uit: de coach stuurt meteen weer", bool(uit239[0][2]) and not uit239[-1][4], f"{uit239}")
+finally:
+    if oud239 is None:
+        sys.modules.pop("homeassistant.helpers.entity_registry", None)
+    else:
+        sys.modules["homeassistant.helpers.entity_registry"] = oud239
+
+# 9. Een Alfen kent dit niet: zijn limiet gaat elke ronde opnieuw.
+hass239e, inst239e, coach239e = bouw237(ALFEN237)
+coach239e.async_mode("dev-laadpaal", "snel")
+asyncio.run(ronde(coach239e, inst239e, T237, paal=ALFEN237))
+hass239e.states.zet("sensor.laadpaal_status", "charging")
+hass239e.states.zet("sensor.laadpaal_dyn", "6")
+alfen239 = gang239(coach239e, inst239e, 1, 15, paal=ALFEN237, ander=None)
+controle("een Alfen: nooit los", "dev-laadpaal" not in coach239e._vreemd_los
+         and not any(r[4].startswith("Iets") for r in alfen239), f"{alfen239}")
+
+# 10. De fasemelding: krijgt de groep in de Easee maar op één fase stroom, dan ligt het niet aan de auto.
+DRIE239 = dict(LAADPAAL, entities=dict(LAADPAAL["entities"], circuit_limit="sensor.laadpaal_groep"),
+               cars=[dict(LAADPAAL["cars"][0], phases="three")])
+hass239f, inst239f, coach239f = bouw237(DRIE239)
+inst239f["devices"] = [DRIE239]
+hass239f.states.zet("sensor.laadpaal_groep", {"state": "16", "attributes": {"state_dynamicCircuitCurrentP1": 16.0,
+                                                    "state_dynamicCircuitCurrentP2": 0.0,
+                                                    "state_dynamicCircuitCurrentP3": 0.0}})
+coach239f._fase_nu["dev-laadpaal"] = 1
+paal239 = types.SimpleNamespace(charging=True, max_amps=16.0)
+tip239 = coach239f._fasetip(inst239f, DRIE239, paal239)
+print(f"  fase: {tip239}")
+controle("de groep op één fase: de melding noemt de groep, en niet eenfasig zetten",
+         "groep" in tip239 and "eenfasig" not in tip239, tip239)
+hass239f.states.zet("sensor.laadpaal_groep", {"state": "16", "attributes": {"state_dynamicCircuitCurrentP1": 16.0,
+                                                    "state_dynamicCircuitCurrentP2": 16.0,
+                                                    "state_dynamicCircuitCurrentP3": 16.0}})
+tip239b = coach239f._fasetip(inst239f, DRIE239, paal239)
+controle("de groep op drie fasen: de oude melding over het profiel", "eenfasig" in tip239b, tip239b)
+hass239f.states.zet("sensor.laadpaal_groep", "16")
+controle("zonder de fasen van de groep: de oude melding", "eenfasig" in coach239f._fasetip(inst239f, DRIE239, paal239), "")
+
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
