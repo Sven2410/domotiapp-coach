@@ -389,6 +389,9 @@ REGEL_TIK = timedelta(seconds=5)
 # batterij los (iets anders stuurt), en na zoveel tijd probeert hij het weer.
 VREEMD_RONDEN = 2
 VREEMD_PAUZE = timedelta(hours=1)
+# Een Easee die iets anders ook stuurt (v0.198.0): een limiet die niet van de coach is en zo lang blijft
+# staan telt opnieuw, en een nieuwe poging van de coach die zo lang blijft staan, betekent dat het over is.
+VREEMD_PROEF = timedelta(minutes=10)
 # "De batterij doet zelf nul op de meter" (v0.97.0). De eigenaar op 24-09-2026:
 # "anker mag zelf nul op de meter doen", en erbij: "ook goed voor een vast
 # contract, want dan heb je niks aan het strategisch inkopen." Een batterij met
@@ -1864,6 +1867,19 @@ class ChargerCoach:
         self._geschreven: dict[str, list[float]] = {}
         self._vreemde_limiet: set[str] = set()
         self._paal_max: dict[str, str] = {}
+        # Een tweede sturing aan een Easee (v0.198.0). Hoe vaak deze beurt een limiet van de coach werd
+        # overschreven door een die niet van hem was (`_vreemd_aantal`, één keer per opdracht van de coach:
+        # `_vreemd_geteld`), de waarde die het werd, wat de coach zag (`_vreemd_gezien`: "slim" voor slim laden
+        # van Easee, "limiet" voor iets anders) en sinds wanneer hij de paal loslaat (`_vreemd_los`), en de
+        # schakelaar van slim laden per paal als de integratie die heeft (`_slim_laden`).
+        self._vreemd_aantal: dict[str, int] = {}
+        self._vreemd_geteld: set[str] = set()
+        self._vreemd_stand: dict[str, float] = {}
+        self._vreemd_gezien: dict[str, str] = {}
+        self._vreemd_los: dict[str, datetime] = {}
+        self._vreemd_proef: dict[str, datetime] = {}
+        self._vreemd_teltijd: dict[str, datetime] = {}
+        self._slim_laden: dict[str, str] = {}
         # Van welke paal een dynamische limiet of een status is, en welke daarvan de limiet zijn, voor
         # `_async_state_changed`.
         self._limiet_van: dict[str, str] = {}
@@ -4194,6 +4210,10 @@ class ChargerCoach:
         self._paal_max = {
             device.get("id", ""): entity for device in chargers if (entity := (device.get("entities") or {}).get("max_limit"))
         }
+        # Slim laden van de paal zelf (v0.198.0): aan of uit krijgt meteen een ronde.
+        self._slim_laden = {
+            device.get("id", ""): entity for device in chargers if (entity := self._slim_laden_entiteit(device))
+        }
         self._watch(
             {
                 entity
@@ -4202,6 +4222,7 @@ class ChargerCoach:
                 if (entity := (device.get("entities") or {}).get(sleutel))
             }
             | set(self._limiet_van)
+            | set(self._slim_laden.values())
             # De startknop erbij: bij Home Connect Local komt die pas terug
             # als de deur dichtgaat, en dan hoort de coach meteen te drukken.
             | {
@@ -9651,6 +9672,7 @@ class ChargerCoach:
         """
         device_id = device.get("id", "")
         grid, car, charger, window = self._read(now, settings, device, reserved)
+        los = self._tweede_sturing(device, charger, now)
         if self._app_hervat(device, charger, now):
             await self._async_app_hervat(device)
             charger = replace(charger, boost=True, paused_by_user=False, modus=self._modus_van(device))
@@ -9882,13 +9904,17 @@ class ChargerCoach:
         # met deze tip als melding op zijn telefoon 24 minuten nadat de auto op
         # zijn doel stond: "waarom krijg ik deze melding als de auto al vol is?"
         nettip = self._nettip(now)
-        fasetip = "" if nettip else self._fasetip(settings, device, charger)
+        # Iets anders dat de paal ook stuurt gaat voor de fase (v0.198.0): bij de eigenaar op 05-11-2026 zette
+        # slim laden van Easee de groep zelf op één fase, en dan is het profiel van de auto niet de oorzaak.
+        vreemdtip = "" if nettip else self._vreemdtip(device_id)
+        fasetip = "" if nettip or vreemdtip else self._fasetip(settings, device, charger)
         tip = (
             nettip
+            or vreemdtip
             or fasetip
             or (self._bewakertip(settings, device, charger) if decision.charge else "")
         )
-        tipsoort = "net" if nettip else ("fase" if fasetip else ("uitleg" if tip else ""))
+        tipsoort = ("net" if nettip else "vreemd" if vreemdtip else "fase" if fasetip else "uitleg" if tip else "")
         # Is de netmeting terug, dan mag een volgende stilte weer gemeld worden.
         if not nettip and self._getipt.get(device_id) == "net":
             self._getipt.pop(device_id, None)
@@ -9911,6 +9937,10 @@ class ChargerCoach:
             self._nul_gezien.discard(device_id)
             self._geschreven.pop(device_id, None)
             self._vreemde_limiet.discard(device_id)
+            for lijst in (self._vreemd_aantal, self._vreemd_stand, self._vreemd_gezien, self._vreemd_los,
+                          self._vreemd_proef, self._vreemd_teltijd):
+                lijst.pop(device_id, None)
+            self._vreemd_geteld.discard(device_id)
             self._modus.pop(device_id, None)
             self._doel.pop(device_id, None)
             self._rend_start.pop(device_id, None)
@@ -9985,7 +10015,7 @@ class ChargerCoach:
             # bepaalt is uitleg: die staat op de kaart en in de geschiedenis,
             # en gaat niet naar de telefoon. De eigenaar op 06-09-2026: per
             # beurt één verslag, plus wat de bewoner zelf moet oplossen.
-            uitleg = not nettip and not fasetip
+            uitleg = not nettip and not vreemdtip and not fasetip
             await self._async_tell(
                 f"{device.get('name') or t('De laadpaal')}: {tip}",
                 kritiek=not uitleg, telefoon=not uitleg,
@@ -10016,6 +10046,20 @@ class ChargerCoach:
         # that is exactly what a load balancer letting go looks like from here.
         # Prodding is on a timer of its own, because some of the reasons a
         # charger does not follow cannot be argued with by asking twice.
+        # Iets anders stuurt de paal ook (`_tweede_sturing`): de coach schrijft niets, want dat is vechten om
+        # de limiet. Behalve voor de zekering: geeft de ander meer dan er onder de zekering past, dan zet de
+        # coach het besluit er toch in. Vergeten wat hij het laatst stuurde, zodat hij na het loslaten meteen
+        # weer schrijft: een paal die op de 6 A van de ander laadt, lijkt anders te doen wat er gevraagd is.
+        if los:
+            limiet = _number(self.hass, (device.get("entities") or {}).get("dynamic_limit"))
+            plafond = ceiling_amps(grid, replace(car, max_amps=0.0), charger)
+            te_veel = charger.charging and limiet is not None and limiet > plafond + 0.5
+            if decision.rule != "no-room" and not te_veel:
+                self._last.pop(device_id, None)
+                self._paal_stroom[device_id] = float(charger.actual_amps or 0.0)
+                return 0.0
+            _LOGGER.warning("%s: iets anders stuurt de paal, maar de zekering gaat voor: %s", device_id, decision.rule)
+
         following = self._following(device, charger, decision)
         if following:
             self._nudged.pop(device_id, None)
@@ -10275,7 +10319,8 @@ class ChargerCoach:
         # eigenaar het uitzette. Zonder een maximum om naast te leggen telt het niet.
         maximum = _number(self.hass, (device.get("entities") or {}).get("max_limit"))
         return (gezien and geldt and maximum is not None and limiet >= max(MIN_AMPS, maximum - 0.5)
-                and device_id not in self._vreemde_limiet and device_id not in self._boost)
+                and device_id not in self._vreemde_limiet and device_id not in self._vreemd_gezien
+                and device_id not in self._boost)
 
     @callback
     def _vreemde_limiet_zien(self, device_id: str, stand: str, max_entiteit: str | None = None) -> None:
@@ -10297,6 +10342,165 @@ class ChargerCoach:
         if device_id not in self._vreemde_limiet:
             _LOGGER.info("%s: de limiet staat op %s A, en die schreef de coach niet; iets anders stuurt mee", device_id, stand)
         self._vreemde_limiet.add(device_id)
+        self._vreemd_stand[device_id] = waarde
+        # Eén keer per opdracht van de coach (v0.198.0): de luisteraar en de ronde zien dezelfde limiet allebei.
+        if device_id not in self._vreemd_geteld:
+            self._vreemd_geteld.add(device_id)
+            self._vreemd_aantal[device_id] = self._vreemd_aantal.get(device_id, 0) + 1
+
+    def _limiet_niet_van_coach(self, device: dict[str, Any]) -> bool:
+        """Of de limiet in de Easee nu een is die de coach niet schreef, geen 0 en niet het maximum."""
+        device_id = device.get("id", "")
+        entities = device.get("entities") or {}
+        waarde = _number(self.hass, entities.get("dynamic_limit"))
+        geschreven = self._geschreven.get(device_id)
+        maximum = _number(self.hass, entities.get("max_limit"))
+        return not (waarde is None or waarde < 0.5 or not geschreven
+                    or (maximum is not None and waarde >= maximum - 0.5)
+                    or any(abs(waarde - eigen) < 0.5 for eigen in geschreven))
+
+    def _slim_laden_entiteit(self, device: dict[str, Any]) -> str | None:
+        """De schakelaar van slim laden van de paal zelf, als de integratie die heeft (v0.198.0).
+
+        Bij Easee een switch aan hetzelfde apparaat met `smart_charging` als `translation_key`
+        (de eigenaar op 05-11-2026: unique_id eindigt op `_smart_charging`).
+        """
+        if device.get("brand") != "easee" or not device.get("device_id"):
+            return None
+        try:
+            from homeassistant.helpers import entity_registry as er
+
+            rijen = er.async_entries_for_device(er.async_get(self.hass), device["device_id"])
+        except Exception:  # noqa: BLE001 - zonder register alleen de limiet
+            return None
+        for rij in rijen:
+            if str(getattr(rij, "entity_id", "")).split(".")[0] != "switch":
+                continue
+            sleutel = f"{getattr(rij, 'translation_key', '') or ''} {getattr(rij, 'unique_id', '') or ''}"
+            if "smartcharging" in sleutel.lower().replace("_", ""):
+                return rij.entity_id
+        return None
+
+    def _tweede_sturing(self, device: dict[str, Any], charger: Charger, now: datetime) -> bool:
+        """Of de coach een Easee nu loslaat, omdat iets anders hem ook stuurt (v0.198.0).
+
+        In de woning van de eigenaar op 05-11-2026 ging slim laden van Easee zelf aan, 14 s na het inpluggen,
+        via de cloud van Easee. Daarna zette Easee de limiet binnen 3 tot 35 s terug op 6 A, elke keer dat de
+        coach 16 A schreef: twee sturingen die om dezelfde limiet vechten, een minuut lang 16 en dan weer 6.
+        Net als bij een batterij (`VREEMD_RONDEN`) laat de coach dan los, zegt het één keer, en vecht niet:
+
+        - staat slim laden van de paal zelf aan (`_slim_laden`), dan zolang het aanstaat;
+        - werd een limiet van de coach `VREEMD_RONDEN` keer overschreven, of bleef een limiet die niet van hem
+          is `VREEMD_PROEF` staan, dan een uur (`VREEMD_PAUZE`). Daarna schrijft hij weer, en blijft zijn
+          limiet `VREEMD_PROEF` staan, dan is het over.
+
+        Wie het deed is in Home Assistant niet te zien, dus de melding zegt wat er gebeurt. De zekering gaat
+        voor: zie `_one`. Een Alfen krijgt zijn limiet elke ronde opnieuw en kent dit niet.
+        """
+        device_id = device.get("id", "")
+        control = CHARGER_CONTROL.get(device.get("brand", "")) or {}
+        if not control or control.get("limit_entity") or control.get("refresh") or not charger.connected:
+            return False
+        schakelaar = self._slim_laden.get(device_id)
+        staat = self.hass.states.get(schakelaar) if schakelaar else None
+        if staat is not None and staat.state == "on":
+            if self._vreemd_gezien.get(device_id) != "slim":
+                _LOGGER.warning("%s: slim laden van de paal zelf staat aan; de coach laat de paal los tot het uit staat",
+                                device_id)
+                self._vreemd_gezien[device_id] = "slim"
+                self._vreemd_los[device_id] = now
+                self._vreemd_proef.pop(device_id, None)
+                self._remember(device_id)
+            return True
+        if self._vreemd_gezien.get(device_id) == "slim":
+            # Uitgezet, of de schakelaar is even weg: meteen weer sturen, zoals bij de start van een beurt.
+            _LOGGER.info("%s: slim laden van de paal zelf staat niet meer aan; de coach stuurt weer", device_id)
+            for lijst in (self._vreemd_gezien, self._vreemd_los, self._vreemd_aantal, self._vreemd_teltijd, self._last):
+                lijst.pop(device_id, None)
+            self._remember(device_id)
+
+        los = self._vreemd_los.get(device_id)
+        if los is not None:
+            if _tussen(los, now) < VREEMD_PAUZE:
+                return True
+            _LOGGER.info("%s: de coach probeert de paal weer te sturen", device_id)
+            self._vreemd_los.pop(device_id, None)
+            self._last.pop(device_id, None)
+            self._vreemd_aantal[device_id] = 0
+            self._vreemd_teltijd.pop(device_id, None)
+            self._vreemd_proef[device_id] = now
+            self._remember(device_id)
+            return False
+
+        # Een limiet die niet van de coach is en blijft staan telt ook, zonder dat de coach opnieuw schrijft.
+        if self._limiet_niet_van_coach(device):
+            stand = _number(self.hass, (device.get("entities") or {}).get("dynamic_limit"))
+            self._vreemde_limiet_zien(device_id, str(stand), (device.get("entities") or {}).get("max_limit"))
+            sinds = self._vreemd_teltijd.setdefault(device_id, now)
+            if sinds > now:
+                # Een klok die terugsprong telt opnieuw vanaf nu, in plaats van nooit.
+                sinds = self._vreemd_teltijd[device_id] = now
+            if _tussen(sinds, now) >= VREEMD_PROEF:
+                self._vreemd_aantal[device_id] = self._vreemd_aantal.get(device_id, 0) + 1
+                self._vreemd_teltijd[device_id] = now
+        else:
+            self._vreemd_teltijd.pop(device_id, None)
+
+        if self._vreemd_aantal.get(device_id, 0) >= VREEMD_RONDEN:
+            _LOGGER.warning("%s: de limiet gaat steeds naar %s A, en dat doet de coach niet; iets anders stuurt, "
+                            "de coach laat de paal een uur los", device_id, self._vreemd_stand.get(device_id))
+            self._vreemd_aantal[device_id] = 0
+            self._vreemd_teltijd.pop(device_id, None)
+            self._vreemd_proef.pop(device_id, None)
+            self._vreemd_gezien[device_id] = "limiet"
+            self._vreemd_los[device_id] = now
+            self._remember(device_id)
+            return True
+
+        # Zolang de coach weer stuurt na wat hij zag, kijkt hij elke `VREEMD_PROEF` of zijn limiet blijft staan.
+        if self._vreemd_gezien.get(device_id) == "limiet":
+            self._vreemd_proef.setdefault(device_id, now)
+        proef = self._vreemd_proef.get(device_id)
+        if proef is not None and _tussen(proef, now) >= VREEMD_PROEF:
+            self._vreemd_proef.pop(device_id, None)
+            if not self._limiet_niet_van_coach(device):
+                _LOGGER.info("%s: de limiet van de coach blijft staan; de andere sturing is weg", device_id)
+                self._vreemd_gezien.pop(device_id, None)
+                self._vreemd_aantal[device_id] = 0
+            self._remember(device_id)
+        return False
+
+    def _vreemd_opnieuw(self, device_id: str) -> None:
+        """Een keuze van de bewoner in de coach: die krijgt een nieuwe poging (v0.198.0).
+
+        Slim laden van de paal zelf niet: dat blijft winnen tot het uit staat.
+        """
+        if self._vreemd_gezien.get(device_id) == "limiet" and self._vreemd_los.pop(device_id, None) is not None:
+            self._last.pop(device_id, None)
+            self._vreemd_aantal[device_id] = 0
+            self._vreemd_teltijd.pop(device_id, None)
+
+    def _vreemdtip(self, device_id: str) -> str:
+        """Wat de bewoner leest als iets anders de paal ook stuurt (v0.198.0)."""
+        soort = self._vreemd_gezien.get(device_id)
+        if soort == "slim":
+            return t("Slim laden staat aan in de Easee-app en stuurt hem ook. De coach laat hem los tot het uit staat.")
+        if soort == "limiet":
+            stand = self._vreemd_stand.get(device_id)
+            if stand is None:
+                # Na een herstart, zolang de coach hem loslaat: het getal weet hij dan niet meer.
+                return t(
+                    "Iets anders stuurt hem ook: de limiet gaat steeds naar een stand die de coach niet zette. "
+                    "De coach laat hem los en probeert het elk uur opnieuw. Zet de andere sturing uit, zoals slim "
+                    "laden in de Easee-app."
+                )
+            return t(
+                "Iets anders stuurt hem ook: de limiet gaat steeds naar {stroom} A, en dat doet de coach niet. "
+                "De coach laat hem los en probeert het elk uur opnieuw. Zet de andere sturing uit, zoals slim "
+                "laden in de Easee-app.",
+                stroom=f"{stand:.0f}",
+            )
+        return ""
 
     async def _async_app_hervat(self, device: dict[str, Any]) -> None:
         """Snel voor deze beurt, omdat de bewoner in de app op hervatten drukte."""
@@ -15121,6 +15325,15 @@ class ChargerCoach:
         _, profile = self._chosen_car(settings, device)
         staat_op = (profile or {}).get("phases")
 
+        # 0. De groep van de paal krijgt in de Easee maar op één fase stroom (v0.198.0). Bij de eigenaar op
+        # 05-11-2026 zette slim laden van Easee de dynamische limiet van de groep op 16, 0 en 0 A, en kreeg hij
+        # het advies de auto op eenfasig te zetten. Dan ligt het niet aan de auto.
+        if staat_op != "one" and gemeten == 1 and self._groep_een_fase(device):
+            return t(
+                "Hij laadt op één fase, want de groep van de paal krijgt in de Easee maar op één fase stroom. "
+                "Aan de auto ligt het niet; laat het profiel zoals het is."
+            )
+
         # 1. De laderlimiet houdt hem op één fase. Dit gaat vóór het profiel,
         # want dan is de instelling niet fout maar de paal de oorzaak.
         if (
@@ -15158,6 +15371,30 @@ class ChargerCoach:
                 "Apparaten."
             )
         return ""
+
+    def _groep_een_fase(self, device: dict[str, Any]) -> bool:
+        """Of de dynamische limiet van de groep van een Easee maar op één fase stroom geeft (v0.198.0).
+
+        Uit de attributen van die limiet (`state_dynamicCircuitCurrentP1` tot en met `P3`), alleen als ze er
+        alle drie zijn.
+        """
+        if device.get("brand") != "easee":
+            return False
+        staat = self.hass.states.get((device.get("entities") or {}).get("circuit_limit") or "")
+        if staat is None:
+            return False
+        fasen: dict[str, float] = {}
+        for sleutel, waarde in (staat.attributes or {}).items():
+            naam = str(sleutel).lower()
+            for fase in ("p1", "p2", "p3"):
+                if naam.endswith("dynamiccircuitcurrent" + fase):
+                    try:
+                        fasen[fase] = float(waarde)
+                    except (TypeError, ValueError):
+                        return False
+        if len(fasen) != 3:
+            return False
+        return sum(1 for waarde in fasen.values() if waarde >= 0.5) == 1
 
     def _measured_phases(self, device: dict[str, Any]) -> int | None:
         """One phase or three, worked out from what the charger reports.
@@ -15481,6 +15718,17 @@ class ChargerCoach:
                     self._snel_app.add(device_id)
             if row.get("paused"):
                 self._paused.add(device_id)
+            if row.get("foreign") in ("slim", "limiet"):
+                self._vreemd_gezien[device_id] = str(row["foreign"])
+                for sleutel, lijst in (("foreign_since", self._vreemd_los), ("foreign_probe", self._vreemd_proef)):
+                    moment = dt_util.parse_datetime(str(row.get(sleutel) or ""))
+                    if moment is not None:
+                        lijst[device_id] = moment
+                try:
+                    if row.get("foreign_amps") is not None:
+                        self._vreemd_stand[device_id] = float(row["foreign_amps"])
+                except (TypeError, ValueError):
+                    pass
             if row.get("mode") in MODI_ZONDER_SOM:
                 self._modus[device_id] = str(row["mode"])
             if row.get("target") is not None:
@@ -15820,6 +16068,15 @@ class ChargerCoach:
             "mode": self._modus.get(device_id),
             "target": self._doel.get(device_id),
         }
+        # Iets anders dat een Easee ook stuurt (v0.198.0), zodat een herstart niet opnieuw gaat vechten.
+        if device_id in self._vreemd_gezien:
+            aan["foreign"] = self._vreemd_gezien[device_id]
+            for sleutel, moment in (("foreign_since", self._vreemd_los.get(device_id)),
+                                    ("foreign_probe", self._vreemd_proef.get(device_id))):
+                if moment is not None:
+                    aan[sleutel] = moment.isoformat()
+            if self._vreemd_stand.get(device_id) is not None:
+                aan["foreign_amps"] = self._vreemd_stand[device_id]
         # Van een airco: dat de coach hem aanzette, en tot wanneer de bewoner
         # wint (v0.119.0). Anders zou na een herstart een airco die de coach op
         # zon aanzette voor eeuwig van de bewoner lijken.
@@ -15881,6 +16138,7 @@ class ChargerCoach:
             self._boost.discard(device_id)
             self._nul_gezien.discard(device_id)
         self._snel_app.discard(device_id)
+        self._vreemd_opnieuw(device_id)
         self._remember(device_id)
         self.async_refresh()
 
@@ -15921,6 +16179,7 @@ class ChargerCoach:
         # Wat de bewoner kiest wint (v0.197.1): pas een 0 die de coach daarna ziet staan, en dan een sprong
         # naar het maximum, is weer een hervat in de app.
         self._nul_gezien.discard(device_id)
+        self._vreemd_opnieuw(device_id)
         if mode in MODI_ZONDER_SOM or mode == "goedkoopst":
             self._modus[device_id] = mode
         else:
@@ -15971,6 +16230,7 @@ class ChargerCoach:
             self._boost.discard(device_id)
         else:
             self._paused.discard(device_id)
+        self._vreemd_opnieuw(device_id)
         self._remember(device_id)
         self.async_refresh()
 
@@ -16063,6 +16323,8 @@ class ChargerCoach:
             return
         geschreven = self._geschreven.setdefault(device.get("id", ""), [])
         geschreven[:] = [*geschreven[-2:], float(amps)]
+        self._vreemd_geteld.discard(device.get("id", ""))
+        self._vreemd_teltijd.pop(device.get("id", ""), None)
         await self._paal_dienst(
             domain,
             service,
