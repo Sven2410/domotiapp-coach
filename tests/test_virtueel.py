@@ -810,6 +810,15 @@ if (vl := v("easee-een-fase-groep")):
              bool(meldingen(vl, "rekent deze beurt met die ene fase")), "")
     controle("één fase, groep zichtbaar: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
 
+# v0.200.0: dezelfde beurt, maar de auto laadde hier eerder op drie fasen. Dan is één fase de keuze van de paal: geen
+# kritiek met het advies het profiel te wijzigen, en hij rekent net zo met één fase.
+if (vl := v("easee-een-fase-drie-eerder")) and (vg := v("easee-een-fase-groep")):
+    controle("één fase, eerder drie: geen melding dat het profiel niet klopt",
+             not meldingen(vl, "Dit profiel staat op driefasig"), f"{[m for _, m in vl.meldingen]}")
+    controle("één fase, eerder drie: even snel vol en op tijd",
+             gehaald(vl) and vl.klaar_op is not None and vg.klaar_op is not None
+             and abs((vl.klaar_op - vg.klaar_op).total_seconds()) <= 600, f"{vl.klaar_op} / {vg.klaar_op}")
+
 if (vl := v("easee-een-fase-blind")):
     controle("één fase, groep onzichtbaar: de paal herstart zelf, zoals in de klantwoning",
              vl.paal_herstarts >= 1, f"{vl.paal_herstarts}")

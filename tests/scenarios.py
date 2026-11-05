@@ -585,7 +585,13 @@ ford_storing_wachtend = ford_inpluggen.kopie(
 een_fase_groep = dyn_zonnig.kopie(
     naam="easee-een-fase-groep", uitleg="de Easee kiest bij de start één fase, de auto trekt 0,9 A boven de limiet, de groep is 16 A en de coach ziet die",
     auto=replace(GROTE, soc=60.0, overschot_amps=0.9, storing_bij_herstart=True),
-    paal=Paal(circuit_amps=16.0, kiest_een_fase=True),
+    paal=Paal(circuit_amps=16.0, kiest_een_fase=True), een_fase_eerder=1,
+)
+# Bij een klant op 28-10 en 05-11-2026: dezelfde Ford laadde er eerder op drie fasen, en de coach adviseerde toch
+# kritiek "zet de auto dan op eenfasig" (v0.200.0).
+een_fase_drie_eerder = een_fase_groep.kopie(
+    naam="easee-een-fase-drie-eerder", uitleg="hetzelfde, maar de auto laadde hier eerder op drie fasen: uitleg, geen kritiek",
+    een_fase_eerder=0, drie_eerder=True,
 )
 een_fase_blind = een_fase_groep.kopie(
     naam="easee-een-fase-blind", uitleg="hetzelfde, maar zonder de sensor van de groep: de paal herstart, de auto gaat in storing, en de coach start hem opnieuw",
@@ -1524,7 +1530,7 @@ alfen_fasen_dyn = alfen_drie_dyn.kopie(
 # ging de paal met 4,3 kW zon van 13 naar 6 A, drie keer in twintig minuten.
 alfen_een_fase = alfen_drie_zon.kopie(
     naam="alfen-een-fase-zon", uitleg="driefasige auto aan een Alfen op 1 Phase, helder, de stroom meldt alleen een wissel",
-    zon=Zon(wolken="helder"), paal=Paal(merk="alfen", fasen_keuze=1, stroom_meldt_wissel=True),
+    zon=Zon(wolken="helder"), paal=Paal(merk="alfen", fasen_keuze=1, stroom_meldt_wissel=True), een_fase_eerder=1,
 )
 alfen_een_fase_vers = alfen_een_fase.kopie(
     naam="alfen-een-fase-zon-vers", uitleg="dezelfde dag, de stroom meldt elke ronde",
@@ -1855,7 +1861,7 @@ ALLE = [
     tien_uur, tien_uur_zon, tien_uur_valt_tegen, tien_uur_vast, equalizer, prijzen_weg,
     weekend, weekend_geen_zon, weekend_voorspelling_mis,
     ford_storing, ford_storing_traag, ford_inpluggen, ford_inpluggen_zonder, ford_inpluggen_kabel,
-    ford_storing_wachtend, vast_avond_proef, een_fase_groep, een_fase_blind, afbouw, afbouw_geleerd,
+    ford_storing_wachtend, vast_avond_proef, een_fase_groep, een_fase_drie_eerder, een_fase_blind, afbouw, afbouw_geleerd,
     afbouw_krap, afbouw_krap_geleerd, afbouw_bovenin, afbouw_bovenin_oud, fasekeuze, zon_belofte, zon_belofte_dyn,
     vaatwasser_avond, vaatwasser_zon, vaatwasser_krap, vaatwasser_afstand_uit, vaatwasser_uiterlijk,
     vaatwasser_dom_zon, vaatwasser_dom_leert, vaatwasser_dom_negeert, vaatwasser_dom_zelf,

@@ -763,6 +763,9 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # Het gemeten laadrendement per auto aan een paal (v0.94.0): {device, car,
     # eff, n}. Zie `_rendement_meten` in coach.py.
     "car_efficiency": [],
+    # Welke fasen een auto aan een paal liet zien (v0.200.0): {device, car, three, one}: wanneer hij voor het eerst
+    # op drie fasen laadde, en hoeveel beurten alleen op één. Zie `_fasetip` in coach.py.
+    "car_phases": [],
     # Wat de coach bij een echte beurt mat van een programma-apparaat: per
     # apparaat en per programma de duur, het verbruik, de piek en het verloop
     # (watt per vijf minuten vanaf de start), als lopend gemiddelde over de
