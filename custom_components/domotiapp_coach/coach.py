@@ -747,6 +747,10 @@ FASEMETING_VERS = timedelta(seconds=10)
 # zegt. Drie ronden, dus in de praktijk drie minuten stabiel laden.
 FASEMETING_RONDEN = 3
 
+# Een auto die aan deze paal nog nooit op drie fasen laadde, krijgt de fasemelding pas in zijn zoveelste beurt op één
+# fase (v0.200.0), niet in de eerste. Zie `_fasetip`.
+FASE_BEURTEN = 2
+
 # Hoe lang de coach stroom aanbiedt aan een auto die niets afneemt voor hij er
 # iets over zegt, en alleen als de klaar-tijd erdoor in gevaar komt. Bij Van den
 # Dam gaf de Ford er op 30-08-2026 om 04:34 de brui aan; het eerste bericht
@@ -1985,6 +1989,10 @@ class ChargerCoach:
         # Het aantal fasen zoals het deze ronde gemeten is, per laadpunt. Eén
         # meting per ronde, want `_fasen_stabiel` telt ronden.
         self._fase_nu: dict[str, int | None] = {}
+        # Welke fasen deze beurt stabiel gemeten zijn (v0.200.0), en voor welke auto aan welke paal "drie fasen gezien"
+        # al in de instellingen staat (`car_phases`).
+        self._beurt_fasen: dict[str, set[int]] = {}
+        self._drie_bewaard: set[tuple[str, str]] = set()
         # Wat de auto deze beurt per band van tien procent aannam terwijl hij
         # zelf de rem was (v0.128.0): de som van de kW per ronde, het aantal
         # ronden, vanaf welke en tot welke accustand, en wat er het laatst van
@@ -9702,6 +9710,7 @@ class ChargerCoach:
         """
         device_id = device.get("id", "")
         grid, car, charger, window = self._read(now, settings, device, reserved)
+        self._fasen_bijhouden(settings, device, now)
         los = self._tweede_sturing(device, charger, now)
         if self._app_hervat(device, charger, now):
             await self._async_app_hervat(device)
@@ -9938,13 +9947,17 @@ class ChargerCoach:
         # slim laden van Easee de groep zelf op één fase, en dan is het profiel van de auto niet de oorzaak.
         vreemdtip = "" if nettip else self._vreemdtip(device_id)
         fasetip = "" if nettip or vreemdtip else self._fasetip(settings, device, charger)
+        # Koos de paal zelf één fase bij een auto die hier ook op drie laadde, dan uitleg en geen kritiek (v0.200.0).
+        faseuitleg = "" if nettip or vreemdtip or fasetip else self._fase_uitleg(settings, device, charger)
         tip = (
             nettip
             or vreemdtip
             or fasetip
+            or faseuitleg
             or (self._bewakertip(settings, device, charger) if decision.charge else "")
         )
-        tipsoort = ("net" if nettip else "vreemd" if vreemdtip else "fase" if fasetip else "uitleg" if tip else "")
+        tipsoort = ("net" if nettip else "vreemd" if vreemdtip else "fase" if fasetip
+                    else "fase-uitleg" if faseuitleg else "uitleg" if tip else "")
         # Is de netmeting terug, dan mag een volgende stilte weer gemeld worden.
         if not nettip and self._getipt.get(device_id) == "net":
             self._getipt.pop(device_id, None)
@@ -9960,6 +9973,7 @@ class ChargerCoach:
         # paal waarvan de integratie nog laadt eerst niets, en dan wiste dit de
         # knoppen die `_restore` net had teruggehaald, en de opgegeven accustand.
         if not charger.connected and self._echt_los.get(device_id, True):
+            self._fasen_beurt_af(settings, device, now)
             self._approved.discard(device_id)
             self._boost.discard(device_id)
             self._snel_app.discard(device_id)
@@ -12296,6 +12310,8 @@ class ChargerCoach:
         # Eén fasemeting per ronde; `_fasetip` en `_car` lezen allebei deze.
         if charger.charging:
             self._fase_nu[device_id] = self._fasen_stabiel(device)
+            if self._fase_nu[device_id] in (1, 3):
+                self._beurt_fasen.setdefault(device_id, set()).add(int(self._fase_nu[device_id]))
         else:
             self._fasen_gemeten.pop(device_id, None)
             self._fase_nu.pop(device_id, None)
@@ -15326,6 +15342,85 @@ class ChargerCoach:
         )
         return _kwh(self.hass, entiteit)
 
+    @staticmethod
+    def _fasen_rij(settings: dict[str, Any], device_id: str, auto_id: str) -> dict[str, Any]:
+        """Wat er van deze auto aan deze paal bekend is over fasen (`car_phases`, v0.200.0)."""
+        for row in settings.get("car_phases") or []:
+            if isinstance(row, dict) and row.get("device") == device_id and row.get("car") == auto_id:
+                return row
+        return {}
+
+    def _drie_gezien(self, settings: dict[str, Any], device: dict[str, Any]) -> bool:
+        """Of de auto die er nu hangt aan deze paal ooit op drie fasen laadde, deze beurt meegeteld."""
+        device_id = device.get("id", "")
+        auto_id, profile = self._chosen_car(settings, device)
+        if not auto_id or profile is None:
+            return False
+        return 3 in self._beurt_fasen.get(device_id, set()) or bool(self._fasen_rij(settings, device_id, auto_id).get("three"))
+
+    def _fasen_bijhouden(self, settings: dict[str, Any], device: dict[str, Any], now: datetime) -> None:
+        """Drie fasen gezien: meteen in de instellingen, zodat het een herstart overleeft (v0.200.0)."""
+        device_id = device.get("id", "")
+        if 3 not in self._beurt_fasen.get(device_id, set()):
+            return
+        auto_id, profile = self._chosen_car(settings, device)
+        if not auto_id or profile is None or (device_id, auto_id) in self._drie_bewaard:
+            return
+        self._drie_bewaard.add((device_id, auto_id))
+        if self._fasen_rij(settings, device_id, auto_id).get("three"):
+            return
+        self.hass.async_create_task(self._async_fasen_bewaren(settings, device_id, auto_id, now, drie=True))
+
+    def _fasen_beurt_af(self, settings: dict[str, Any], device: dict[str, Any], now: datetime) -> None:
+        """Een beurt die alleen op één fase liep telt mee (v0.200.0). Na een herstart halverwege telt hij soms
+        niet: liever een melding te laat dan een te veel."""
+        device_id = device.get("id", "")
+        fasen = self._beurt_fasen.pop(device_id, None)
+        if fasen != {1}:
+            return
+        auto_id, profile = self._chosen_car(settings, device)
+        if auto_id and profile is not None:
+            self.hass.async_create_task(self._async_fasen_bewaren(settings, device_id, auto_id, now, een=True))
+
+    async def _async_fasen_bewaren(
+        self, settings: dict[str, Any], device_id: str, auto_id: str, now: datetime,
+        drie: bool = False, een: bool = False,
+    ) -> None:
+        """Een rij van `car_phases` bijwerken."""
+        rows = [r for r in (settings.get("car_phases") or []) if isinstance(r, dict)]
+        rij = next((r for r in rows if r.get("device") == device_id and r.get("car") == auto_id), None)
+        if rij is None:
+            rij = {"device": device_id, "car": auto_id, "three": None, "one": 0}
+            rows.append(rij)
+        if drie and not rij.get("three"):
+            rij["three"] = now.isoformat()
+        if een:
+            rij["one"] = int(rij.get("one") or 0) + 1
+        try:
+            saved = await async_get_store(self.hass).async_save({"car_phases": rows})
+        except Exception:  # noqa: BLE001 - een gemiste meting is geen reden om te stoppen
+            _LOGGER.exception("kon de fasen van de auto niet bewaren")
+            return
+        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+
+    def _fase_uitleg(self, settings: dict[str, Any], device: dict[str, Any], charger: Charger) -> str:
+        """Uitleg op de kaart als de paal zelf voor één fase koos (v0.200.0).
+
+        Bij een klant op 28-10 en 05-11-2026 ging een Easee in de automatische fasemodus zelf naar één fase, ook bij
+        het inpluggen, en na zes minuten tot een kwartier vanzelf weer naar drie. Dezelfde Ford laadde er eerder op
+        drie fasen, dus het profiel klopte, en het advies "zet de auto op eenfasig" was fout, als kritiek op de
+        telefoon. Nu alleen deze uitleg, op de kaart en in de geschiedenis; de coach rekent zolang met één fase.
+        """
+        if not charger.charging or self._fasewissel_aan(device) or self._fase_nu.get(device.get("id", "")) != 1:
+            return ""
+        _, profile = self._chosen_car(settings, device)
+        if (profile or {}).get("phases") != "three" or not self._drie_gezien(settings, device):
+            return ""
+        return t(
+            "De paal laadt nu op één fase. Dat kiest hij zelf; deze auto laadde hier eerder op drie fasen. "
+            "De coach rekent zolang met één fase."
+        )
+
     def _fasetip(
         self, settings: dict[str, Any], device: dict[str, Any], charger: Charger
     ) -> str:
@@ -15364,6 +15459,11 @@ class ChargerCoach:
                 "Aan de auto ligt het niet; laat het profiel zoals het is."
             )
 
+        # Laadde deze auto hier ooit op drie fasen, dan houdt de laderlimiet hem niet op één fase en klopt het
+        # profiel: dan alleen uitleg (`_fase_uitleg`, v0.200.0).
+        if staat_op == "three" and gemeten == 1 and self._drie_gezien(settings, device):
+            return ""
+
         # 1. De laderlimiet houdt hem op één fase. Dit gaat vóór het profiel,
         # want dan is de instelling niet fout maar de paal de oorzaak.
         if (
@@ -15387,6 +15487,10 @@ class ChargerCoach:
         # meting gebruikt waar hij hoort: om te zeggen dat de instelling niet
         # klopt, in plaats van er stilletjes omheen te rekenen.
         if staat_op == "three" and gemeten == 1:
+            # Pas vanaf de `FASE_BEURTEN`e beurt op één fase, niet in de eerste (v0.200.0).
+            auto_id, _ = self._chosen_car(settings, device)
+            if int(self._fasen_rij(settings, device.get("id", ""), auto_id).get("one") or 0) + 1 < FASE_BEURTEN:
+                return ""
             return t(
                 "Dit profiel staat op driefasig, maar er wordt nu op één fase "
                 "geladen. Laden duurt daardoor ongeveer drie keer zo lang; de coach "

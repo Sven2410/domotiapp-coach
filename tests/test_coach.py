@@ -890,6 +890,12 @@ controle("een eenfasige auto krijgt geen verwijt", not eenfasig["tip"], f"{eenfa
 # De laderlimiet staat hier op 16 A, dus de tip hierboven kan het niet zijn.
 hass21.states.zet("sensor.laadpaal_max", "16")
 hass21.states.zet("sensor.laadpaal_vermogen", "3070")
+# Sinds v0.200.0 alleen voor een auto die hier nooit op drie fasen laadde, en niet in zijn eerste beurt op één fase:
+# deze beurt telt als een nieuwe, en er ging er al één aan vooraf.
+coach21._beurt_fasen.clear()
+coach21._fase_nu.clear()
+coach21._fasen_gemeten.clear()
+inst21["car_phases"] = [{"device": "dev-laadpaal", "car": "car-1", "three": None, "one": 1}]
 hass21.states.zet("sensor.laadpaal_stroom", "13.5")
 for minuut in (4, 5):
     asyncio.run(ronde(coach21, inst21, paal=PAAL21, nu=dt.datetime(2026, 8, 25, 13, minuut)))
@@ -2560,6 +2566,7 @@ print("=== 51. één fase gemeten op een driefasig profiel: daarmee rekenen ==="
 # hoort te zien wat er loopt en daar deze beurt mee te rekenen: drie keer zo
 # lang, en dat zegt hij erbij.
 inst51 = instellingen(devices=[PAAL50])
+inst51["car_phases"] = [{"device": "dev-laadpaal", "car": "car-1", "three": None, "one": 1}]  # zie proef 21
 inst51["strategy"]["schedules"][0]["window"]["done_by"] = "06:00"
 huis51 = huis(status="charging", stroom=12.79, vermogen=2877.0, teruglevering=0.0, afname=3000.0)
 huis51["sensor.laadpaal_circuit"] = "16"
@@ -7363,6 +7370,7 @@ for naam133, paal133, waarden133, laadt133 in (
      huis90(teruglevering=1200.0), {"sensor.alfen_laadt": "on", "sensor.alfen_modus3": "C2"}),
 ):
     i133 = inst130(paal133)
+    i133["car_phases"] = [{"device": paal133["id"], "car": "car-1", "three": None, "one": 1}]  # zie proef 21
     h133, _, c133 = bouw(waarden133, i133)
     T133 = dt.datetime(2026, 8, 18, 12, 0)
     asyncio.run(ronde130(c133, i133, paal133, T133))
@@ -15216,6 +15224,7 @@ DRIE239 = dict(LAADPAAL, entities=dict(LAADPAAL["entities"], circuit_limit="sens
                cars=[dict(LAADPAAL["cars"][0], phases="three")])
 hass239f, inst239f, coach239f = bouw237(DRIE239)
 inst239f["devices"] = [DRIE239]
+inst239f["car_phases"] = [{"device": "dev-laadpaal", "car": "car-1", "three": None, "one": 1}]  # zie proef 21
 hass239f.states.zet("sensor.laadpaal_groep", {"state": "16", "attributes": {"state_dynamicCircuitCurrentP1": 16.0,
                                                     "state_dynamicCircuitCurrentP2": 0.0,
                                                     "state_dynamicCircuitCurrentP3": 0.0}})
@@ -15334,6 +15343,109 @@ controle("wordt hij steeds teruggezet, dan laat hij toch los, met de melding",
          f"{rondes240c} {meldingen240c}")
 
 # Na een herstart weet de coach niet wat hij zag, en telt het zoals vroeger: proef 86, 140 en 214.
+
+
+
+print("=== 241. de paal kiest zelf één fase bij een auto die hier op drie laadde: uitleg, geen kritiek (v0.200.0) ===")
+# Bij een klant op 28-10-2026 ging een Easee in de automatische fasemodus midden in de beurt naar één fase en na een
+# kwartier vanzelf terug; op 05-11-2026 begon hij bij het inpluggen op één fase, zes minuten. Dezelfde Ford laadde er
+# eerder op drie fasen, en de coach adviseerde kritiek "zet de auto op eenfasig".
+DRIE241 = dict(LAADPAAL, cars=[dict(LAADPAAL["cars"][0], phases="three", capacity_kwh=60.0)])
+
+
+def beurt241(hass, coach, inst, begin, fasen, paal=DRIE241, herstart=None):
+    """Een beurt: kabel erin, dan per minuut drie of één fase. Geeft de rondes terug."""
+    uit = []
+    hass.states.zet("sensor.laadpaal_status", "ready_to_charge")
+    asyncio.run(ronde(coach, inst, begin, paal=paal))
+    hass.states.zet("sensor.laadpaal_status", "charging")
+    for m, f in enumerate(fasen, start=1):
+        hass.states.zet("sensor.laadpaal_stroom", "10.8" if f == 3 else "13.5")
+        hass.states.zet("sensor.laadpaal_vermogen", "7600" if f == 3 else "3070")
+        if herstart is not None and m == herstart:
+            coach = herstart213(hass)
+            coach._restore(inst)
+        b, v = asyncio.run(ronde(coach, inst, begin + dt.timedelta(minutes=m), paal=paal))
+        uit.append((m, f, b.get("tip") or "", [d[2].get("message", "") for d in v if d[0] == "notify"]))
+    return coach, uit
+
+
+def los241(hass, coach, inst, nu, paal=DRIE241):
+    hass.states.zet("sensor.laadpaal_status", "disconnected")
+    hass.states.zet("sensor.laadpaal_stroom", "0")
+    hass.states.zet("sensor.laadpaal_vermogen", "0")
+    for m in range(3):
+        asyncio.run(ronde(coach, inst, nu + dt.timedelta(minutes=m), paal=paal))
+    asyncio.run(coach.hass.afmaken())
+
+
+T241 = dt.datetime(2026, 10, 28, 12, 40)
+inst241 = instellingen(devices=[DRIE241])
+hass241, _, coach241 = bouw(huis(status="disconnected", teruglevering=0.0, afname=1500.0), inst241)
+hass241.states.zet("sensor.laadpaal_max", "16")
+coach241.async_boost("dev-laadpaal", True)
+# 1. Midden in de beurt van drie naar één fase.
+coach241, midden241 = beurt241(hass241, coach241, inst241, T241, [3] * 5 + [1] * 8)
+for r in midden241[3:5] + midden241[-2:]:
+    print(f"  {r[0]:>2} {r[1]}F tip={r[2][:60]!r} {[m[:40] for m in r[3]]}")
+controle("drie fasen gezien staat in de instellingen", any(
+    r.get("car") == "car-1" and r.get("three") for r in inst241.get("car_phases") or []), f"{inst241.get('car_phases')}")
+controle("naar één fase: geen kritiek op de telefoon, geen advies om het profiel te wijzigen",
+         not any("eenfasig" in m or "één fase" in m for r in midden241 for m in r[3])
+         and not any("eenfasig" in r[2] for r in midden241), f"{midden241}")
+controle("wel de uitleg op de kaart", midden241[-1][2].startswith("De paal laadt nu op één fase"), f"{midden241[-1]}")
+geschiedenis241 = [m["message"] for m in asyncio.run(hass241.data["domotiapp_coach"]["meldingen"].async_list())]
+controle("en één keer in de geschiedenis", sum("De paal laadt nu op één fase" in m for m in geschiedenis241) == 1,
+         f"{geschiedenis241}")
+controle("en de coach rekent met één fase", coach241._fase_nu.get("dev-laadpaal") == 1, "")
+los241(hass241, coach241, inst241, T241 + dt.timedelta(minutes=20))
+
+# 2. De volgende beurt begint meteen op één fase: dezelfde uitleg, geen kritiek. Met een herstart halverwege.
+coach241, begin241 = beurt241(hass241, coach241, inst241, T241 + dt.timedelta(minutes=30), [1] * 8, herstart=4)
+controle("een nieuwe beurt meteen op één fase, met een herstart erin: uitleg, geen kritiek",
+         begin241[-1][2].startswith("De paal laadt nu op één fase")
+         and not any("eenfasig" in m for r in begin241 for m in r[3]), f"{begin241}")
+los241(hass241, coach241, inst241, T241 + dt.timedelta(minutes=45))
+
+# Ook de laderlimiet onder 16 A is dan niet de oorzaak: hij laadde hier al op drie fasen.
+coach241._fase_nu["dev-laadpaal"] = 1
+controle("een laderlimiet van 14 A bij een auto die hier op drie fasen laadde: geen kritiek over de limiet",
+         coach241._fasetip(inst241, DRIE241, types.SimpleNamespace(charging=True, max_amps=14.0)) == "", "")
+coach241._fase_nu.pop("dev-laadpaal", None)
+
+# 3. Een auto die hier nog nooit op drie fasen laadde: de eerste beurt op één fase nog niets, de tweede de melding.
+inst241b = instellingen(devices=[DRIE241])
+hass241b, _, coach241b = bouw(huis(status="disconnected", teruglevering=0.0, afname=1500.0), inst241b)
+hass241b.states.zet("sensor.laadpaal_max", "16")
+coach241b.async_boost("dev-laadpaal", True)
+coach241b, eerste241 = beurt241(hass241b, coach241b, inst241b, T241, [1] * 6)
+controle("nooit drie fasen, eerste beurt op één fase: nog geen melding",
+         not any(r[2] for r in eerste241) and not any(m for r in eerste241 for m in r[3] if "fase" in m), f"{eerste241}")
+los241(hass241b, coach241b, inst241b, T241 + dt.timedelta(minutes=10))
+controle("die beurt telt", any(r.get("car") == "car-1" and r.get("one") == 1 and not r.get("three")
+                               for r in inst241b.get("car_phases") or []), f"{inst241b.get('car_phases')}")
+coach241b, tweede241 = beurt241(hass241b, coach241b, inst241b, T241 + dt.timedelta(minutes=20), [1] * 6)
+controle("de tweede beurt op één fase: de melding van nu, kritiek",
+         "eenfasig" in tweede241[-1][2] and sum("eenfasig" in m for r in tweede241 for m in r[3]) == 1, f"{tweede241}")
+
+# 4. Een Alfen zonder fasewissel net zo; met fasewissel krijgt hij niets, zoals altijd.
+ALFEN241 = {**ALFEN, "cars": [dict(LAADPAAL["cars"][0], phases="three", capacity_kwh=60.0)]}
+i241 = inst130(ALFEN241)
+i241["car_phases"] = [{"device": ALFEN241["id"], "car": "car-1", "three": "2026-10-01T10:00:00", "one": 0}]
+h241, _, c241 = bouw(huis90(teruglevering=0.0), i241)
+asyncio.run(ronde130(c241, i241, ALFEN241, T241))
+h241.states.zet("sensor.alfen_laadt", "on")
+h241.states.zet("sensor.alfen_modus3", "C2")
+for m in range(1, 6):
+    h241.states.zet("sensor.laadpaal_stroom", "13.1")
+    h241.states.zet("sensor.laadpaal_vermogen", "3100")
+    a241, _ = asyncio.run(ronde130(c241, i241, ALFEN241, T241 + dt.timedelta(minutes=m)))
+controle("een Alfen die hier op drie fasen laadde: de uitleg", (a241.get("tip") or "").startswith("De paal laadt nu op één fase"),
+         f"{a241.get('tip')}")
+paal241 = types.SimpleNamespace(charging=True, max_amps=16.0)
+WISSEL241 = {**ALFEN241, "phase_switching": True, "entities": {**ALFEN241["entities"], "phases": "select.alfen_fasen"}}
+controle("een Alfen die mag wisselen: niets", c241._fasewissel_aan(WISSEL241)
+         and c241._fase_uitleg(i241, WISSEL241, paal241) == "" and c241._fasetip(i241, WISSEL241, paal241) == "", "")
 
 
 print()

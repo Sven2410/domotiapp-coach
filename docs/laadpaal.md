@@ -1667,3 +1667,32 @@ fasen van de groep. Elke beveiliging is met een mutatie nagekeken.
 
 **Wat er overblijft:** stuurt iets anders de paal alleen naar het maximum, dan ziet de coach dat niet als een tweede
 sturing (dat kan ook de app of een houdbaarheid die afloopt zijn). Gezien is dat nog niet.
+
+
+## De paal kiest zelf één fase: uitleg in plaats van kritiek (v0.200.0)
+
+Bij een klant op 28-10-2026 ging een Easee in de automatische fasemodus midden in de beurt naar één fase, en na een
+kwartier vanzelf terug naar drie. Op 05-11-2026 begon hij bij het inpluggen op één fase, zes minuten lang, terwijl
+dezelfde Ford er 25 minuten eerder op drie fasen laadde. Beide keren kwam de kritieke melding "zet de auto dan op
+eenfasig", en dat advies was fout: het profiel klopte, de paal koos zelf.
+
+Nu houdt de coach per auto aan een paal bij wat hij zag (`car_phases` in de instellingen: `three`, wanneer hij er voor
+het eerst op drie fasen laadde, en `one`, hoeveel beurten alleen op één fase). Drie fasen gezien gaat meteen de
+opslag in en overleeft een herstart; een beurt op één fase telt als de kabel eruit gaat.
+- **Laadde deze auto hier ooit op drie fasen** (in deze beurt of een eerdere), dan geen kritiek en niet naar de
+  telefoon, ook niet de melding over de laderlimiet. Op de kaart en één keer in de geschiedenis: "De paal laadt nu op
+  één fase. Dat kiest hij zelf; deze auto laadde hier eerder op drie fasen. De coach rekent zolang met één fase."
+  (`_fase_uitleg`, tipsoort `fase-uitleg`).
+- **Nog nooit op drie fasen**: de melding van nu ("Dit profiel staat op driefasig ..."), maar pas vanaf de tweede beurt
+  op één fase (`FASE_BEURTEN`), niet in de eerste.
+- De groep op één fase (v0.198.0) blijft gaan zoals hij ging; een auto die eenfasig staat en driefasig laadt ook.
+- Het rekenen verandert niet: één fase zolang die gemeten wordt (`phases_measured`), na `FASEMETING_RONDEN` op drie
+  weer drie.
+- Een Alfen zonder fasewissel net zo; een Alfen met fasewissel krijgt niets, zoals altijd.
+
+Proef 241 in test_coach.py: van drie naar één midden in de beurt, een nieuwe beurt meteen op één fase met een herstart
+erin, een auto die nooit driefasig was (eerste beurt niets, tweede de melding), de laderlimiet, en een Alfen met en
+zonder fasewissel. Proef 21, 51, 133 en 239 gaan uit van een auto die al een beurt op één fase had, en in het
+virtuele huis ook `easee-een-fase-groep` en `alfen-een-fase-zon` (`een_fase_eerder`). Het scenario
+`easee-een-fase-drie-eerder` is dezelfde beurt met een auto die er eerder op drie fasen laadde: geen melding, even snel
+vol. Elke beveiliging is met een mutatie nagekeken.

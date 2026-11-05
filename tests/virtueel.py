@@ -1175,6 +1175,11 @@ class Scenario:
     # tien procent, zoals `car_pace` in de instellingen, of (kW, vanaf welke
     # accustand hij remde). Zie `_tempo_leren`.
     geleerd_tempo: dict = field(default_factory=dict)
+    # Hoeveel eerdere beurten de auto aan deze paal alleen op één fase laadde, en nooit op drie (`car_phases`,
+    # v0.200.0). Pas vanaf de tweede zulke beurt zegt de coach dat het profiel niet klopt.
+    een_fase_eerder: int = 0
+    # Of de auto hier eerder op drie fasen laadde: dan is één fase de keuze van de paal (v0.200.0).
+    drie_eerder: bool = False
     # Een vaatwasser in huis, met haar eigen schema ("klaar om"); None is geen.
     vaatwasser: Vaatwasser | None = None
     vaatwasser_klaar_om: str | None = "07:00"
@@ -1805,6 +1810,8 @@ def instellingen(s: Scenario) -> dict:
                            "min_interval_minutes": 30, "min_duration_seconds": 60},
         },
         "car_soc": [],
+        "car_phases": ([{"device": "paal", "car": "auto", "three": "2026-10-01T10:00:00" if s.drie_eerder else None,
+                         "one": s.een_fase_eerder}] if s.een_fase_eerder or s.drie_eerder else []),
         # Wat een eerdere beurt over deze auto leerde, per band van tien procent.
         # Een getal is een band waarin de auto over de hele breedte remde; een
         # paar (kW, vanaf) een auto die pas vanaf die accustand remde (v0.128.0).
