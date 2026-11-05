@@ -15234,6 +15234,108 @@ hass239f.states.zet("sensor.laadpaal_groep", "16")
 controle("zonder de fasen van de groep: de oude melding", "eenfasig" in coach239f._fasetip(inst239f, DRIE239, paal239), "")
 
 
+
+print("=== 240. de batterij valt even weg: geen valse 'iets anders stuurt' (v0.199.0) ===")
+# Bij de eigenaar op 29-10 en 05-11-2026 viel het netwerk ruim een minuut weg. De Anker deed zelf nul; de coach
+# nam hem over "want het plan zegt standby" (de accustand was weg), schreef zijn modus aan een onbereikbare
+# select, en toen de Anker op zijn eigen stand terugkwam telde dat als een andere sturing: een kritieke melding om
+# kwart voor vier, en een uur niet gestuurd.
+
+# 1. Een batterij die zelf nul doet en even helemaal weg is, houdt haar eigen stand.
+hass240, _, coach240 = bouw(huis75(modus="self_consumption"), instellingen(devices=[LAADPAAL, BATTERIJ106]))
+anker240 = Anker112(hass240)
+hass240.services = anker240
+anker240.knop()
+NU240 = dt.datetime(2026, 11, 5, 3, 50)
+
+
+def ronde240(seconden, tik=True):
+    klok112.utcnow = lambda: NU240 + dt.timedelta(seconds=seconden)
+    try:
+        b = asyncio.run(ronde75(hass240, coach240, NU240 + dt.timedelta(seconds=seconden)))
+        if tik:
+            asyncio.run(coach240._async_regel_tik())
+            asyncio.run(hass240.afmaken())
+        return b
+    finally:
+        klok112.utcnow = echte_klok112
+
+
+ronde240(0)
+ronde240(60)
+controle("eerst doet hij het zelf", coach240._batterij["dev-batterij"].get("zelf") is True, "")
+hass240.services.verstuurd.clear()
+for eid in ("sensor.batterij_soc", "select.batterij_modus", "sensor.batterij_vermogen", "number.batterij_vermogen",
+            "select.batterij_richting"):
+    hass240.states.zet(eid, "unavailable")
+weg240 = [ronde240(120), ronde240(125, tik=True), ronde240(150)]
+sessie240 = coach240._batterij["dev-batterij"]
+controle("weg: hij houdt zijn eigen stand en de coach schrijft niets",
+         sessie240.get("zelf") is True and zet75(hass240) == ([], [], []), f"{sessie240.get('zelf')} {zet75(hass240)}")
+# Terug op zijn eigen stand, de accustand er weer.
+hass240.states.zet("sensor.batterij_soc", "5")
+hass240.states.zet("select.batterij_modus", "self_consumption")
+hass240.states.zet("sensor.batterij_vermogen", {"state": "0", "attributes": {"unit_of_measurement": "W"}})
+anker240.knop()
+# Eerst een tik van de meter met de accustand er weer, terwijl het besluit van de ronde nog zonder accustand is.
+klok112.utcnow = lambda: NU240 + dt.timedelta(seconds=165)
+try:
+    asyncio.run(coach240._async_regel_tik())
+    asyncio.run(hass240.afmaken())
+finally:
+    klok112.utcnow = echte_klok112
+controle("een tik met de accustand terug, en het besluit nog zonder: hij houdt zijn eigen stand",
+         coach240._batterij["dev-batterij"].get("zelf") is True, "")
+terug240 = [ronde240(180 + 60 * i) for i in range(4)]
+meldingen240 = [d[2].get("message", "") for d in hass240.services.verstuurd if d[0] == "notify"]
+geschiedenis240 = [m["message"] for m in asyncio.run(hass240.data["domotiapp_coach"]["meldingen"].async_list())]
+controle("terug: geen 'iets anders stuurt' en de coach laat hem niet los",
+         not any("Iets anders stuurt" in m for m in geschiedenis240) and not coach240._batterij["dev-batterij"].get("vreemd"),
+         f"{geschiedenis240}")
+controle("en hij doet het nog steeds zelf, zonder overname", coach240._batterij["dev-batterij"].get("zelf") is True
+         and not any("neemt het over" in m for m in geschiedenis240), f"{geschiedenis240}")
+
+# 2. De coach stuurt, en zijn modus kwam niet aan omdat de select weg was: opnieuw schrijven, geen melding.
+hass240b, _, coach240b = bouw(huis75(modus="third_party_control"), instellingen(devices=[LAADPAAL, BATTERIJ]))
+NU240b = dt.datetime(2026, 11, 5, 3, 50)
+asyncio.run(ronde75(hass240b, coach240b, NU240b))
+controle("de coach stuurt en ziet zijn modus", coach240b._batterij["dev-batterij"].get("stuurt") is True
+         and coach240b._batterij["dev-batterij"].get("modus_gezien", True) is True, "")
+hass240b.states.zet("select.batterij_modus", "unavailable")
+coach240b._batterij["dev-batterij"]["modus_gezien"] = True
+asyncio.run(coach240b._async_batterij_modus(BATTERIJ, "control_mode"))
+controle("een modus aan een onbereikbare select is niet gezien",
+         coach240b._batterij["dev-batterij"].get("modus_gezien") is False, "")
+hass240b.states.zet("select.batterij_modus", "self_consumption")
+r240b = [asyncio.run(ronde75(hass240b, coach240b, NU240b + dt.timedelta(minutes=m))) for m in (1, 2, 3)]
+geschreven240b = zet75(hass240b)
+meldingen240b = [m["message"] for m in asyncio.run(hass240b.data["domotiapp_coach"]["meldingen"].async_list())]
+controle("de modus kwam niet aan: hij schrijft hem opnieuw, zonder melding, en blijft sturen",
+         hass240b.states.get("select.batterij_modus").state == "third_party_control"
+         and not any("Iets anders stuurt" in m for m in meldingen240b)
+         and coach240b._batterij["dev-batterij"].get("stuurt") is True, f"{meldingen240b}")
+
+# 3. Iets anders zet hem steeds terug, ook na het opnieuw schrijven: dan is het wel een andere sturing.
+hass240c, _, coach240c = bouw(huis75(modus="third_party_control"), instellingen(devices=[LAADPAAL, BATTERIJ]))
+asyncio.run(ronde75(hass240c, coach240c, NU240b))
+hass240c.states.zet("select.batterij_modus", "unavailable")
+asyncio.run(coach240c._async_batterij_modus(BATTERIJ, "control_mode"))
+rondes240c = 0
+for m in range(1, 10):
+    hass240c.states.zet("select.batterij_modus", "self_consumption")
+    b240c = asyncio.run(ronde75(hass240c, coach240c, NU240b + dt.timedelta(minutes=m)))
+    rondes240c = m
+    if b240c.get("foreign"):
+        break
+meldingen240c = [m["message"] for m in asyncio.run(hass240c.data["domotiapp_coach"]["meldingen"].async_list())]
+print(f"  steeds terug: na {rondes240c} ronden los")
+controle("wordt hij steeds teruggezet, dan laat hij toch los, met de melding",
+         b240c.get("foreign") is True and rondes240c <= 2 + 2 + 1 and any("Iets anders stuurt" in m for m in meldingen240c),
+         f"{rondes240c} {meldingen240c}")
+
+# Na een herstart weet de coach niet wat hij zag, en telt het zoals vroeger: proef 86, 140 en 214.
+
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
