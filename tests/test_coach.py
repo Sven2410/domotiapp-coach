@@ -15448,6 +15448,129 @@ controle("een Alfen die mag wisselen: niets", c241._fasewissel_aan(WISSEL241)
          and c241._fase_uitleg(i241, WISSEL241, paal241) == "" and c241._fasetip(i241, WISSEL241, paal241) == "", "")
 
 
+print("=== 242. Een andere opgegeven inhoud: wat de coach erop leerde begint opnieuw (v0.201.0) ===")
+# In een klantwoning ging de Growatt op 06-11-2026 van zes naar tien modules, en de opgave van 15,3
+# naar 25,6 kWh. De coach bleef op 12,7 kWh uit de stukken van de oude accu, en tijdens het werk van
+# de installateur kwamen er elf stukken van 0 tot 0,05 kWh per procent bij.
+sys.modules["homeassistant.helpers.entity_registry"] = register192
+ONZIN242 = [0.04, 0.05, 0.0364, 0.0364, 0.0455, 0.04, 0.05]
+controle("een onmogelijk stuk telt niet bij de opgave",
+         abs(coachmod.growatt_inhoud([0.13] * 5 + ONZIN242, 15.3) - 13.0) < 1e-9
+         and coachmod.growatt_inhoud([0.13] * 5 + ONZIN242) < 6.0
+         and coachmod.growatt_inhoud([0.04] * 5, 25.6) is None, "")
+DAG242 = {"net": 1.0, "teveel": 0.0, "tekort": 3.08, "gat": 0.0, "in_vak": False,
+          "op": "2026-11-06T17:00:00+00:00", "begon": "2026-11-06T08:00:00+00:00"}
+
+
+def bouw242(opgave, rij, merk="growatt"):
+    apparaat = dict(GROWATT192, battery=dict(GROWATT192["battery"], capacity_kwh=opgave), brand=merk)
+    inst = instellingen(devices=[apparaat], battery_state=[dict(rij, device="dev-growatt")])
+    inst["contract"] = inst192["contract"]
+    hass, store, coach = bouw(dict(waarden192), inst)
+    coach._huis_kwh = {u: 0.7 for u in range(24)}
+    coach._async_huisverbruik = _huis192
+    hass.services.antwoorden = dict(hass192.services.antwoorden)
+    gezegd = []
+
+    async def tell(bericht, kritiek=False, telefoon=True):
+        gezegd.append(bericht)
+
+    coach._async_tell = tell
+    return hass, store, coach, inst, apparaat, gezegd
+
+
+def rij242(store):
+    return next((r for r in store.instellingen.get("battery_state") or [] if r.get("device") == "dev-growatt"), {})
+
+
+def inhoud242(coach, inst, apparaat, store):
+    b = coach._batterij_van(T242, inst, apparaat, rij242(store))
+    coach._growatt_batterij(b, apparaat, rij242(store))
+    return b.capacity_kwh
+
+
+T242 = dt.datetime(2026, 11, 6, 18, 0)
+OUD242 = {"capacity_given": 15.3, "growatt_kwh_pct": [0.13] * 5 + ONZIN242, "growatt_nachten": [1.2, 0.8, 1.0],
+          "growatt_nachten_v": coachmod.GROWATT_NACHTEN_V, "growatt_dag": DAG242, "growatt_vloer": 15}
+# 1. Dezelfde opgave: niets eruit, en de onzin telt niet mee.
+h242, s242, c242, i242, a242, g242 = bouw242(15.3, OUD242)
+asyncio.run(c242._one_batterij(T242, i242, a242, "steer"))
+r242 = rij242(s242)
+controle("dezelfde opgave: niets leeg", len(r242.get("growatt_kwh_pct") or []) == 12 and r242.get("growatt_nachten") == [1.2, 0.8, 1.0]
+         and not (r242.get("growatt_dag") or {}).get("telt_niet") and not g242, f"{r242} {g242}")
+controle("en de inhoud uit de stukken die kunnen", abs(inhoud242(c242, i242, a242, s242) - 13.0) < 1e-9, "")
+
+# 2. De opgave naar 25,6, en een herstart voor de volgende ronde: de lijsten leeg, de dag telt niet, de opgave geldt.
+i242["devices"][0]["battery"]["capacity_kwh"] = 25.6
+c242b = coachmod.ChargerCoach(h242)
+c242b._sleep = lambda seconds: asyncio.sleep(0)
+c242b._huis_kwh = {u: 0.7 for u in range(24)}
+c242b._async_huisverbruik = _huis192
+c242b._async_tell = c242._async_tell
+asyncio.run(c242b._one_batterij(T242 + dt.timedelta(minutes=1), i242, a242, "steer"))
+r242 = rij242(s242)
+print(f"  na de nieuwe opgave: {dict((k, r242.get(k)) for k in ('capacity_given', 'growatt_kwh_pct', 'growatt_nachten', 'growatt_dag'))}")
+controle("een andere opgave: stukken en nachten leeg, de dag van vandaag telt niet",
+         r242.get("capacity_given") == 25.6 and r242.get("growatt_kwh_pct") == [] and r242.get("growatt_nachten") == []
+         and (r242.get("growatt_dag") or {}).get("telt_niet") is True and r242.get("growatt_vloer") == 15, f"{r242}")
+controle("en de coach rekent met de opgave", inhoud242(c242b, i242, a242, s242) == 25.6, "")
+controle("met één regel in de geschiedenis", len(g242) == 1 and "25,6 kWh opgegeven in plaats van 15,3" in g242[0], f"{g242}")
+nachten242 = list(r242.get("growatt_nachten") or [])
+asyncio.run(c242b._async_growatt_dag_af(T242 + dt.timedelta(hours=14), i242, a242,
+                                        c242b._batterij_van(T242, i242, a242, r242),
+                                        {**c242b._growatt_dag_uit(r242["growatt_dag"])[0], "gat": 0.0}))
+controle("die dag gaat niet in de nachten", rij242(s242).get("growatt_nachten") == nachten242, f"{rij242(s242)}")
+dag242 = dict(c242b._batterij["dev-growatt"].get("growatt_dag") or {})
+controle("ook niet in het geheugen van de coach", dag242.get("telt_niet") is True, f"{dag242}")
+
+# 3. Wat daarna komt telt weer, en een opgave die minder dan 10% scheelt maakt niets leeg.
+asyncio.run(c242b._async_batterij_bewaren(i242, "dev-growatt", {"growatt_kwh_pct": [0.2, 0.21, 0.2]}))
+i242["devices"][0]["battery"]["capacity_kwh"] = 26.0
+asyncio.run(c242b._one_batterij(T242 + dt.timedelta(minutes=2), i242, a242, "steer"))
+controle("een kleine wijziging: niets leeg, geen regel", rij242(s242).get("growatt_kwh_pct") == [0.2, 0.21, 0.2]
+         and rij242(s242).get("capacity_given") == 25.6 and len(g242) == 1, f"{rij242(s242)} {g242}")
+controle("drie nieuwe stukken: de gemeten inhoud", abs(inhoud242(c242b, i242, a242, s242) - 20.0) < 1e-9, "")
+
+# 4. Een sprong in de accustand en een onmogelijk stuk tellen niet; een gewoon stuk wel.
+i242["devices"][0]["battery"]["capacity_kwh"] = 25.6
+asyncio.run(c242b._async_batterij_bewaren(i242, "dev-growatt", {"growatt_kwh_pct": [], "capacity_given": 25.6}))
+sessie242 = c242b._batterij["dev-growatt"]
+
+
+def stap242(soc, erin, m):
+    h242.states.zet("sensor.growatt_soc", {"state": str(soc), "attributes": {"unit_of_measurement": "%"}})
+    h242.states.zet("sensor.growatt_in", {"state": str(erin), "attributes": {"unit_of_measurement": "kWh"}})
+    asyncio.run(c242b._one_batterij(T242 + dt.timedelta(minutes=10 + m), i242, a242, "steer"))
+    return list(rij242(s242).get("growatt_kwh_pct") or [])
+
+
+stap242(13, 400.0, 0)
+controle("van 13 naar 99% in één meting: geen stuk", stap242(99, 400.0, 1) == [], f"{rij242(s242)}")
+stap242(20, 400.0, 2)
+controle("ook niet als de teller meesprong", stap242(32, 403.07, 3) == [], f"{rij242(s242)}")
+stap242(20, 400.0, 2)
+stap242(25, 401.3, 3)
+controle("een gewoon stuk van 10% telt", stap242(30, 402.6, 4) == [0.26], f"{rij242(s242)}")
+controle("een stuk van 0,04 kWh per procent bij 25,6 kWh niet", stap242(40, 403.0, 5) == [0.26], f"{rij242(s242)}")
+
+# 5. Van voor deze versie, zonder opgave in de rij: een Growatt leert één keer opnieuw, zonder regel;
+# een andere batterij houdt haar rendement en krijgt de opgave erbij.
+h242m, s242m, c242m, i242m, a242m, g242m = bouw242(25.6, {k: v for k, v in OUD242.items() if k != "capacity_given"})
+asyncio.run(c242m._one_batterij(T242, i242m, a242m, "steer"))
+controle("van voor deze versie: een Growatt leert opnieuw, zonder melding",
+         rij242(s242m).get("growatt_kwh_pct") == [] and rij242(s242m).get("capacity_given") == 25.6 and not g242m,
+         f"{rij242(s242m)} {g242m}")
+STAPPEN242 = {"in": {"0": {"n": 30, "ac": 3.0, "cel": 2.8, "s": 9000}}, "uit": {}}
+h242r, s242r, c242r, i242r, a242r, g242r = bouw242(10.0, {"rte_steps": STAPPEN242, "growatt_kwh_pct": [0.1] * 3},
+                                                   merk="anker")
+asyncio.run(c242r._async_opgave_anders(i242r, a242r, rij242(s242r), c242r._batterij_sessie("dev-growatt")))
+controle("een andere batterij van voor deze versie: niets eruit", rij242(s242r).get("rte_steps") == STAPPEN242
+         and rij242(s242r).get("capacity_given") == 10.0, f"{rij242(s242r)}")
+i242r["devices"][0]["battery"]["capacity_kwh"] = 15.0
+asyncio.run(c242r._async_opgave_anders(i242r, a242r, rij242(s242r), c242r._batterij_sessie("dev-growatt")))
+controle("en bij een andere opgave het rendement per stap opnieuw", rij242(s242r).get("rte_steps") is None
+         and rij242(s242r).get("growatt_kwh_pct") == [0.1] * 3 and len(g242r) == 1, f"{rij242(s242r)} {g242r}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

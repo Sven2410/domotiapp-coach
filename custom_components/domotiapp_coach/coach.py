@@ -55,6 +55,7 @@ from .const import (
 )
 from .archive import async_get_archive
 from .batterij import (
+    INHOUD_ANDERS,
     HANDELEN,
     HANDELEN_KAN_NIET,
     Besluit,
@@ -69,6 +70,7 @@ from .batterij import (
     Batterij,
     GROWATT_HOUDEN_KWH,
     GROWATT_MIN_PCT,
+    GROWATT_SPRONG_PCT,
     GROWATT_STUK_PCT,
     GROWATT_VOORAF,
     GrowattSchema,
@@ -87,6 +89,7 @@ from .batterij import (
     GROWATT_DAG,
     GROWATT_NACHTEN_V,
     growatt_inhoud,
+    growatt_stuk_kan,
     growatt_max_w,
     growatt_nacht,
     growatt_narekening,
@@ -7679,6 +7682,7 @@ class ChargerCoach:
         naam = device.get("name") or t("De batterij")
         rij = self._batterij_rij(settings, device_id)
         sessie = self._batterij_sessie(device_id)
+        rij = await self._async_opgave_anders(settings, device, rij, sessie)
         if "voorraad" not in sessie:
             sessie["voorraad"] = self._voorraad_uit(rij)
         b = self._batterij_van(now, settings, device, rij)
@@ -8766,6 +8770,73 @@ class ChargerCoach:
             return False
         return True
 
+    @staticmethod
+    def _inhoud_opgave(device: dict[str, Any]) -> float | None:
+        """De inhoud die bij de batterij is ingevuld, in kWh, of None."""
+        try:
+            return float((device.get("battery") or {}).get("capacity_kwh") or 0.0) or None
+        except (TypeError, ValueError):
+            return None
+
+    async def _async_opgave_anders(
+        self, settings: dict[str, Any], device: dict[str, Any], rij: dict[str, Any], sessie: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Een andere opgegeven inhoud: wat de coach erop leerde begint opnieuw (v0.201.0).
+
+        In de klantwoning ging de Growatt op 06-11-2026 van zes naar tien modules, en de opgave van
+        15,3 naar 25,6 kWh. De coach rekende verder met de 12,7 kWh die hij van de oude accu leerde,
+        want een meting gaat voor een opgave, en het duurt weken voor nieuwe stukken de mediaan
+        halen. Wijkt de opgave meer dan `INHOUD_ANDERS` af van die waarbij hij leerde, dan gaan de
+        stukken, de nachten en de telling van die dag eruit (een Growatt), en de stappen van het
+        rendement (die rekenen met de inhoud). Tot er weer genoeg is, geldt de opgave. Van voor deze
+        versie staat er geen opgave bij: dan leert een Growatt één keer opnieuw, want bij welke accu
+        zijn stukken horen weet de coach niet.
+        """
+        opgave = self._inhoud_opgave(device)
+        if opgave is None:
+            return rij
+        try:
+            vorige = float(rij["capacity_given"]) if rij.get("capacity_given") is not None else None
+        except (TypeError, ValueError):
+            vorige = None
+        if vorige is not None and abs(opgave - vorige) <= INHOUD_ANDERS * vorige:
+            return rij
+        device_id = device.get("id", "")
+        nieuw: dict[str, Any] = {"capacity_given": round(opgave, 3)}
+        schema = device.get("brand") in BATTERIJ_SCHEMA
+        weg: list[str] = []
+        if schema and (vorige is not None or rij.get("growatt_kwh_pct")):
+            for sleutel in ("growatt_kwh_pct", "growatt_nachten"):
+                if rij.get(sleutel):
+                    weg.append(sleutel)
+                nieuw[sleutel] = []
+            sessie["growatt_stuk"] = None
+            # De telling van vandaag rust op de oude accu: die dag telt niet mee.
+            if isinstance(sessie.get("growatt_dag"), dict):
+                sessie["growatt_dag"]["telt_niet"] = True
+            if isinstance(rij.get("growatt_dag"), dict):
+                nieuw["growatt_dag"] = {**rij["growatt_dag"], "telt_niet": True}
+                weg.append("growatt_dag")
+        if vorige is not None and rij.get("rte_steps") is not None:
+            weg.append("rte_steps")
+            nieuw["rte_steps"] = None
+            nieuw["rte_power"] = None
+            meter = sessie.get("rte_meter")
+            if meter is not None:
+                meter.sommen = {}
+            sessie["rte_nieuw"] = False
+        await self._async_batterij_bewaren(settings, device_id, nieuw)
+        _LOGGER.info("%s: opgegeven inhoud %s kWh (was %s); opnieuw: %s", device_id, getal(opgave, 1),
+                     "onbekend" if vorige is None else getal(vorige, 1), ", ".join(weg) or "niets")
+        if vorige is not None and weg:
+            await self._async_tell(
+                t("{naam} heeft nu {kwh} kWh opgegeven in plaats van {oud} kWh. Wat de coach van deze batterij "
+                  "leerde begint opnieuw; tot dan rekent hij met {kwh} kWh.",
+                  naam=device.get("name") or t("De batterij"), kwh=getal(opgave, 1), oud=getal(vorige, 1)),
+                telefoon=False,
+            )
+        return self._batterij_rij(settings, device_id)
+
     def _growatt_batterij(self, b: Batterij, device: dict[str, Any], rij: dict[str, Any]) -> None:
         """Wat een Growatt anders maakt dan een batterij met een stuurgetal (v0.150.0).
 
@@ -8780,7 +8851,7 @@ class ChargerCoach:
         # In een vak met de stopgrens op de accustand staat hij stil (v0.155.0).
         b.kan_vasthouden = True
         b.vol_vasthouden = False
-        inhoud = growatt_inhoud(rij.get("growatt_kwh_pct"))
+        inhoud = growatt_inhoud(rij.get("growatt_kwh_pct"), self._inhoud_opgave(device))
         if inhoud is not None:
             b.capacity_kwh = inhoud
         max_w = growatt_max_w(rij.get("growatt_w_pct"))
@@ -9154,14 +9225,19 @@ class ChargerCoach:
         stuk = sessie.get("growatt_stuk")
         if soc is None or erin is None or eruit is None:
             sessie["growatt_stuk"] = None
-        elif stuk is None or soc < stuk["soc_nu"] or eruit > stuk["uit"] + 0.05:
+        elif (stuk is None or soc < stuk["soc_nu"] or eruit > stuk["uit"] + 0.05
+              or soc - stuk["soc_nu"] > GROWATT_SPRONG_PCT):
+            # Een sprong in de accustand is geen laden (v0.201.0): opnieuw, zonder te tellen.
             sessie["growatt_stuk"] = {"soc": soc, "soc_nu": soc, "in": erin, "uit": eruit}
         else:
             stuk["soc_nu"] = soc
             if soc - stuk["soc"] >= GROWATT_STUK_PCT:
                 per_pct = (erin - stuk["in"]) / (soc - stuk["soc"])
-                rij_stukken = list(rij.get("growatt_kwh_pct") or [])[-(GROWATT_BEWAAR - 1):]
-                nieuw["growatt_kwh_pct"] = [*rij_stukken, round(per_pct, 4)]
+                if growatt_stuk_kan(per_pct, self._inhoud_opgave(device)):
+                    rij_stukken = list(rij.get("growatt_kwh_pct") or [])[-(GROWATT_BEWAAR - 1):]
+                    nieuw["growatt_kwh_pct"] = [*rij_stukken, round(per_pct, 4)]
+                else:
+                    _LOGGER.info("%s: stuk van %.4f kWh per procent telt niet bij de opgave", device_id, per_pct)
                 sessie["growatt_stuk"] = {"soc": soc, "soc_nu": soc, "in": erin, "uit": eruit}
 
         geschreven: GrowattSchema | None = sessie.get("growatt_geschreven")
@@ -9360,7 +9436,8 @@ class ChargerCoach:
                 dag["gat"] += self._growatt_gemist(vorige, grens) + max(
                     0.0, (vorige - grens).total_seconds() / 3600.0)
             await self._async_growatt_dag_af(grens, settings, device, b, dag)
-            dag.update(net=0.0, teveel=0.0, tekort=0.0, gat=self._growatt_gemist(grens, now), begon=grens)
+            dag.update(net=0.0, teveel=0.0, tekort=0.0, gat=self._growatt_gemist(grens, now), begon=grens,
+                       telt_niet=False)
             sessie["growatt_dag_bewaard"] = None
         elif vorige is not None:
             dag["gat"] += self._growatt_gemist(vorige, now)
@@ -9435,6 +9512,8 @@ class ChargerCoach:
                 pass
         if isinstance(bewaard.get("in_vak"), bool):
             dag["in_vak"] = bewaard["in_vak"]
+        if bewaard.get("telt_niet") is True:
+            dag["telt_niet"] = True
         try:
             op = _moment(datetime.fromisoformat(str(bewaard.get("op"))))
         except (TypeError, ValueError):
@@ -9458,6 +9537,7 @@ class ChargerCoach:
             "tekort": round(dag["tekort"], 4), "gat": round(dag.get("gat", 0.0), 4),
             "in_vak": dag["in_vak"], "op": dt_util.as_utc(op).isoformat(),
             "begon": dt_util.as_utc(dag["begon"]).isoformat() if dag.get("begon") else None,
+            "telt_niet": bool(dag.get("telt_niet")),
         }})
 
     async def _async_growatt_dag_af(
@@ -9474,6 +9554,10 @@ class ChargerCoach:
         met de reden in het log: wat ontbreekt blijft ontbreken.
         """
         device_id = device.get("id", "")
+        if dag.get("telt_niet"):
+            # Een dag met een andere accu dan de opgave (v0.201.0, `_async_opgave_anders`).
+            _LOGGER.info("%s: nacht telt niet: de opgegeven inhoud veranderde die dag", device_id)
+            return
         if dag["gat"] * 3600.0 <= GROWATT_DAG_GAT.total_seconds():
             tellingen, hoe = [(dag["net"], dag["teveel"], dag["tekort"])], "geteld"
         else:

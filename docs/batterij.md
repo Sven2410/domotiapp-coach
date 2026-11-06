@@ -2517,3 +2517,36 @@ Proef 240 in test_coach.py: een Anker die zelf nul doet en een minuut helemaal w
 geschreven, ook niet bij een tik van de meter met de accustand terug terwijl het besluit nog zonder is), een modus die
 niet aankwam en opnieuw geschreven wordt zonder melding, en iets anders dat hem steeds terugzet (wel de melding). Elke
 beveiliging is met een mutatie nagekeken.
+
+
+## Een andere opgegeven inhoud: de coach leert opnieuw (v0.201.0)
+
+In een klantwoning ging de Growatt op 06-11-2026 van zes naar tien modules, van 15,36 naar 25,6 kWh, en de opgave bij
+de batterij ging mee naar 25,6. De coach bleef rekenen met 12,73 kWh. Een gemeten inhoud gaat voor de opgave
+(`growatt_inhoud`), en de dertig stukken in `growatt_kwh_pct` waren van de oude accu: 0,12 tot 0,14 kWh per procent.
+Het had weken geduurd voor nieuwe stukken de mediaan haalden, en al die tijd plande hij het netladen voor de helft van
+de accu. Tijdens het werk van de installateur hingen er bovendien maar vier modules aan; de accustand sprong van 50
+naar 13% en van 13 naar 99%, en er kwamen elf stukken van 0 tot 0,05 kWh per procent bij. Nog een paar van die en de
+mediaan was naar 5 kWh gezakt.
+
+Nu:
+- **Een andere opgave is een andere accu.** Bij elke batterij bewaart de coach bij welke opgave hij leerde
+  (`capacity_given` in de batterijrij). Wijkt de opgave meer dan `INHOUD_ANDERS` (10%) af, dan gaan eruit
+  (`_async_opgave_anders`): bij een Growatt de stukken, de nachten en de telling van die dag (`telt_niet`: die dag
+  gaat niet in `growatt_nachten`), en bij elke batterij de stappen van het rendement (`rte_steps`), want die rekenen
+  met de inhoud. Tot er weer genoeg is, geldt de opgave. In de geschiedenis staat één regel. De vloer en het hoogste
+  vermogen blijven: die horen bij de omvormer, en een grotere accu levert niet minder.
+- **Van voor deze versie** staat er geen opgave bij. Een Growatt met stukken leert dan één keer opnieuw, want bij welke
+  accu ze horen weet de coach niet; een andere batterij houdt haar rendement en krijgt de opgave erbij.
+- **Een stuk dat niet kan telt niet** (`growatt_stuk_kan`): buiten 50 tot 130% van de opgave per procent
+  (`GROWATT_STUK_MARGE`; op 15-10-2026 gemeten 12 kWh tegen 15,3 op het typeplaatje, 78%). Dat geldt bij het meten en
+  bij het rekenen, dus ook voor wat er al in de lijst staat.
+- **Een sprong in de accustand is geen laden.** Gaat hij tussen twee rondes meer dan `GROWATT_SPRONG_PCT` (10) omhoog,
+  dan begint het stuk opnieuw zonder te tellen, ook als de teller meesprong. Een Growatt meldt eens per vijf minuten;
+  op 25,6 kWh is dat bij vol vermogen nog geen 3%.
+
+Een spanning die verspringt (een accu die eraf gaat) breekt een stuk nog niet af: de coach kent bij een batterij geen
+spanningssensor. Proef 242 in test_coach.py: dezelfde opgave (niets leeg, de onzin telt niet), 15,3 naar 25,6 met een
+herstart ertussen (leeg, de dag telt niet, de opgave geldt, één regel), een wijziging onder de 10%, een sprong met en
+zonder de teller, een stuk van 0,04 bij 25,6, en een rij van voor deze versie bij een Growatt en bij een andere batterij.
+Elke beveiliging is met een mutatie nagekeken.
