@@ -56,6 +56,8 @@ import {
   defaultBattery,
   missingForControl,
   releaseOnOwnPlug,
+  releaseSwitchIsButton,
+  PRESS_KEYS,
   needsRelease,
   typeMeta,
 } from "../devices.js";
@@ -411,7 +413,7 @@ class DacViewDevices extends DacEditorElement {
           <label>${field.label}</label>
           <dac-entity-picker data-entity-key="${field.key}" data-index="${index}"></dac-entity-picker>
           <span class="sub">${field.hint}${field.needed ? ` ${t("Nodig zodra de coach mag sturen.")}` : ""}</span>
-        </div>${field.key === "release_button" ? this.pressHtml_(device, index) : ""}`
+        </div>${PRESS_KEYS[field.key] ? this.pressHtml_(device, index, field.key) : ""}`
       )
       .join("");
 
@@ -1090,20 +1092,22 @@ class DacViewDevices extends DacEditorElement {
   }
 
   /**
-   * Welke druk op de vrijgaveknop telt (v0.102.0). De soorten komen van de knop
-   * zelf: een event-entiteit zegt ze in `event_types`, een actiesensor in
-   * `options`. Leeg is elke druk. Zonder knop geen keuze.
+   * Welke druk op de vrijgaveknop telt (v0.102.0), en sinds v0.204.0 op de
+   * nu-startknop (`PRESS_KEYS`). De soorten komen van de knop zelf: een
+   * event-entiteit zegt ze in `event_types`, een actiesensor in `options`. Leeg
+   * is elke druk. Zonder knop geen keuze.
    */
-  pressHtml_(device, index) {
-    const knop = device.entities?.release_button;
+  pressHtml_(device, index, key = "release_button") {
+    const knop = device.entities?.[key];
     if (!knop) return "";
+    const veld = PRESS_KEYS[key];
     const attr = this.hass_?.states?.[knop]?.attributes ?? {};
-    const soorten = [...new Set([...(attr.event_types ?? attr.options ?? []), device.release_press].filter(Boolean))];
-    const gekozen = device.release_press ?? "";
+    const soorten = [...new Set([...(attr.event_types ?? attr.options ?? []), device[veld]].filter(Boolean))];
+    const gekozen = device[veld] ?? "";
     return `
         <div class="row">
-          <label for="press-${index}">${t("Welke druk")}</label>
-          <select id="press-${index}" data-release-press data-index="${index}">
+          <label for="press-${key}-${index}">${t("Welke druk")}</label>
+          <select id="press-${key}-${index}" data-release-press="${veld}" data-index="${index}">
             <option value=""${gekozen ? "" : " selected"}>${t("Elke druk")}</option>
             ${soorten.map((s) => `<option value="${s}"${s === gekozen ? " selected" : ""}>${s}</option>`).join("")}
           </select>
@@ -1131,6 +1135,10 @@ class DacViewDevices extends DacEditorElement {
     // de bewoner hier te lezen in plaats van te merken aan een dode vaatwasser.
     if (releaseOnOwnPlug(device, this.hass_?.entities).length) {
       return { text: t("de vrijgaveschakelaar is de stekker zelf en haalt de stroom eraf; de coach gebruikt hem niet"), warn: true };
+    }
+    // Een knop bij een schakelaar doet niets (v0.204.0): die hoort bij Vrijgaveknop of Nu-startknop.
+    if (releaseSwitchIsButton(device).length) {
+      return { text: t("bij een vrijgaveschakelaar staat een knop; zet die bij Vrijgaveknop of Nu-startknop"), warn: true };
     }
     if (brandsFor(device.type).length && !device.brand) {
       return { text: t("nog geen merk gekozen"), warn: true };
@@ -1778,8 +1786,8 @@ class DacViewDevices extends DacEditorElement {
         this.paintSummary_(index);
         this.syncSaveBar_();
         // Een andere knop heeft andere soorten druk.
-        if (key === "release_button") {
-          device.release_press = "";
+        if (PRESS_KEYS[key]) {
+          device[PRESS_KEYS[key]] = "";
           this.paintDevices_();
         }
         // De accustand van een Growatt: de rest van hetzelfde apparaat erbij (v0.123.0).
@@ -1796,7 +1804,7 @@ class DacViewDevices extends DacEditorElement {
     for (const keuze of list.querySelectorAll("select[data-release-press]")) {
       const index = Number(keuze.dataset.index);
       keuze.addEventListener("change", () => {
-        this.draft_.devices[index].release_press = keuze.value;
+        this.draft_.devices[index][keuze.dataset.releasePress || "release_press"] = keuze.value;
         this.syncSaveBar_();
       });
     }

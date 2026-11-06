@@ -147,9 +147,13 @@ export const APPARATEN = {
   "Optioneel: een schakelaar of input_boolean die hetzelfde betekent als \"Ingeruimd en dicht\". Zet je die aan, bijvoorbeeld vanaf een eigen dashboard, dan geeft de coach de vaatwasser vrij; zet je hem op de kaart vrij, dan gaat de schakelaar mee aan. Na de beurt gaan ze allebei uit. Niet de schakelaar van de stekker waar de machine op hangt: die haalt de stroom eraf, en die gebruikt de coach dus niet.":
     "Optional: a switch or input_boolean that means the same as \"Loaded and closed\". Turn it on, for example from a dashboard of your own, and the coach releases the dishwasher; release it on the card and the switch turns on too. After the run both turn off. Not the switch of the plug the machine is on: that cuts the power, so the coach does not use it.",
   "Schakelaar nu starten": "Start now switch",
-  "Optioneel: een schakelaar of input_boolean die \"ingeruimd en nu starten\" betekent. Zet je die aan, dan start de coach hem meteen, ook als het niet het goedkoopste moment is. Na de beurt gaat hij uit. Niet de schakelaar van de stekker waar de machine op hangt.":
-    "Optional: a switch or input_boolean that means \"loaded, start now\". Turn it on and the coach starts it straight away, even if it is not the cheapest moment. After the run it turns off. Not the switch of the plug the machine is on.",
+  "Optioneel: een schakelaar of input_boolean die \"ingeruimd en nu starten\" betekent. Zet je die aan, dan start de coach hem meteen, ook als het niet het goedkoopste moment is. Na de beurt gaat hij uit. Niet de schakelaar van de stekker waar de machine op hangt. Een knop hoort bij Nu-startknop.":
+    "Optional: a switch or input_boolean that means \"loaded, start now\". Turn it on and the coach starts it straight away, even if it is not the cheapest moment. After the run it turns off. Not the switch of the plug the machine is on. A button belongs under Start now button.",
   "Vrijgaveknop": "Release button",
+  // v0.204.0: de nu-startknop.
+  "Nu-startknop": "Start now button",
+  "Optioneel: een knop die \"ingeruimd en nu starten\" betekent, zoals de Vrijgaveknop. Eén druk geeft hem vrij en start hem meteen, ook als het niet het goedkoopste moment is; was hij al vrijgegeven, dan start hij nu. Dezelfde knop mag ook bij Vrijgaveknop staan, met een andere soort druk.":
+    "Optional: a button that means \"loaded, start now\", like the Release button. One press releases it and starts it straight away, even if it is not the cheapest moment; if it was already released, it starts now. The same button may also be under Release button, with a different kind of press.",
   "Optioneel: een knop die hetzelfde betekent als \"Ingeruimd en dicht\", bijvoorbeeld een Zigbee-knop naast de vaatwasser (een event-entiteit), een knop-helper (input_button) of een actiesensor. Eén druk geeft hem vrij; nog een keer drukken doet niets. Je krijgt een melding met wanneer hij start.":
     "Optional: a button that means the same as \"Loaded and closed\", for example a Zigbee button next to the dishwasher (an event entity), a button helper (input_button) or an action sensor. One press releases it; pressing again does nothing. You get a notification saying when it starts.",
 
@@ -524,6 +528,8 @@ export const APPARATEN = {
     "For example only a single press, so a double press can do something else.",
   "de vrijgaveschakelaar is de stekker zelf en haalt de stroom eraf; de coach gebruikt hem niet":
     "the release switch is the plug itself and cuts the power; the coach does not use it",
+  "bij een vrijgaveschakelaar staat een knop; zet die bij Vrijgaveknop of Nu-startknop":
+    "a release switch field holds a button; put it under Release button or Start now button",
   "nog geen merk gekozen": "no brand chosen yet",
   "nog niet gekozen wat eraan hangt": "not yet chosen what is plugged in",
   "altijd aan, maar zonder schakelaar": "always on, but without a switch",

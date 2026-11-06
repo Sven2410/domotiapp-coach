@@ -466,7 +466,7 @@ const RELEASE_SWITCH_FIELD = {
 const RELEASE_NOW_SWITCH_FIELD = {
   key: "release_now_switch",
   label: nt("Schakelaar nu starten"),
-  hint: nt("Optioneel: een schakelaar of input_boolean die \"ingeruimd en nu starten\" betekent. Zet je die aan, dan start de coach hem meteen, ook als het niet het goedkoopste moment is. Na de beurt gaat hij uit. Niet de schakelaar van de stekker waar de machine op hangt."),
+  hint: nt("Optioneel: een schakelaar of input_boolean die \"ingeruimd en nu starten\" betekent. Zet je die aan, dan start de coach hem meteen, ook als het niet het goedkoopste moment is. Na de beurt gaat hij uit. Niet de schakelaar van de stekker waar de machine op hangt. Een knop hoort bij Nu-startknop."),
   filter: "all",
   hideRow: true,
 };
@@ -505,8 +505,34 @@ const RELEASE_BUTTON_FIELD = {
   hideRow: true,
 };
 
+/**
+ * Een knop die "ingeruimd en nu starten" betekent (v0.204.0). In een klantwoning hing op
+ * 06-11-2026 een knop met twee knoppen naast de vaatwasser, de ene om vrij te geven en de
+ * andere om meteen te starten; Schakelaar nu starten leest aan of uit, en een knop heeft dat
+ * niet. Dezelfde knop mag ook bij Vrijgaveknop staan, met een andere soort druk
+ * (`release_now_press`).
+ */
+const RELEASE_NOW_BUTTON_FIELD = {
+  key: "release_now_button",
+  label: nt("Nu-startknop"),
+  hint: nt("Optioneel: een knop die \"ingeruimd en nu starten\" betekent, zoals de Vrijgaveknop. Eén druk geeft hem vrij en start hem meteen, ook als het niet het goedkoopste moment is; was hij al vrijgegeven, dan start hij nu. Dezelfde knop mag ook bij Vrijgaveknop staan, met een andere soort druk."),
+  filter: "all",
+  hideRow: true,
+};
+
 /** De velden waarmee de bewoner een vaatwasser vrijgeeft; weg als dat niet hoeft. */
-export const RELEASE_KEYS = ["release_switch", "release_now_switch", "release_button"];
+export const RELEASE_KEYS = ["release_switch", "release_now_switch", "release_button", "release_now_button"];
+
+/** De knopvelden en welke soort druk bij elk hoort (v0.204.0). */
+export const PRESS_KEYS = { release_button: "release_press", release_now_button: "release_now_press" };
+
+/**
+ * Een vrijgaveschakelaar waar een knop in staat (v0.204.0): een knop heeft geen aan of uit, dus
+ * de coach doet er niets mee. Een event-entiteit, een knop-helper of een knop.
+ */
+export const releaseSwitchIsButton = (device) =>
+  ["release_switch", "release_now_switch"].filter((key) =>
+    ["event", "input_button", "button"].includes(String(device?.entities?.[key] ?? "").split(".")[0]));
 
 export const DISHWASHER_BRANDS = [
   {
@@ -573,6 +599,7 @@ export const DISHWASHER_BRANDS = [
       RELEASE_SWITCH_FIELD,
       RELEASE_NOW_SWITCH_FIELD,
       RELEASE_BUTTON_FIELD,
+      RELEASE_NOW_BUTTON_FIELD,
       {
         key: "door",
         label: nt("Deurstand"),
@@ -627,7 +654,7 @@ export const DISHWASHER_BRANDS = [
     id: "overig",
     label: nt("Overig"),
     note: nt("Een vaatwasser zonder koppeling, op een meetstekker: de coach zegt wanneer je hem aan moet zetten en meet wat hij verbruikt."),
-    fields: [RELEASE_SWITCH_FIELD, RELEASE_NOW_SWITCH_FIELD, RELEASE_BUTTON_FIELD],
+    fields: [RELEASE_SWITCH_FIELD, RELEASE_NOW_SWITCH_FIELD, RELEASE_BUTTON_FIELD, RELEASE_NOW_BUTTON_FIELD],
     manual: true,
   },
 ];
@@ -680,6 +707,7 @@ const WASHER_BRANDS = (wat) => [
       RELEASE_SWITCH_FIELD,
       RELEASE_NOW_SWITCH_FIELD,
       RELEASE_BUTTON_FIELD,
+      RELEASE_NOW_BUTTON_FIELD,
       {
         key: "door",
         label: nt("Deur"),
@@ -717,7 +745,7 @@ const WASHER_BRANDS = (wat) => [
     id: "overig",
     label: nt("Overig"),
     ...metWoorden("note", nt("Een {wat} zonder koppeling, op een meetstekker: de coach zegt wanneer je hem aan moet zetten en meet wat hij verbruikt."), { wat }),
-    fields: [RELEASE_SWITCH_FIELD, RELEASE_NOW_SWITCH_FIELD, RELEASE_BUTTON_FIELD],
+    fields: [RELEASE_SWITCH_FIELD, RELEASE_NOW_SWITCH_FIELD, RELEASE_BUTTON_FIELD, RELEASE_NOW_BUTTON_FIELD],
     manual: true,
   },
 ];

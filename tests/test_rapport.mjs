@@ -1134,6 +1134,43 @@ proef("moet eerst vrijgegeven worden: aan toont de vrijgavevelden, uit is klep d
   assert.equal(el.pressHtml_(hc, 0), "", "zonder knop geen keuze");
 });
 
+// Een nu-startknop naast de vrijgaveknop (v0.204.0): in een klantwoning op 06-11-2026 een knop met
+// twee knoppen naast de vaatwasser, de ene om vrij te geven en de andere om meteen te starten.
+
+proef("de nu-startknop: een eigen veld met een eigen soort druk, en een knop bij een schakelaar", async () => {
+  const { brandFields, RELEASE_KEYS, PRESS_KEYS, releaseSwitchIsButton } =
+    await import("../custom_components/domotiapp_coach/frontend/src/devices.js");
+  const sleutels = (d) => brandFields(d).map((f) => f.key);
+  const vaat = (brand, type = "vaatwasser") => ({ id: "v", type, brand, controllable: true, entities: {}, programs: [] });
+  for (const d of [vaat("home_connect"), vaat("overig"), vaat("miele", "wasmachine"), vaat("overig", "droger")]) {
+    assert.ok(sleutels(d).includes("release_now_button"), `${d.type} ${d.brand}: het veld staat er`);
+    assert.ok(sleutels(d).indexOf("release_now_button") === sleutels(d).indexOf("release_button") + 1,
+      `${d.type} ${d.brand}: direct na de vrijgaveknop`);
+  }
+  assert.ok(RELEASE_KEYS.includes("release_now_button"), "weg als er niet vrijgegeven hoeft te worden");
+  assert.deepEqual(PRESS_KEYS, { release_button: "release_press", release_now_button: "release_now_press" });
+  assert.deepEqual(releaseSwitchIsButton({ entities: { release_now_switch: "event.keuken_knop_2" } }), ["release_now_switch"]);
+  assert.deepEqual(releaseSwitchIsButton({ entities: { release_switch: "input_button.vw" } }), ["release_switch"]);
+  assert.deepEqual(releaseSwitchIsButton({ entities: { release_switch: "input_boolean.vw", release_now_button: "event.k" } }), []);
+
+  await import("../custom_components/domotiapp_coach/frontend/src/views/devices.js");
+  const Apparaten = geregistreerd.get("dac-view-devices");
+  const el = Object.create(Apparaten.prototype);
+  el.hass_ = { states: { "event.knop": { state: "unknown", attributes: { event_types: ["multi_press_1", "multi_press_2", "long_press"] } } } };
+  const knop = { ...vaat("overig"), entities: { release_button: "event.knop", release_now_button: "event.knop" },
+                 release_press: "multi_press_1", release_now_press: "multi_press_2" };
+  const vrij = el.pressHtml_(knop, 0, "release_button");
+  const nu = el.pressHtml_(knop, 0, "release_now_button");
+  assert.ok(vrij.includes('value="multi_press_1" selected') && vrij.includes('data-release-press="release_press"'), vrij);
+  assert.ok(nu.includes('value="multi_press_2" selected') && nu.includes('data-release-press="release_now_press"'), nu);
+  assert.ok(!vrij.includes('id="press-release_now_button-0"') && nu.includes('id="press-release_now_button-0"'),
+    "twee keuzelijsten met elk een eigen id");
+  assert.equal(el.pressHtml_({ ...knop, entities: { release_button: "event.knop" } }, 0, "release_now_button"), "",
+    "zonder nu-startknop geen keuze");
+  assert.ok(String(el.summary_({ ...vaat("overig"), entity: "sensor.v", entities: { release_now_switch: "event.knop" } })?.text)
+    .includes("Nu-startknop"), "een knop bij Schakelaar nu starten: het paneel zegt het");
+});
+
 // De eigenaar op 16-09-2026: "ik wil een optie hebben op de kaart dat ik kan aangeven
 // tot hoever de bus laadt. Mijne laadt tot 80% namelijk maar ik kan hem ook op
 // 100% instellen."

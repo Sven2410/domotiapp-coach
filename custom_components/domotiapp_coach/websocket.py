@@ -370,6 +370,8 @@ _DEVICE = _schema(
         # Welke soort druk op de vrijgaveknop telt ("single", "double", ...);
         # leeg is elke druk.
         vol.Optional("release_press", default=""): vol.All(str, vol.Length(max=64)),
+        # En op de nu-startknop (v0.204.0): vrijgegeven én nu starten.
+        vol.Optional("release_now_press", default=""): vol.All(str, vol.Length(max=64)),
         # Wat de bewoner over zijn thuisbatterij invult. Alles mag leeg: wat
         # een sensor zegt gaat voor, en wat niemand zegt weet de coach niet.
         vol.Optional("battery", default=dict): _BATTERY,
