@@ -908,6 +908,9 @@ class Batterij:
     # Een batterij die de coach een tijd niet volgt (v0.167.0): tussen deze twee klokuren laadt hij op
     # vol vermogen, wat er ook gezegd wordt, zoals in een klantwoning op 27-10-2026 van 16:00 tot 16:17.
     eigenwijs: tuple[str, str] | None = None
+    # En een die tussen deze klokuren niets levert (v0.202.0), zoals de Growatt in een klantwoning op
+    # 05-11-2026 van 17:06 tot 22:00 op 95%, terwijl het huis van het net haalde.
+    staakt: tuple[str, str] | None = None
     # --- een Growatt (v0.150.0) ---
     # Een SPH op het API-token: geen stuurgetal, wel een laadschema met drie vakken,
     # een vermogen in procent, een accustand om te stoppen en of hij van het net mag
@@ -1022,6 +1025,8 @@ class Batterij:
             w = 0.0
         if self.eigenwijs and self.eigenwijs[0] <= nu.strftime("%H:%M") < self.eigenwijs[1] and self.soc < 100.0:
             w = self.max_laden_w
+        if self.staakt and self.staakt[0] <= nu.strftime("%H:%M") < self.staakt[1] and w < 0:
+            w = 0.0
         self.sensor_verloop.append((nu, w))
         grens = nu - dt.timedelta(seconds=self.sensor_na_s + 60)
         while len(self.sensor_verloop) > 2 and self.sensor_verloop[0][0] < grens:
