@@ -1696,3 +1696,30 @@ zonder fasewissel. Proef 21, 51, 133 en 239 gaan uit van een auto die al een beu
 virtuele huis ook `easee-een-fase-groep` en `alfen-een-fase-zon` (`een_fase_eerder`). Het scenario
 `easee-een-fase-drie-eerder` is dezelfde beurt met een auto die er eerder op drie fasen laadde: geen melding, even snel
 vol. Elke beveiliging is met een mutatie nagekeken.
+
+
+## Na een opstart eerst herstellen, dan melden (v0.203.0)
+
+In een klantwoning ging op 04-11-2026 de stroom uit, en Home Assistant kwam op zonder netwerk. De Easee-integratie
+laadde zonder paal, de Growatt-integratie gaf een fout. De coach meldde de paal na een minuut als kritiek ("kan het
+vermogen van je laadpaal al een minuut niet lezen") en na tien minuten nog eens (de sensorwacht), en een stekker na twee
+minuten. Pas bij de eerste controle, een kwartier na de opstart, herlaadde hij de integraties (v0.195.0), en binnen drie
+seconden was alles terug. Die avond gebeurde het nog twee keer: vier kritieke meldingen over iets wat de coach daarna
+zelf herstelde.
+
+Nu wacht de coach met melden over wat bij zijn eerste ronde al weg was (`_opstart_rust`), tot `OPSTART_RUST`: de eerste
+controle (`INTEGRATIE_CONTROLE`) en vijf minuten om terug te komen.
+- Komt het in die tijd terug, dan is er niets gemeld, en dus ook geen "doet het weer".
+- Is het daarna nog weg, dan komt de melding van altijd, met alles wat tegelijk stilviel erbij.
+- Het geldt voor de sensorwacht, de melding over de netmeting of het vermogen van de paal (de tip blijft op de kaart
+  staan, alleen de melding wacht), een paal die geen opdracht aanneemt (`_async_paal_weg`) en een stekker die altijd
+  aan moet en niet bereikbaar is (niet een stekker die uit staat: die zet de coach zelf aan).
+- Wat na de eerste ronde wegvalt, telt zoals altijd.
+- Een herstart is een nieuwe start: het moment is de eerste ronde van deze coach (`_opstart`), en er hoeft niets te
+  worden bewaard. Op 04-11 was de rust om 17:07 om; van de drie kritieke meldingen na de opstart was alleen die van de
+  haard overgebleven, een stekker die tot 17:51 weg bleef.
+
+Stekkers die na elkaar wegvallen staan in `docs/smart-plug.md`. Proef 244 in test_coach.py: de sensorwacht (terug na de
+herstelpoging, nog weg na de rust, later weggevallen, een herstart halverwege), een paal die geen opdracht aanneemt
+vanaf de opstart en vanaf een minuut later, het vermogen van de paal in een hele ronde, en de stekkers. Elke beveiliging
+is met een mutatie nagekeken. Vijf oudere proeven bleven ongewijzigd groen.

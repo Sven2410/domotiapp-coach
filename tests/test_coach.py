@@ -15706,6 +15706,155 @@ print(f"  regelaar: {(sessie243r.get('besluit') or types.SimpleNamespace(stand=N
 controle("een batterij met een regelaar: na het half uur eerst opnieuw, en tien minuten later de melding",
          len(niets243(g243r)) == 1 and opnieuw243r and 30 <= opnieuw243r[0] <= 35, f"{opnieuw243r} {g243r}")
 
+print("=== 244. Na een opstart eerst herstellen, dan melden; stekkers na elkaar in één melding (v0.203.0) ===")
+# In een klantwoning kwam op 04-11-2026 na een stroomstoring de paal zonder netwerk op. De coach meldde hem na 1 en
+# na 10 minuten als kritiek, herlaadde hem pas bij de eerste controle, en daarna was alles binnen drie seconden
+# terug. Een stekker die 2,5 minuut na de rest wegviel kreeg een eigen kritieke melding.
+T244 = dt.datetime(2026, 11, 4, 16, 47)
+inst244 = instellingen(devices=[LAADPAAL])
+
+
+def bouw244(vermogen="unavailable"):
+    hass, _, coach = bouw({**huis(status="disconnected"), "sensor.laadpaal_vermogen": vermogen}, inst244)
+    coach._opstart = T244
+    # Hij deed het voor de stroomstoring al: dat staat in het geheugen (`sensor_ooit`).
+    coach._sensor_ooit.add("sensor.laadpaal_vermogen")
+    return hass, coach
+
+
+def wacht244(hass, coach, van, tot, zet=None):
+    """Rondes van de sensorwacht; geeft de minuut van de eerste melding en alle meldingen."""
+    eerste = None
+    for m in range(van, tot):
+        if zet and m in zet:
+            hass.states.zet("sensor.laadpaal_vermogen", zet[m])
+        asyncio.run(coach._async_sensorwacht(inst244, T244 + dt.timedelta(minutes=m)))
+        if eerste is None and lijst219(hass):
+            eerste = m
+    return eerste, lijst219(hass)
+
+
+# 1. Weg sinds de opstart en terug na de herstelpoging: niets, ook geen "doet het weer".
+h244, c244 = bouw244()
+eerste244, l244 = wacht244(h244, c244, 0, 30, {16: "0"})
+controle("sinds de opstart weg en na de herstelpoging terug: geen melding", l244 == [], f"{l244}")
+# 2. Nog weg na de rust: de melding van altijd, op het eind van de rust.
+h244b, c244b = bouw244()
+eerste244b, l244b = wacht244(h244b, c244b, 0, 30)
+print(f"  nog weg: minuut {eerste244b}, {l244b}")
+controle("nog weg na de rust: één kritieke melding na twintig minuten", eerste244b == 20 and len(l244b) == 1
+         and l244b[0][0] == "kritiek", f"{eerste244b} {l244b}")
+# 3. Wat later wegvalt telt zoals altijd: na tien minuten.
+h244c, c244c = bouw244("0")
+eerste244c, l244c = wacht244(h244c, c244c, 0, 45, {30: "unavailable"})
+controle("later weggevallen: na tien minuten, zoals altijd", eerste244c == 40, f"{eerste244c} {l244c}")
+# 4. Een herstart is een nieuwe start: weg sinds de eerste, herstart na tien minuten, terug na de herstelpoging
+# van de tweede: niets.
+h244d, c244d = bouw244()
+wacht244(h244d, c244d, 0, 10)
+c244e = coachmod.ChargerCoach(h244d)
+c244e._opstart = T244 + dt.timedelta(minutes=10)
+c244e._sensor_ooit.add("sensor.laadpaal_vermogen")
+eerste244e, l244e = wacht244(h244d, c244e, 10, 40, {27: "0"})
+controle("een herstart halverwege: een nieuwe rust, en terug zonder melding", l244e == [], f"{l244e}")
+controle("zonder opstart (geen ronde gedaan) geen rust", not coachmod.ChargerCoach(h244d)._opstart_rust(T244, T244), "")
+
+# 5. De paal: een opdracht die niet aankomt sinds de opstart, pas na de rust; later weg na tien minuten.
+fout244 = OSError("geen netwerk")
+for sinds244, verwacht244 in ((0, 20), (1, 11)):
+    h244p, c244p = bouw244()
+    gezien244 = None
+    for m in range(sinds244, 30):
+        asyncio.run(c244p._async_paal_weg(LAADPAAL, T244 + dt.timedelta(minutes=m), fout244))
+        if gezien244 is None and lijst219(h244p):
+            gezien244 = m
+    controle(f"een paal onbereikbaar vanaf minuut {sinds244}: de melding op minuut {verwacht244}",
+             gezien244 == verwacht244, f"{gezien244} {lijst219(h244p)}")
+
+# 6. De meter of het vermogen van de paal: de melding op de kaart wacht ook.
+h244n, c244n = bouw244()
+controle("de netmeting die sinds de opstart zwijgt: rust tot de herstelpoging om is",
+         c244n._opstart_rust(T244, T244 + dt.timedelta(minutes=19))
+         and not c244n._opstart_rust(T244, T244 + dt.timedelta(minutes=20))
+         and not c244n._opstart_rust(T244 + dt.timedelta(minutes=1), T244 + dt.timedelta(minutes=5)), "")
+
+inst244n = instellingen()
+h244r, _, c244r = bouw({**huis(status="charging", stroom=10.0), "sensor.laadpaal_vermogen": "unavailable"}, inst244n)
+c244r._sensor_ooit.add("sensor.laadpaal_vermogen")
+c244r._opstart = T244
+tip244 = None
+for m in range(0, 25):
+    asyncio.run(ronde(c244r, inst244n, T244 + dt.timedelta(minutes=m)))
+    if tip244 is None and any("vermogen van je laadpaal" in x[1] for x in lijst219(h244r)):
+        tip244 = m
+print(f"  het vermogen van de paal: melding op minuut {tip244}")
+controle("het vermogen van de paal sinds de opstart weg: de melding pas na de rust", tip244 == 20, f"{tip244}")
+
+# 7. Een stekker die sinds de opstart weg is: pas na de rust, en terug ervoor is niets.
+for terug244, verwacht244 in ((None, 1), (17, 0)):
+    h244s, i244s, c244s = bouw219("on")
+    stekkers219(h244s, c244s, i244s, -5)
+    c244s._opstart = T219
+    for i in range(1, 6):
+        h244s.states.zet(f"switch.p{i}", "unavailable")
+    for m in range(0, 25):
+        if m == terug244:
+            for i in range(1, 6):
+                h244s.states.zet(f"switch.p{i}", "on")
+        stekkers219(h244s, c244s, i244s, m)
+        if m == 19:
+            voor244 = lijst219(h244s)
+    l244s = lijst219(h244s)
+    controle(f"stekkers sinds de opstart weg{' en terug op minuut 17' if terug244 else ''}: {verwacht244} melding(en), "
+             f"niet voor minuut 20", voor244 == [] and len([x for x in l244s if x[0] == "kritiek"]) == verwacht244
+             and (terug244 is None or l244s == []), f"{l244s}")
+
+# 8. Stekkers die na elkaar wegvallen: één keer de telefoon, de tweede alleen in de geschiedenis.
+h244t, i244t, c244t = bouw219("on")
+stekkers219(h244t, c244t, i244t, 0)
+c244t._opstart = T219 - dt.timedelta(hours=1)
+
+
+def telefoon244(hass):
+    return [d[2]["message"] for d in hass.services.verstuurd if d[0] == "notify"]
+
+
+for i in range(1, 5):
+    h244t.states.zet(f"switch.p{i}", "unavailable")
+for m in range(1, 4):
+    stekkers219(h244t, c244t, i244t, m)
+h244t.states.zet("switch.p5", "unavailable")
+for m in range(4, 9):
+    stekkers219(h244t, c244t, i244t, m)
+l244t = lijst219(h244t)
+print(f"  na elkaar: {l244t}")
+controle("een stekker 2,5 minuut na de rest: één keer de telefoon",
+         len(telefoon244(h244t)) == 1 and len([x for x in l244t if x[0] == "kritiek"]) == 2
+         and "vaatwasser" in l244t[-1][1], f"{telefoon244(h244t)} {l244t}")
+# Allemaal terug, en een ervan valt vijf minuten later weer weg: nog dezelfde storing.
+for i in range(1, 6):
+    h244t.states.zet(f"switch.p{i}", "on")
+stekkers219(h244t, c244t, i244t, 10)
+h244t.states.zet("switch.p3", "unavailable")
+for m in range(15, 19):
+    stekkers219(h244t, c244t, i244t, m)
+controle("vijf minuten na het terugkomen: nog geen nieuwe telefoon", len(telefoon244(h244t)) == 1
+         and "Quooker" in lijst219(h244t)[-1][1], f"{telefoon244(h244t)} {lijst219(h244t)[-2:]}")
+# Een herstart onthoudt wanneer ze terug waren.
+h244t.states.zet("switch.p3", "on")
+stekkers219(h244t, c244t, i244t, 19)
+c244t._meldingen_onthouden()
+c244t = herstart213(h244t)
+asyncio.run(c244t._async_geheugen_laden())
+c244t._opstart = T219 - dt.timedelta(hours=1)
+controle("na een herstart weet hij wanneer de laatste terug was", c244t._stekker_dicht == T219 + dt.timedelta(minutes=19),
+         f"{c244t._stekker_dicht}")
+# Twintig minuten later is het een nieuwe storing: weer de telefoon.
+h244t.states.zet("switch.p3", "unavailable")
+for m in range(40, 44):
+    stekkers219(h244t, c244t, i244t, m)
+controle("twintig minuten later: een nieuwe melding op de telefoon", len(telefoon244(h244t)) == 2, f"{telefoon244(h244t)}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
