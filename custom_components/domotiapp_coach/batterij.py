@@ -2712,6 +2712,16 @@ GROWATT_VOORUIT = timedelta(hours=23)
 # stukken de coach de gemeten inhoud gelooft, en na hoeveel metingen het laadvermogen.
 GROWATT_STUK_PCT = 10
 GROWATT_MIN_STUKKEN = 3
+# Wat een stuk per procent mag zijn tegen de opgave (v0.201.0): daarbuiten is het geen meting van
+# deze accu. In de klantwoning was het op 15-10-2026 gemeten 12 kWh tegen 15,3 op het typeplaatje,
+# 78%. Op 06-11-2026 hingen er tijdens het werk van de installateur maar vier van de zes modules aan,
+# en kwamen er elf stukken van 0 tot 0,05 kWh per procent in de lijst.
+GROWATT_STUK_MARGE = (0.5, 1.3)
+# Een sprong in de accustand van meer dan zoveel procent tussen twee rondes is geen laden: dan
+# begint het stuk opnieuw zonder te tellen. Op 06-11-2026 sprong hij van 13 naar 99%.
+GROWATT_SPRONG_PCT = 10
+# Vanaf hoeveel verschil een nieuwe opgegeven inhoud een andere accu is (v0.201.0).
+INHOUD_ANDERS = 0.10
 # Vanaf hoeveel procent verschil in vermogen of stopgrens een nieuw schema loont.
 GROWATT_SPELING_PCT = 5
 GROWATT_SPELING_SOC = 3
@@ -3102,7 +3112,17 @@ def growatt_besluit(
     )
 
 
-def growatt_inhoud(stukken: list | None) -> float | None:
+def growatt_stuk_kan(per_pct: float, opgave_kwh: float | None) -> bool:
+    """Of een stuk per procent een meting van deze accu kan zijn, tegen de opgave (v0.201.0)."""
+    if not 0.0 < per_pct < 1.0:
+        return False
+    if not opgave_kwh:
+        return True
+    laag, hoog = GROWATT_STUK_MARGE
+    return laag <= per_pct * 100.0 / opgave_kwh <= hoog
+
+
+def growatt_inhoud(stukken: list | None, opgave_kwh: float | None = None) -> float | None:
     """De bruikbare inhoud bij honderd procent in kWh, uit wat de eigen teller per procent telde.
 
     Elk stuk is een stuk alleen laden van minstens `GROWATT_STUK_PCT` procent, en
@@ -3110,9 +3130,11 @@ def growatt_inhoud(stukken: list | None) -> float | None:
     stuk en niet elke procent, want de teller telt per 0,1 kWh en een procent is
     daar maar iets meer dan. In de klantwoning kwam er op 15-10-2026 ongeveer 12 kWh
     per 100% uit, tegen 15,3 op het typeplaatje. De mediaan, zodat één stuk waarin
-    de cloud een meting oversloeg het niet bepaalt.
+    de cloud een meting oversloeg het niet bepaalt. Een stuk dat bij de opgave niet kan,
+    telt niet (v0.201.0, `growatt_stuk_kan`).
     """
-    rij = sorted(float(s) for s in stukken or [] if isinstance(s, (int, float)) and 0.0 < s < 1.0)
+    rij = sorted(float(s) for s in stukken or []
+                 if isinstance(s, (int, float)) and growatt_stuk_kan(float(s), opgave_kwh))
     if len(rij) < GROWATT_MIN_STUKKEN:
         return None
     return rij[len(rij) // 2] * 100.0
