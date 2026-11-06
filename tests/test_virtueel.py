@@ -2059,6 +2059,17 @@ for naam_vn in ("batterij-volgt-niet", "batterij-volgt-niet-zelf"):
         controle(f"{naam_vn}: het besluit zegt het na drie minuten, en daarna dat hij weer volgt",
                  any("probeert het opnieuw" in g for g in gesch_vn) and any("volgt de coach weer" in g for g in gesch_vn),
                  f"{[g for g in gesch_vn if 'volgt' in g]}")
+if (vl := v("growatt-levert-niets")):
+    tel_ln = [(t.strftime("%H:%M"), m) for t, m in vl.meldingen if "levert niets terwijl" in m]
+    print(f"  growatt-levert-niets: {tel_ln}")
+    controle("growatt-levert-niets: een half uur niets en tien minuten later één melding",
+             len(tel_ln) == 1 and "19:05" <= tel_ln[0][0] <= "19:15", f"{tel_ln}")
+    controle("growatt-levert-niets: daarna zegt de geschiedenis dat hij weer volgt",
+             any("volgt de coach weer" in (g.get("message") or "") for g in vl.geschiedenis), "")
+controle("een batterij die levert krijgt nooit 'levert niets'",
+         not [n for n, vl in V.items() if n != "growatt-levert-niets"
+              and any("levert niets terwijl" in (g.get("message") or "") for g in vl.geschiedenis)],
+         f"{[n for n, vl in V.items() if n != 'growatt-levert-niets' and any('levert niets terwijl' in (g.get('message') or '') for g in vl.geschiedenis)]}")
 if (vl := v("batterij-volgt-even-niet")):
     controle("batterij-volgt-even-niet: twee minuten is geen storing",
              not any("volgt de coach" in (g.get("message") or "") for g in vl.geschiedenis), "")

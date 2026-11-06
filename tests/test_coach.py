@@ -15571,6 +15571,141 @@ asyncio.run(c242r._async_opgave_anders(i242r, a242r, rij242(s242r), c242r._batte
 controle("en bij een andere opgave het rendement per stap opnieuw", rij242(s242r).get("rte_steps") is None
          and rij242(s242r).get("growatt_kwh_pct") == [0.1] * 3 and len(g242r) == 1, f"{rij242(s242r)} {g242r}")
 
+print("=== 243. Een batterij die niets levert terwijl het huis van het net haalt (v0.202.0) ===")
+# In een klantwoning stopte de Growatt op 05-11-2026 om 17:06 op 95% met ontladen, en haalde het huis tot 22:00
+# gemiddeld 4,25 kW van het net. De coach zag het niet: hij keek alleen naar laden en ontladen dat niet hoorde.
+sys.modules["homeassistant.helpers.entity_registry"] = register192
+T243 = dt.datetime(2026, 9, 21, 17, 0)
+
+
+def bouw243(soc=95, ontladen="0", afname="4000"):
+    hass, store, coach, inst, apparaat, _ = bouw242(12.5, {"capacity_given": 12.5, "growatt_vloer": 15,
+                                                           "growatt_uit_w": 6000})
+    apparaat["controllable"] = True
+    hass.states.zet("sensor.growatt_soc", {"state": str(soc), "attributes": {"unit_of_measurement": "%"}})
+    hass.states.zet("sensor.growatt_ontladen", {"state": ontladen, "attributes": {"unit_of_measurement": "kW"}})
+    hass.states.zet("sensor.afname", afname)
+    return hass, store, coach, inst, apparaat
+
+
+def tell243(coach, gezegd):
+    async def tell(bericht, kritiek=False, telefoon=True):
+        gezegd.append((bericht, kritiek, telefoon))
+    coach._async_tell = tell
+
+
+def gang243(coach, inst, apparaat, van, tot, gezegd):
+    tell243(coach, gezegd)
+    standen = []
+    for m in range(van, tot):
+        asyncio.run(coach._one_batterij(T243 + dt.timedelta(minutes=m), inst, apparaat, "steer"))
+        coach._batterij_onthouden("dev-growatt")
+        standen.append((coach._batterij["dev-growatt"].get("besluit") or types.SimpleNamespace(stand=None)).stand)
+    return standen
+
+
+def niets243(gezegd):
+    return [g for g in gezegd if "levert niets terwijl" in g[0]]
+
+
+# 1. Op nul, 95%, niets eruit en 4 kW van het net: na het half uur en tien minuten één kritieke melding.
+h243, s243, c243, i243, a243 = bouw243()
+g243 = []
+st243 = gang243(c243, i243, a243, 0, 39, g243)
+print(f"  standen: {sorted(set(st243))}")
+controle("na 39 minuten nog geen melding", not niets243(g243) and set(st243) == {"nul"}, f"{g243} {set(st243)}")
+gang243(c243, i243, a243, 39, 60, g243)
+controle("dan één kritieke melding", len(niets243(g243)) == 1 and niets243(g243)[0][1] is True
+         and "sensor." not in niets243(g243)[0][0], f"{g243}")
+controle("en de kaart zegt het", "levert niets terwijl" in (c243.state["dev-growatt"].get("reason") or ""),
+         f"{c243.state['dev-growatt'].get('reason')}")
+controle("de coach schrijft er bij een Growatt niets voor", not [d for d in h243.services.verstuurd
+                                                                  if d[1] == "write_ac_charge_times"
+                                                                  and d[2].get("mains_enabled")], "")
+# Hij levert weer: een regel in de geschiedenis, niet op de telefoon.
+h243.states.zet("sensor.growatt_ontladen", {"state": "4.0", "attributes": {"unit_of_measurement": "kW"}})
+h243.states.zet("sensor.afname", "0")
+gang243(c243, i243, a243, 60, 95, g243)
+controle("hij levert weer: één regel, niet op de telefoon", len(niets243(g243)) == 1
+         and any("volgt de coach weer" in g[0] and g[2] is False for g in g243), f"{g243}")
+
+# 2. Een herstart na twintig minuten: het venster gaat mee, de melding komt even laat en één keer.
+h243h, s243h, c243h, i243h, a243h = bouw243()
+asyncio.run(c243h._async_geheugen_laden())
+g243h = []
+gang243(c243h, i243h, a243h, 0, 20, g243h)
+c243n = herstart213(h243h)
+asyncio.run(c243n._async_geheugen_laden())
+c243n._huis_kwh = {u: 0.7 for u in range(24)}
+c243n._async_huisverbruik = _huis192
+gang243(c243n, i243h, a243h, 20, 45, g243h)
+controle("een herstart in het venster: de melding op dezelfde tijd, één keer", len(niets243(g243h)) == 1, f"{g243h}")
+c243n._meldingen_onthouden()
+c243m = herstart213(h243h)
+asyncio.run(c243m._async_geheugen_laden())
+c243m._huis_kwh = {u: 0.7 for u in range(24)}
+c243m._async_huisverbruik = _huis192
+gang243(c243m, i243h, a243h, 45, 70, g243h)
+controle("en na nog een herstart niet opnieuw", len(niets243(g243h)) == 1, f"{g243h}")
+
+# 3. Waar niets hoort te komen: de accu bij zijn vloer, een batterij die levert wat ze kan, en een paal die laadt.
+for naam243, kwargs243 in (("de accu bij zijn vloer", {"soc": 25}),
+                           ("een batterij die levert, ook als het huis meer vraagt", {"ontladen": "6.0"}),
+                           ("het huis haalt weinig van het net", {"afname": "800"})):
+    hx, sx, cx, ix, ax = bouw243(**kwargs243)
+    gx = []
+    gang243(cx, ix, ax, 0, 60, gx)
+    controle(f"{naam243}: niets", not niets243(gx) and not [g for g in gx if g[1]], f"{gx}")
+hp, sp, cp, ip, ap = bouw243()
+cp._paal_laadt = lambda settings: True
+gp = []
+gang243(cp, ip, ap, 0, 60, gp)
+controle("een paal die laadt en die de batterij niet helpt: niets", not niets243(gp), f"{gp}")
+
+# 4. In een vak van het schema staat hij zoals de coach het schreef: niets.
+hv, sv, cv, iv, av = bouw243()
+gv = []
+gang243(cv, iv, av, 0, 1, gv)
+cv._batterij["dev-growatt"]["growatt_geschreven"] = coachmod.GrowattSchema(
+    net=True, houden=True, vakken=[("16:00", "19:00")], stop_soc=95, vermogen_pct=0, tot=T243 + dt.timedelta(hours=2))
+cv._async_growatt = lambda *a, **k: asyncio.sleep(0)
+gang243(cv, iv, av, 1, 60, gv)
+controle("vasthouden in een vak: niets", not niets243(gv), f"{gv}")
+# En rechtstreeks, met een besluit dat toch nul zegt: een vak of een paal die laadt telt niet.
+b243 = types.SimpleNamespace(soc=95.0, soc_min=15.0, reserve=None)
+nul243 = types.SimpleNamespace(stand=coachmod.NUL)
+
+
+def venster243():
+    return {"levert_venster": [(T243 + dt.timedelta(minutes=m), 0.0, 4000.0) for m in range(30)]}
+
+
+eind243 = T243 + dt.timedelta(minutes=30)
+controle("een vol venster zonder iets eruit: ja", cv._levert_niet(eind243, iv, venster243(), nul243, b243, 0.0, 4000.0, False), "")
+controle("in een vak: nee", not cv._levert_niet(eind243, iv, venster243(), nul243, b243, 0.0, 4000.0, True), "")
+cv._paal_laadt = lambda settings: True
+controle("een paal die laadt: nee, en met hulp aan de auto wel",
+         not cv._levert_niet(eind243, iv, venster243(), nul243, b243, 0.0, 4000.0, False)
+         and cv._levert_niet(eind243, iv, {**venster243(), "helpt": True}, nul243, b243, 0.0, 4000.0, False), "")
+cv._paal_laadt = lambda settings: False
+controle("een venster met te weinig rondes: nee", not cv._levert_niet(
+    eind243, iv, {"levert_venster": [(T243, 0.0, 4000.0)]}, nul243, b243, 0.0, 4000.0, False), "")
+
+# 5. Een batterij met een regelaar die op nul niets levert: één keer opnieuw, en dan de melding.
+inst243r = instellingen(devices=[LAADPAAL, BATTERIJ])
+h243r, s243r, c243r = bouw(huis75(afname=2500.0, soc="70"), inst243r)
+g243r = []
+tell243(c243r, g243r)
+opnieuw243r = []
+for m in range(0, 50):
+    asyncio.run(ronde75(h243r, c243r, T243 + dt.timedelta(minutes=m)))
+    if (c243r._batterij.get("dev-batterij") or {}).get("volgt_niet", (None, False))[1] and not opnieuw243r:
+        opnieuw243r.append(m)
+sessie243r = c243r._batterij.get("dev-batterij") or {}
+print(f"  regelaar: {(sessie243r.get('besluit') or types.SimpleNamespace(stand=None)).stand}, {g243r[-3:]}")
+controle("een batterij met een regelaar: na het half uur eerst opnieuw, en tien minuten later de melding",
+         len(niets243(g243r)) == 1 and opnieuw243r and 30 <= opnieuw243r[0] <= 35, f"{opnieuw243r} {g243r}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

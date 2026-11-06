@@ -1689,6 +1689,19 @@ growatt_herstart = growatt_bihorario.kopie(
     uitleg="dezelfde Growatt, Home Assistant herstart om 21:00 en de Growatt-integratie is er pas drie minuten later",
     gebeurtenissen=[("21:00", "sensor_weg", ("bat_soc", 3)), ("21:00", "herstart", None)],
 )
+# Een Growatt die 's avonds niets levert terwijl het huis van het net haalt (v0.202.0), zoals in een
+# klantwoning op 05-11-2026 van 17:06 tot 22:00 op 95%. Wat hem stopte stond niet in Home Assistant.
+growatt_levert_niets = growatt_bihorario.kopie(
+    naam="growatt-levert-niets",
+    uitleg="dezelfde Growatt op 95%, die van 18:30 tot 22:00 niets levert terwijl het huis 2,5 kW vraagt",
+    batterij=Batterij(**{**GROWATT_SPH, "soc": 95.0}, staakt=("18:30", "22:00")),
+    huis=Huis(extra=[("18:00", "22:00", 2500.0)]), duur_uren=6,
+)
+growatt_levert = growatt_levert_niets.kopie(
+    naam="growatt-levert",
+    uitleg="hetzelfde, met een Growatt die gewoon levert: geen melding",
+    batterij=Batterij(**{**GROWATT_SPH, "soc": 95.0}),
+)
 growatt_zon = growatt_bihorario.kopie(
     naam="growatt-zon",
     uitleg="dezelfde Growatt op een bewolkte dag: de zon van morgen vult hem, dus geen laden van het net",
@@ -1885,6 +1898,7 @@ ALLE = [
     growatt_zon_onzeker_zonder, growatt_zon_onzeker, growatt_zon_te_hoog,
     growatt_ochtend, growatt_ochtend_zonder_grens, growatt_herstart, growatt_weigert, growatt_terug_100,
     batterij_volgt_niet, batterij_volgt_niet_zelf, batterij_volgt_even_niet,
+    growatt_levert_niets, growatt_levert,
 ]
 
 

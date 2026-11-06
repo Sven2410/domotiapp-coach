@@ -2550,3 +2550,39 @@ spanningssensor. Proef 242 in test_coach.py: dezelfde opgave (niets leeg, de onz
 herstart ertussen (leeg, de dag telt niet, de opgave geldt, één regel), een wijziging onder de 10%, een sprong met en
 zonder de teller, een stuk van 0,04 bij 25,6, en een rij van voor deze versie bij een Growatt en bij een andere batterij.
 Elke beveiliging is met een mutatie nagekeken.
+
+
+## Een batterij die niets levert terwijl het huis van het net haalt (v0.202.0)
+
+In een klantwoning stopte de Growatt op 05-11-2026 om 17:06 met ontladen. De accu stond op 95%, de coach op nul, en
+er stond geen laadschema in. Tot 22:00 haalde het huis gemiddeld 4,25 kW van het net, op het dure tarief. Op 06-11 om
+08:20 weer, op 95%. Wat hem stopte stond niet in Home Assistant. De coach zag het niet: `_volgt_niet` (v0.167.0) keek
+alleen naar laden van het net en ontladen dat niet hoorde, en draaide voor een Growatt helemaal niet.
+
+Nu:
+- **"niets"** (`_levert_niet`): de coach wil nul, ontladen of handelen, de accu zit `LEVERT_NIET_BOVEN` (15) punten
+  boven zijn vloer (de hoogste van de ontlaadgrens, de geleerde vloer van een Growatt en de reserve), er laadt geen
+  paal die hij niet helpt, en gemiddeld over `LEVERT_NIET_VENSTER` (een half uur, minstens tien rondes) komt er minder
+  dan 100 W uit de batterij terwijl het huis meer dan 1 kW van het net haalt. Een gemiddelde en geen blik per ronde,
+  want een Growatt meldt eens per vijf minuten.
+- Daarna zoals bij de andere twee: bij een batterij met een regelaar één keer opnieuw (in de eigen stand overnemen),
+  en tien minuten later één kritieke melding: "levert niets terwijl het huis van het net haalt. Kijk in de app van de
+  batterij of hij in storing staat of een andere stand heeft." Levert hij weer, dan een regel in de geschiedenis.
+- **Een Growatt** krijgt nu ook "net" (laden van het net in zijn eigen stand, zoals op 05-11 om 14:56) en "niets",
+  niet "ontladen", en niet in een vak van het schema. Er valt buiten een vak niets te schrijven: de coach zegt het
+  op de kaart en meldt het, zonder opnieuw te proberen. Een sensor die vijf minuten blijft hangen haalt de tien
+  minuten van de melding niet.
+- **Herstart:** of het al gemeld is stond al in het geheugen (`volgt_niet_gemeld`); het venster staat er nu ook
+  (`batterij-venster:<id>`), met de gewone slag van vijf minuten in plaats van meteen, want het verandert elke ronde.
+
+Wat de werkbon ook vroeg en er niet in zit: het plan met 0 W uit de accu laten rekenen zolang het duurt. Bij een
+Growatt zou een ontlaadvermogen van nul hem het netladen afnemen ("weet nog niet hoeveel deze Growatt kan leveren"),
+en bij een batterij met een regelaar zou het plan zelf niets meer vragen, zodat hij nooit meer zou leveren. Het plan
+van de nacht rekent toch met de accustand van dat moment.
+
+Proef 243 in test_coach.py: een Growatt op nul die niets levert met 4 kW van het net (na 39 minuten niets, dan één
+kritieke melding, de kaart, niets geschreven, en terug als regel), een herstart na twintig minuten (de melding op
+dezelfde tijd) en nog een (niet opnieuw), de accu bij zijn vloer, een batterij die levert, weinig van het net, een
+paal die laadt, vasthouden in een vak, en een batterij met een regelaar (eerst opnieuw, dan de melding). Het
+virtuele huis: `growatt-levert-niets` (melding om 19:10 na een stop om 18:30) en `growatt-levert`, en geen enkel
+ander scenario krijgt hem. Elke beveiliging is met een mutatie nagekeken.
