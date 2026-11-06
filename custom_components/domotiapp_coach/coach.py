@@ -485,6 +485,15 @@ INTEGRATIE_STIL = timedelta(hours=1)
 # controle (`INTEGRATIE_CONTROLE` na de start). Stil sinds de opstart: de laatste die stilviel deed dat
 # binnen dit venster rond de start van de coach, ervoor of erna.
 INTEGRATIE_OPSTART = timedelta(minutes=15)
+# Na een opstart eerst herstellen, dan melden (v0.203.0). In een klantwoning kwam op 04-11-2026 na een
+# stroomstoring de paal zonder netwerk op; de coach meldde hem na 1 en na 10 minuten als kritiek, en herlaadde
+# hem pas bij de eerste controle (`INTEGRATIE_CONTROLE`), waarna alles binnen drie seconden terug was. Wat bij
+# de eerste ronde al weg is meldt de coach pas na `OPSTART_RUST`: de eerste controle, en vijf minuten om terug
+# te komen.
+OPSTART_RUST = INTEGRATIE_CONTROLE + timedelta(minutes=5)
+# Een stekker die wegvalt terwijl een eerdere melding nog openstaat, of binnen zo lang nadat de laatste terug
+# was, hoort bij dezelfde storing (v0.203.0): een regel in de geschiedenis, niet opnieuw de telefoon.
+STEKKER_NALOOP = timedelta(minutes=10)
 # Integraties die zelf geen verbinding maken: een `utility_meter`, `template`, `derivative`, ...
 # (v0.190.0). Die zijn stil omdat hun bron stil is, en herladen helpt dan niet.
 INTEGRATIE_HELPER = "helper"
@@ -1789,6 +1798,10 @@ class ChargerCoach:
         self._integratie_stil: dict[str, datetime] = {}
         # De eerste controle van deze start (v0.195.0); hoort bij deze start, dus niet in de opslag.
         self._integratie_start: datetime | None = None
+        # De eerste ronde na het starten, voor de rust na een opstart (v0.203.0, `_opstart_rust`).
+        self._opstart: datetime | None = None
+        # Wanneer de laatste gemelde stekker terug was (v0.203.0, `STEKKER_NALOOP`).
+        self._stekker_dicht: datetime | None = None
         # Wanneer de zon vandaag boven `ZON_SLAAPT_ONDER` kwam, of None zolang hij eronder staat (v0.190.0).
         self._zon_wakker: datetime | None = None
         # De zon van vandaag: de verwachting van voor zonsopkomst naast wat het dak gaf (v0.193.0).
@@ -2572,6 +2585,19 @@ class ChargerCoach:
         _chosen, profile = self._chosen_car(settings, device)
         return bool(profile and profile.get("wake_entity"))
 
+    def _opstart_rust(self, sinds: datetime | None, now: datetime) -> bool:
+        """Of een melding over iets dat sinds `sinds` weg is nog wacht op de herstelpoging (v0.203.0).
+
+        Alleen wat bij de eerste ronde al weg was: de integratie kon zijn server niet vinden, en de coach
+        herlaadt hem bij de eerste controle (`_async_stil_herladen`). Lukt dat, dan is er niets te melden,
+        ook geen "doet het weer". Is het na `OPSTART_RUST` nog weg, dan de melding van altijd, en wat
+        tegelijk stilviel gaat mee. Wat later wegvalt telt zoals altijd. Een herstart is een nieuwe start.
+        """
+        start = self._opstart
+        if start is None or sinds is None:
+            return False
+        return sinds <= start and now < start + OPSTART_RUST
+
     async def _async_sensorwacht(self, settings: dict[str, Any], now: datetime) -> None:
         """Zeggen welke sensor al `SENSOR_STIL` niets zegt, en wanneer hij terug is.
 
@@ -2628,7 +2654,7 @@ class ChargerCoach:
             if sinds is None:
                 self._sensor_stil[entity_id] = now
                 continue
-            if entity_id in self._sensor_gemeld:
+            if entity_id in self._sensor_gemeld or self._opstart_rust(sinds, now):
                 continue
             grens = SENSOR_STIL_AUTO if entity_id in auto_sensoren else SENSOR_STIL
             stil_nu.append((entity_id, naam, sinds, grens))
@@ -3708,6 +3734,9 @@ class ChargerCoach:
             if sleutel in self._stekker_gemeld or (nooit and sleutel in self._stekker_nieuw):
                 continue
             soort = "uit" if stand == "off" else ("nieuw" if nooit else "weg")
+            if soort != "uit" and self._opstart_rust(sinds, now):
+                # Sinds de opstart niet bereikbaar: eerst de herstelpoging (v0.203.0).
+                continue
             kandidaten.append((sleutel, naam, verder, sinds, soort))
             # De entiteit-id in het log en niet in de melding, zoals bij de sensorwacht.
             if now - sinds >= ALTIJD_AAN_WACHT:
@@ -3727,6 +3756,8 @@ class ChargerCoach:
         self._stekker_nieuw &= gezien
         self._stekker_ooit &= gezien
         self._stekker_terug = {k: v for k, v in self._stekker_terug.items() if k in gezien}
+        if self._stekker_terug and not self._stekker_gemeld:
+            self._stekker_dicht = max(self._stekker_terug.values())
         if self._stekker_terug and (
             not self._stekker_gemeld or now - min(self._stekker_terug.values()) >= ALTIJD_AAN_BUNDEL
         ):
@@ -3797,8 +3828,13 @@ class ChargerCoach:
                 else t("{namen} staan al {minuten} minuten uit.", namen=namen(uit), minuten=minuten(uit))
             )
         if delen:
+            # Valt er een stekker weg terwijl er nog een melding openstaat, of was de laatste net terug,
+            # dan hoort dit bij dezelfde storing (v0.203.0): in de geschiedenis, en niet opnieuw op de telefoon. In een klantwoning
+            # viel op 04-11-2026 de Quooker 2,5 minuut na de rest weg en kreeg hij een eigen melding.
+            naloop = not uit and (bool(self._stekker_gemeld) or (
+                self._stekker_dicht is not None and now - self._stekker_dicht < STEKKER_NALOOP))
             self._stekker_gemeld |= {k[0] for k in weg + uit}
-            await self._async_tell(" ".join(delen), kritiek=True, telefoon=telefoon)
+            await self._async_tell(" ".join(delen), kritiek=True, telefoon=telefoon and not naloop)
         if nieuw:
             self._stekker_nieuw |= {k[0] for k in nieuw}
             await self._async_tell(
@@ -4181,6 +4217,8 @@ class ChargerCoach:
 
         level = (settings.get("strategy") or {}).get("level", LEVEL_PROPOSE)
         moment = _moment(now)
+        if self._opstart is None:
+            self._opstart = moment
         await self._async_nordpool(settings, moment)
         try:
             await self._async_berichten(settings, moment)
@@ -10208,7 +10246,10 @@ class ChargerCoach:
         if decision.needs_soc:
             await self._async_ask_soc(device, decision)
 
-        if tip and self._getipt.get(device_id) != tipsoort:
+        if tip and self._getipt.get(device_id) != tipsoort and not (
+            tipsoort == "net" and self._opstart_rust(self._net_stil_sinds, now)
+        ):
+            # Een meter of paal die sinds de opstart zwijgt: eerst de herstelpoging (v0.203.0).
             self._getipt[device_id] = tipsoort
             # Een meter die zwijgt of een fase die niet klopt moet de bewoner
             # zelf oplossen, en dat is kritiek. De lastbewaker die het tempo
@@ -16237,6 +16278,7 @@ class ChargerCoach:
             "stekker_ooit": sorted(self._stekker_ooit),
             "stekker_sinds": {k: _naar_geheugen(v) for k, v in sorted(self._stekker_uit.items())},
             "stekker_terug": {k: _naar_geheugen(v) for k, v in sorted(self._stekker_terug.items())},
+            "stekker_dicht": _naar_geheugen(self._stekker_dicht),
             "sensor_ooit": sorted(self._sensor_ooit),
             "soc_gevraagd": sorted(self._soc_asked),
             "getipt": dict(sorted(self._getipt.items())),
@@ -16273,6 +16315,8 @@ class ChargerCoach:
             self._stekker_uit.setdefault(k, v)
         for k, v in momenten("stekker_terug").items():
             self._stekker_terug.setdefault(k, v)
+        if self._stekker_dicht is None and data.get("stekker_dicht"):
+            self._stekker_dicht = _uit_geheugen(data["stekker_dicht"])
         self._sensor_ooit |= {str(k) for k in lijst("sensor_ooit")}
         self._soc_asked |= {str(k) for k in lijst("soc_gevraagd")}
         getipt = data.get("getipt")
@@ -16665,7 +16709,7 @@ class ChargerCoach:
             self._paal_weg[device_id] = now
             _LOGGER.warning("%s is niet bereikbaar, de coach probeert het elke ronde opnieuw: %s", device_id, fout)
             return
-        if device_id in self._paal_gemeld or _tussen(sinds, now) < SENSOR_STIL:
+        if device_id in self._paal_gemeld or _tussen(sinds, now) < SENSOR_STIL or self._opstart_rust(sinds, now):
             return
         self._paal_gemeld.add(device_id)
         minuten = int(_tussen(sinds, now).total_seconds() // 60)

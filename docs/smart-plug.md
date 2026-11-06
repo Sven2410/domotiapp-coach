@@ -178,12 +178,28 @@ Dus één apparaat, geen losse smart plug ernaast:
 In de sensor voor DomotiApp Lovelace staat de stekker in `entiteiten` als `switch`, en de
 stekker als `power` en `energy`. Dat is iets toevoegen; het contract blijft 1.
 
+## Stekkers die na elkaar wegvallen (v0.203.0)
+
+In een klantwoning vielen op 04-11-2026 om 16:37 negen stekkers samen weg, en kwam er één melding (v0.178.0). De Quooker
+viel 2,5 minuut later en kreeg een eigen kritieke melding. Bij één storing hoort één keer de telefoon.
+
+- Valt een stekker weg terwijl er nog een melding openstaat (een gemelde stekker is nog niet terug), of binnen
+  `STEKKER_NALOOP` (tien minuten) nadat de laatste terug was, dan komt hij als kritiek in de geschiedenis, maar niet
+  opnieuw op de telefoon.
+- Wanneer de laatste terug was (`_stekker_dicht`), staat in het geheugen en overleeft een herstart.
+- Een stekker die uit staat en niet aan te krijgen is, is iets anders: die gaat altijd naar de telefoon.
+- Twintig minuten later is het een nieuwe storing, met een nieuwe melding. Op 04-11 was dat de Quooker om 17:10.
+
+De melding op de telefoon bijwerken met dezelfde `tag` kan alleen bij de app van Home Assistant, en een ander
+notify-doel (bijvoorbeeld Telegram) kan op onbekende velden stuklopen. Daarom gaat de tweede alleen naar de
+geschiedenis. Een stekker die sinds de opstart weg is, wacht eerst op de herstelpoging (`docs/laadpaal.md`, v0.203.0).
+
 ## Proeven
 
 Proef 157, 158, 218, 219 en 223 in test_coach.py (de bewaking, de meldingen, de niveaus, de sensorwacht, een
 volle ronde, de vaatwasser; de vriezer, de wasmachine op het vermogen van de stekker en de teller die
 zakt; vijf stekkers in één melding, een herstart halverwege, nieuwe stekkers en het internet; twee groepjes waarvan de tweede de coach niet wekt, een herstart terwijl
-de stekker wegvalt, en terug in één regel), en zeven proeven "smart plug" in test_rapport.mjs (de lijst tegen const.py, naam en icoon, de
+de stekker wegvalt, en terug in één regel), proef 244 (sinds de opstart weg, en na elkaar in één melding), en zeven proeven "smart plug" in test_rapport.mjs (de lijst tegen const.py, naam en icoon, de
 kaart, Apparaten en Meldingen, het blok Stekker bij alle vijf de types).
 
 ## Nog niet in het echt gezien
