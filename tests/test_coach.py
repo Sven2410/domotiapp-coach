@@ -15855,6 +15855,87 @@ for m in range(40, 44):
     stekkers219(h244t, c244t, i244t, m)
 controle("twintig minuten later: een nieuwe melding op de telefoon", len(telefoon244(h244t)) == 2, f"{telefoon244(h244t)}")
 
+print("=== 245. een nu-startknop naast de vrijgaveknop: vrijgegeven én nu (v0.204.0) ===")
+# In een klantwoning hing op 06-11-2026 een knop met twee knoppen naast de vaatwasser: de ene om vrij te geven,
+# de andere om meteen te starten. De eigenaar zei die dag ja op een eigen veld.
+DOM245 = dict(DOM, entities={"release_button": KNOP121, "release_now_button": KNOP121},
+              release_press="single", release_now_press="double")
+
+
+def bouw245(apparaat=DOM245, huis=None):
+    inst = instellingen(devices=[LAADPAAL, apparaat])
+    inst["contract"] = inst56["contract"]
+    inst["strategy"]["schedules"].append({
+        "device": "dev-dom", "enabled": True, "priority": "mid", "per_day": False,
+        "window": {"not_before": "08:00", "start_by": "", "done_by": "16:30"}, "days": [],
+    })
+    hass, _, coach = bouw(huis or huis121, inst)
+    return hass, coach, inst
+
+
+def nu245(inst):
+    return "dev-dom" in (inst.get("ready_now") or [])
+
+
+T245 = dt.datetime(2026, 9, 8, 7, 0)
+h245, c245, i245 = bouw245()
+b, m = asyncio.run(ronde121(h245, c245, T245))
+controle("nog nooit gedrukt: niets", not vrij121(i245) and not nu245(i245) and not m, f"{m}")
+controle("de coach luistert naar de knop", KNOP121 in c245._watched, "")
+# 1. Dubbel: vrijgegeven én nu, met één melding.
+druk121("double", 1, hass=h245)
+b, m = asyncio.run(ronde121(h245, c245, T245 + dt.timedelta(minutes=1)))
+print(f"  dubbel: {b.get('rule')} {m}")
+controle("de nu-startknop: vrijgegeven én nu, en één melding dat hij nu aan moet",
+         vrij121(i245) and nu245(i245) and m == ["Vaatwasser is vrijgegeven. Zet hem nu aan."], f"{b.get('rule')} {m}")
+druk121("double", 2, hass=h245)
+b, m = asyncio.run(ronde121(h245, c245, T245 + dt.timedelta(minutes=2)))
+controle("al nu: nog een druk doet niets", vrij121(i245) and nu245(i245) and not m, f"{m}")
+# 2. Enkel geeft vrij voor later, dubbel maakt er daarna nu van.
+i245["ready_devices"], i245["ready_now"] = [], []
+asyncio.run(ronde121(h245, c245, T245 + dt.timedelta(minutes=3)))
+druk121("single", 4, hass=h245)
+b, m = asyncio.run(ronde121(h245, c245, T245 + dt.timedelta(minutes=4)))
+controle("enkel: vrijgegeven voor later, niet nu", vrij121(i245) and not nu245(i245) and b.get("rule") == "wait-for-start"
+         and m == ["Vaatwasser is vrijgegeven. Zet hem aan om 11:00."], f"{b.get('rule')} {m}")
+druk121("double", 5, hass=h245)
+b, m = asyncio.run(ronde121(h245, c245, T245 + dt.timedelta(minutes=5)))
+controle("daarna dubbel: nu, met een melding", vrij121(i245) and nu245(i245) and m == ["Vaatwasser is vrijgegeven. Zet hem nu aan."],
+         f"{m}")
+# 3. Een herstart met de oude druk: niets.
+i245["ready_devices"], i245["ready_now"] = [], []
+h245b, c245b, _ = bouw245(huis=dict(huis121, **{KNOP121: {"state": "2026-09-08T05:05:00.123+00:00",
+                                                          "attributes": {"event_type": "double"}}}))
+c245b.hass.data["domotiapp_coach"]["store"] = h245.data["domotiapp_coach"]["store"]
+b, m = asyncio.run(ronde121(h245b, c245b, T245 + dt.timedelta(minutes=6)))
+controle("na een herstart telt de oude druk niet", not nu245(i245) and not m, f"{m}")
+# 4. Dezelfde knop in allebei, allebei elke druk: nu wint.
+h245c, c245c, i245c = bouw245(dict(DOM245, release_press="", release_now_press=""))
+asyncio.run(ronde121(h245c, c245c, T245))
+druk121("single", 1, hass=h245c)
+b, m = asyncio.run(ronde121(h245c, c245c, T245 + dt.timedelta(minutes=1)))
+controle("dezelfde druk in allebei: nu wint, met één melding", vrij121(i245c) and nu245(i245c) and len(m) == 1, f"{m}")
+# 5. Tijdens de beurt doet een druk niets; na de beurt eraf werkt hij weer.
+sessie245 = c245c._programma["dev-dom"]
+sessie245["gestart"] = T245
+i245c["ready_now"] = []
+druk121("double", 2, hass=h245c)
+uit245 = asyncio.run(c245c._async_nu_knop_volgen(i245c, DOM245, sessie245, True))
+controle("tijdens de beurt: een druk doet niets", uit245 is True and not nu245(i245c) and not sessie245.get("knop_melden"), "")
+sessie245["gestart"] = None
+i245c["ready_devices"], i245c["ready_now"] = [], []
+druk121("double", 3, hass=h245c)
+uit245 = asyncio.run(c245c._async_nu_knop_volgen(i245c, DOM245, sessie245, False))
+controle("na de beurt: een nieuwe druk geeft weer vrij en nu", uit245 is True and nu245(i245c) and vrij121(i245c), "")
+# 6. Alleen een nu-startknop, een knop-helper: elke druk.
+NUKNOP245 = dict(DOM, entities={"release_now_button": "input_button.vw_nu"})
+h245d, c245d, i245d = bouw245(NUKNOP245, dict(huis58, **{"input_button.vw_nu": "2026-09-01T10:00:00+00:00"}))
+asyncio.run(ronde121(h245d, c245d, T245))
+h245d.states.zet("input_button.vw_nu", "2026-09-08T05:01:00+00:00")
+b, m = asyncio.run(ronde121(h245d, c245d, T245 + dt.timedelta(minutes=1)))
+controle("een knop-helper als nu-startknop: vrij en nu", vrij121(i245d) and nu245(i245d) and len(m) == 1, f"{m}")
+controle("en de coach luistert naar die knop", "input_button.vw_nu" in c245d._watched, f"{c245d._watched}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

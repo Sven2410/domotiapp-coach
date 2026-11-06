@@ -4287,7 +4287,7 @@ class ChargerCoach:
             | {
                 entity
                 for device in programma_apparaten
-                for sleutel in ("release_switch", "release_now_switch", "release_button", "door",
+                for sleutel in ("release_switch", "release_now_switch", "release_button", "release_now_button", "door",
                                 "status", "start", "remote_start")
                 if (entity := (
                     self._vrijgave_entiteit(device, sleutel)
@@ -4546,6 +4546,8 @@ class ChargerCoach:
         # Een fysieke knop of een knop-helper (v0.102.0): één druk is "ingeruimd
         # en dicht", nog een keer drukken doet niets.
         if not zonder_vrijgave and not alleen_lezen:
+            # Eerst de nu-startknop (v0.204.0): staat dezelfde knop in allebei, dan wint nu.
+            released = await self._async_nu_knop_volgen(settings, device, sessie, released)
             released = await self._async_knop_volgen(settings, device, sessie, released)
         # Een vrijgaveschakelaar naast de knop op de kaart. De eigenaar op 06-09-2026:
         # een eigen kaart in de keuken met een knop "sturing" die een
@@ -4944,6 +4946,7 @@ class ChargerCoach:
             # De vrijgaveknop zoals hij de vorige ronde stond (het tijdstip van
             # de laatste druk), en of er na het besluit een melding moet komen.
             "knop": None,
+            "nu_knop": None,
             "knop_melden": False,
             # Zonder vrijgave: na een beurt eerst uitruimen (de klep open en weer
             # dicht) voordat klep dicht weer vrijgegeven is; zie `_async_klep_volgen`.
@@ -5811,29 +5814,60 @@ class ChargerCoach:
         weer leeg. `release_press` kiest de soort; leeg is elke druk. Bij de
         eerste ronde (of na een herstart) is een oude druk geen nieuwe.
         """
-        entity_id = str((device.get("entities") or {}).get("release_button") or "")
-        if not entity_id:
-            return released
-        toestand = self.hass.states.get(entity_id)
-        if toestand is None or toestand.state == "unavailable":
-            return released
-        stand = str(toestand.state)
-        vorige = sessie.get("knop")
-        sessie["knop"] = stand
-        if vorige is None or stand == vorige or stand in ("unknown", ""):
-            return released
-        domein = entity_id.split(".")[0]
-        soort = (toestand.attributes or {}).get("event_type") if domein == "event" else (
-            stand if domein == "sensor" else None
-        )
-        gewenst = str(device.get("release_press") or "")
-        if gewenst and str(soort or "") != gewenst:
-            return released
-        if released:
+        if not self._knop_druk(device, sessie, "release_button", "release_press", "knop") or released:
             return released
         await self._async_vrijgave_zetten(settings, device.get("id", ""), True)
         # Een knop laat zelf niets zien: één melding na het besluit van deze
         # ronde, met wanneer hij start (de eigenaar koos dat op 29-09-2026).
+        sessie["knop_melden"] = True
+        return True
+
+    def _knop_druk(
+        self, device: dict[str, Any], sessie: dict[str, Any], veld: str, druk_veld: str, geheugen: str
+    ) -> bool:
+        """Of de knop in `veld` sinds de vorige ronde gedrukt is, met de soort druk uit `druk_veld`.
+
+        Elk veld onthoudt zijn eigen vorige stand (`geheugen` in de sessie), zodat dezelfde knop in
+        twee velden kan staan met een andere soort druk (v0.204.0).
+        """
+        entity_id = str((device.get("entities") or {}).get(veld) or "")
+        if not entity_id:
+            return False
+        toestand = self.hass.states.get(entity_id)
+        if toestand is None or toestand.state == "unavailable":
+            return False
+        stand = str(toestand.state)
+        vorige = sessie.get(geheugen)
+        sessie[geheugen] = stand
+        if vorige is None or stand == vorige or stand in ("unknown", ""):
+            return False
+        domein = entity_id.split(".")[0]
+        soort = (toestand.attributes or {}).get("event_type") if domein == "event" else (
+            stand if domein == "sensor" else None
+        )
+        gewenst = str(device.get(druk_veld) or "")
+        return not gewenst or str(soort or "") == gewenst
+
+    async def _async_nu_knop_volgen(
+        self, settings: dict[str, Any], device: dict[str, Any], sessie: dict[str, Any], released: bool
+    ) -> bool:
+        """Een druk op de nu-startknop: vrijgegeven én nu starten (v0.204.0); geeft de vrijgave van nu.
+
+        In een klantwoning hing op 06-11-2026 een knop met twee knoppen naast de vaatwasser: de ene om
+        vrij te geven, de andere om meteen te starten. Een knop heeft geen aan of uit, dus het veld
+        Schakelaar nu starten deed er niets mee. De eigenaar zei die dag ja op een eigen veld; daarmee
+        vervalt zijn keuze van 29-09-2026 dat nu starten niet met een knop gaat.
+
+        Al vrijgegeven voor later: dan maakt een druk er nu van, zoals "Toch nu starten" op de kaart.
+        Al nu, of draait hij al: een druk doet niets. Staat dezelfde knop ook bij Vrijgaveknop en telt
+        dezelfde druk voor allebei, dan wint nu: deze kijkt eerst.
+        """
+        if not self._knop_druk(device, sessie, "release_now_button", "release_now_press", "nu_knop"):
+            return released
+        device_id = device.get("id", "")
+        if sessie.get("gestart") is not None or (released and device_id in (settings.get("ready_now") or [])):
+            return released
+        await self._async_vrijgave_zetten(settings, device_id, True, nu=True)
         sessie["knop_melden"] = True
         return True
 

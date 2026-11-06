@@ -105,8 +105,9 @@ naar de telefoon, na het besluit van die ronde: "Vaatwasser is vrijgegeven.
 Hij start om 01:00." (of "Zet hem aan om 11:00." bij een domme). Een oude druk
 na een herstart of na een knop die even wegviel telt niet. Een knop die Home
 Assistant niet als entiteit kent kan via een eigen automatisering een
-`input_button` indrukken. "Ingeruimd en nu starten" gaat niet met de knop
-(zijn keuze). Proef 121 in test_coach.py.
+`input_button` indrukken. "Ingeruimd en nu starten" ging tot v0.204.0 niet met de knop
+(zijn keuze van 29-09-2026); sinds v0.204.0 heeft het een eigen veld, Nu-startknop (zie
+hieronder). Proef 121 in test_coach.py.
 
 **Moet eerst vrijgegeven worden** (v0.102.0, `release_required`, standaard
 aan). De eigenaar op 29-09-2026: "bij het toevoegen van een vaatwasser: moet
@@ -587,3 +588,31 @@ geen vermogenssensor); vijf proeven in test_rapport.mjs.
 paneel, en het schema van de websocket weigerde een airco met dat merk bij het opslaan.
 `AIRCO_BRANDS` staat nu in const.py, en test_rapport.mjs legt elke merkenlijst van het paneel
 naast const.py.
+
+
+## Een nu-startknop naast de vrijgaveknop (v0.204.0)
+
+In een klantwoning hing op 06-11-2026 een knop met twee knoppen naast de vaatwasser (Matter, twee
+event-entiteiten met `multi_press_1`, `multi_press_2` en `long_press`). De bewoner wilde met de ene vrijgeven,
+zodat de coach het goedkoopste moment kiest, en met de andere vrijgeven en meteen starten. Voor het tweede was er
+alleen Schakelaar nu starten (`release_now_switch`). Die leest aan of uit, en een knop heeft alleen het tijdstip van
+de laatste druk. Het zoekveld liet de knop wel kiezen, en dan gebeurde er niets. De eigenaar zei die dag ja op een
+eigen veld; daarmee vervalt zijn keuze van 29-09-2026.
+
+- **Nu-startknop** (`release_now_button`, met een eigen "Welke druk" in `release_now_press`), bij elk type met een
+  vrijgave, direct na de Vrijgaveknop. Een druk telt zoals bij de vrijgaveknop (`_knop_druk`): een event-entiteit,
+  een knop-helper of een actiesensor, en een oude druk na een herstart telt niet.
+- **Een druk is vrijgegeven én nu** (`_async_nu_knop_volgen`). Was hij al vrijgegeven voor later, dan maakt de druk
+  er nu van, zoals "Toch nu starten" op de kaart. Al nu, of draait hij al: niets. Daarna één melding, zoals bij de
+  vrijgaveknop: "Vaatwasser is vrijgegeven. Hij start nu."
+- **Dezelfde knop in allebei de velden**, met een andere soort druk: elk veld onthoudt zijn eigen vorige stand
+  (`knop` en `nu_knop` in de sessie). Telt dezelfde druk voor allebei, dan wint nu.
+- "Nu" zelf staat in de opslag (`ready_now`), dus een herstart midden in een wachtende vrijgave houdt het.
+- **Het paneel** zegt het bij een apparaat waar een knop in een schakelaarveld staat (`releaseSwitchIsButton`): "bij
+  een vrijgaveschakelaar staat een knop; zet die bij Vrijgaveknop of Nu-startknop". De uitleg bij Schakelaar nu
+  starten zegt het ook.
+- De startsensor voor DomotiApp Lovelace blijft zoals hij is; het contract blijft 1.
+
+Proef 245 in test_coach.py (dubbel: vrij en nu; nog eens: niets; enkel voor later en dan dubbel; een oude druk na een
+herstart; dezelfde druk in allebei; tijdens de beurt niets; na de beurt weer; een knop-helper, en dat de coach naar
+de knop luistert) en de proef "de nu-startknop" in test_rapport.mjs. Elke beveiliging is met een mutatie nagekeken.
