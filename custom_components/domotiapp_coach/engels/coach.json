@@ -282,5 +282,8 @@
   "{naam} laadt zelf van het net, en niet wat de coach wil.": "{naam} is charging from the grid by itself, not what the coach wants.",
   "{naam} levert niets terwijl het huis van het net haalt.": "{naam} delivers nothing while the house draws from the grid.",
   "{naam} levert niets terwijl het huis van het net haalt. De coach probeert het opnieuw.": "{naam} delivers nothing while the house draws from the grid. The coach tries again.",
-  "{naam} levert niets terwijl het huis van het net haalt. Kijk in de app van de batterij of hij in storing staat of een andere stand heeft.": "{naam} delivers nothing while the house draws from the grid. Check in the battery's app whether it has a fault or is in another mode."
+  "{naam} levert niets terwijl het huis van het net haalt. Kijk in de app van de batterij of hij in storing staat of een andere stand heeft.": "{naam} delivers nothing while the house draws from the grid. Check in the battery's app whether it has a fault or is in another mode.",
+  "Hij reageert niet op de coach. Kijk of de integratie werkt.": "It does not respond to the coach. Check whether the integration works.",
+  "{naam} reageert niet op de coach. Kijk of de integratie werkt.": "{naam} does not respond to the coach. Check whether the integration works.",
+  "{naam} reageert weer op de coach.": "{naam} responds to the coach again."
 }

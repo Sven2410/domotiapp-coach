@@ -22,8 +22,15 @@ of goedkope uren of beide." Dus een keuze `run_on` (`AIRCO_AAN_OP` in
 planner.py): zon (de standaard), goedkoop of beide. Zonder zon over gaat hij
 standaard nooit aan, hoe koud of warm het ook is; het scenario `airco-geen-zon`
 laat dat zien. En: "Bij apparaten toevoegen alleen nog de optie Mitsubishi
-Electric kunnen kiezen." Een airco heeft sinds v0.119.1 een merk, en dat is er
-één (`AIRCO_BRANDS` in devices.js); zonder merk geen velden en geen sturing.
+Electric kunnen kiezen." Een airco heeft sinds v0.119.1 een merk (`AIRCO_BRANDS` in
+devices.js); zonder merk geen velden en geen sturing.
+
+**Fujitsu (Atlantic Cozytouch)** kwam erbij in v0.205.0. Een bewoner met twee
+Fujitsu-airco's had Mitsubishi Electric gekozen, want dat had dezelfde velden: "Maar
+voor de netheid mag die er wel aan toegevoegd worden." Zelfde velden, een eigen
+uitleg, en de kamertemperatuur verplicht. Wat er anders is aan die integratie, de
+stand alleen via `set_hvac_mode`, geldt sindsdien voor elk merk (Een airco die niet
+luistert, hieronder).
 
 **De coach verzint geen temperatuur.** Hij zet de temperatuur die de bewoner
 koos op de airco, kiest verwarmen of koelen, en zet hem aan of uit. Hij schuift
@@ -36,12 +43,15 @@ of dure uren te ontwijken, is daarmee van tafel.
 ## Velden
 
 Van de installateur, onder Apparaten (`AIRCO_BRANDS` en `AIRCO_FIELDS` in
-devices.js, `_AIRCO` in websocket.py), na het merk Mitsubishi Electric:
+devices.js, `_AIRCO` in websocket.py), na het merk Mitsubishi Electric of, sinds
+v0.205.0, Fujitsu (Atlantic Cozytouch):
 
 - **Airco**: de climate-entiteit, verplicht. De kiezer toont alles met
   `hvac_modes` (`climate` in entity-picker.js).
 - **Kamertemperatuur**: een eigen sensor, optioneel. Leeg is de
-  `current_temperature` van de airco.
+  `current_temperature` van de airco. Bij Fujitsu verplicht: Atlantic Cozytouch
+  geeft `current_temperature` niet door (in een klantwoning op 07-11-2026 leeg),
+  en zonder kamertemperatuur doet de coach niets.
 - **Vermogenssensor** (het gewone veld van elk apparaat) en/of **het vermogen
   van het typeplaatje** (`airco.power_w`). Een van de twee is nodig
   (`missingForControl`).
@@ -79,9 +89,9 @@ aanzette, wat de bewoner deed, de opdrachten) in `_one_airco` in coach.py.
   (`MIN_RUN_MINUTES`, dezelfde als de paal bij een wolk). Op temperatuur doet de
   airco zelf niets meer; daar schakelt de coach niet voor.
 
-Aanzetten is één opdracht, `climate.set_temperature` met `hvac_mode` erin, want
-een airco in de cloud doet over elke opdracht een minuut. Uit is
-`climate.set_hvac_mode` naar `off`. Past het vermogen niet onder de zekering na
+Aanzetten is sinds v0.205.0 twee opdrachten: eerst `climate.set_hvac_mode` met
+de stand, dan `climate.set_temperature` zonder stand (zie hieronder, Een airco
+die niet luistert). Uit is `climate.set_hvac_mode` naar `off`. Past het vermogen niet onder de zekering na
 wie hoger staat in de voorrang, dan wacht hij (`no-room`), net als de boiler.
 
 **Zon delen.** Een airco staat niet in de voorrang bij zon (`zon_regels`), en
@@ -108,6 +118,38 @@ is, stuurt hij hem niet nog eens.
 opdracht van de coach telde in de ronde erna als iets van de bewoner (de
 vergelijking keek naar de stand van vóór de opdracht), en zolang de cloud de
 opdracht nog niet liet zien stuurde hij hem elke minuut opnieuw.
+
+## Een airco die niet luistert (v0.205.0)
+
+In een klantwoning op 06-11-2026 zei de kaart om 23:47 "Hij gaat verwarmen naar
+20 °C; het is nu 18,2 °C", en de airco bleef de hele nacht uit. De bewoner: "Zegt
+dat ie gaat verwarmen, maar doet uiteindelijk niks." Tot dan zette de coach een
+airco aan met één opdracht, `set_temperature` met `hvac_mode` erin. Home Assistant
+geeft die stand alleen als argument door aan de integratie, en de integratie daar
+(Atlantic Cozytouch) leest hem niet: de temperatuur ging naar een airco die uit
+stond, zonder fout, en het besluit zei `applied`. Na `AIRCO_VOLGT` stuurde de coach
+dezelfde opdracht opnieuw, elke vijf minuten, en niemand hoorde het. MELCloud leest
+de stand wel, daarom kwam het niet eerder boven.
+
+- **Eerst de stand, dan de temperatuur** (`_async_airco_zetten`). De stand gaat bij
+  elke integratie via `set_hvac_mode`. Bij een cloudkoppeling kost dat een
+  opdracht meer, en dat is beter dan een airco die niet aangaat.
+- **De kaart zegt "De coach zet hem aan om te verwarmen naar 20 °C"** en niet meer
+  "Hij gaat verwarmen" (`plan_airco`): dat klopt pas als hij aan is.
+- **Na twee pogingen die niet aankwamen** (`AIRCO_MISLUKT`, alleen aanzetten; uit
+  laat de coach los) één kritieke melding: "{naam} reageert niet op de coach. Kijk
+  of de integratie werkt." Het besluit is dan niet meer `applied`, de stand is
+  `uit` met regel `geen-gehoor`, en hij probeert het een half uur na de laatste
+  poging opnieuw (`AIRCO_OPNIEUW`) in plaats van elke vijf minuten. Komt een poging
+  wel aan, dan staat "{naam} reageert weer op de coach." in de geschiedenis, niet op
+  de telefoon.
+- De telling, de laatste poging en of het gemeld is overleven een herstart
+  (`airco_miss`, `airco_try`, `airco_miss_told` in `sessions`). Een poging die een
+  herstart onderbrak telt niet; de coach stuurt hem dan opnieuw.
+
+Het scenario `airco-cozytouch` in het virtuele huis is `airco-goedkoop` met een
+airco die de stand in `set_temperature` negeert: hij verwarmt net zo. Proef 246 in
+test_coach.py doet de rest.
 
 ## Het vermogen
 
@@ -159,6 +201,9 @@ de bewoner.
 
 - test_planner.py proef 75: aan op zon en op een goedkoop uur, de marge, nooit
   wisselen, de wolk, alleen wat de coach aanzette uit, zonder meting niets.
+- test_coach.py proef 246 (v0.205.0): een integratie die de stand alleen via
+  `set_hvac_mode` leest, twee pogingen en één melding, een half uur tussen de
+  pogingen daarna, een herstart, en weer luisteren.
 - test_coach.py proef 156: de opdrachten, de wolk, de cloud die een minuut doet,
   de bewoner tot middernacht, de temperatuur van de afstandsbediening, de number
   die meteen doorschrijft, de pauze, de entiteiten, wat de bewoner mag zetten, en
@@ -178,4 +223,6 @@ de bewoner.
 - Een airco die alleen met `target_temp_high` en `target_temp_low` werkt
   (`heat_cool`); de coach zet alleen `temperature`.
 - Twee airco's in één ruimte gelijk laten lopen; elk volgt zijn eigen wens.
-- Nog niet beproefd tegen een echte airco: alles hierboven is nagebouwd.
+- Nog niet beproefd tegen een echte airco: alles hierboven is nagebouwd. Atlantic
+  Cozytouch is bekeken in de bron (1.4.0) en in de recorder van een klantwoning,
+  niet met een echte opdracht van de coach.

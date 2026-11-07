@@ -1300,6 +1300,7 @@ const AIRCO_FIELDS = [
  * De merken van een airco (v0.119.1). De eigenaar op 14-10-2026: "Bij apparaten
  * toevoegen alleen nog de optie Mitsubishi Electric kunnen kiezen." Zonder merk
  * staan de velden er niet en mag hij niet sturen, net als een thuisbatterij.
+ * Sinds v0.205.0 ook Fujitsu, via Atlantic Cozytouch.
  */
 export const AIRCO_BRANDS = [
   {
@@ -1307,6 +1308,22 @@ export const AIRCO_BRANDS = [
     label: "Mitsubishi Electric",
     note: nt("Voor Mitsubishi Electric is dat de airco zoals de MELCloud-integratie hem in Home Assistant zet. Die praat via de cloud: een opdracht van de coach staat er na ongeveer een minuut."),
     fields: AIRCO_FIELDS,
+  },
+  {
+    // Een klantwoning op 07-11-2026: twee Fujitsu-airco's, in Home Assistant via
+    // Atlantic Cozytouch. Die integratie geeft de kamertemperatuur niet door
+    // (`current_temperature` leeg), dus een eigen sensor is nodig (v0.205.0).
+    id: "fujitsu",
+    label: "Fujitsu (Atlantic Cozytouch)",
+    note: nt("Voor Fujitsu is dat de airco zoals de integratie Atlantic Cozytouch hem in Home Assistant zet, via de cloud. Die geeft de temperatuur in de kamer niet door, dus kies daarvoor een eigen sensor."),
+    fields: [
+      AIRCO_FIELDS[0],
+      {
+        ...AIRCO_FIELDS[1],
+        hint: nt("Een eigen sensor in de kamer. Atlantic Cozytouch geeft de temperatuur die de airco meet niet door, dus zonder deze sensor weet de coach niet wanneer hij aan moet."),
+        needed: true,
+      },
+    ],
   },
 ];
 

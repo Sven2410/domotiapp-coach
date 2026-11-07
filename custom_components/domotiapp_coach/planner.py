@@ -6117,8 +6117,21 @@ def plan_airco(
         )
     werk = t("verwarmen") if nodig == "heat" else t("koelen")
     if zon or goedkoop:
+        # Niet "hij gaat verwarmen": dat klopt pas als hij aan is, en een
+        # opdracht kan in de cloud blijven hangen (v0.205.0).
         stand = "zon" if zon else "goedkoop"
-        return AircoBesluit(aan=True, modus=nodig, stand=stand, rule=stand, reason=waarom(t("gaat {werk}", werk=werk)))
+        if zon:
+            reden = t(
+                "Er is {kw} zon over. De coach zet hem aan om te {werk} naar {doel}; het is nu {kamer}.",
+                kw=_kw(surplus_w), werk=werk, doel=doel, kamer=kamer,
+            )
+        else:
+            reden = t(
+                "Stroom kost nu {prijs}, onder het gemiddelde van vandaag ({gemiddeld}). "
+                "De coach zet hem aan om te {werk} naar {doel}; het is nu {kamer}.",
+                prijs=_euro(prijs), gemiddeld=_euro(gemiddeld), werk=werk, doel=doel, kamer=kamer,
+            )
+        return AircoBesluit(aan=True, modus=nodig, stand=stand, rule=stand, reason=reden)
     if not op_zon:
         return AircoBesluit(
             aan=None, modus=None, stand="uit", rule="wacht",

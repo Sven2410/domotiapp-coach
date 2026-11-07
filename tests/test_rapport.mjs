@@ -3380,12 +3380,27 @@ proef("het zelf geleerde rendement: één regel in de pop-up, de punten per verm
   assert.equal(el.geleerdHtml_(accu()), "", "nog niets geleerd: niets");
 });
 
+// Een klantwoning op 07-11-2026: Fujitsu via Atlantic Cozytouch, dat de kamertemperatuur niet doorgeeft.
+proef("de airco: Fujitsu (Atlantic Cozytouch) met een eigen kamersensor (v0.205.0)", () => {
+  const merk = brandsFor("airco").find((b) => b.id === "fujitsu");
+  assert.equal(merk.label, "Fujitsu (Atlantic Cozytouch)");
+  assert.match(merk.note, /Atlantic Cozytouch/);
+  assert.doesNotMatch(merk.note, /MELCloud/);
+  const leeg = { type: "airco", controllable: true, brand: "fujitsu", entities: {}, airco: { power_w: 1200 } };
+  assert.equal(canSteer(leeg), true);
+  assert.deepEqual(brandFields(leeg).map((f) => f.key), ["climate", "temperature"]);
+  assert.deepEqual(missingForControl(leeg), ["Airco", "Kamertemperatuur"], "de kamersensor is nodig");
+  assert.deepEqual(missingForControl({ ...leeg, entities: { climate: "climate.kamer", temperature: "sensor.kamer" } }), []);
+  const mitsu = { ...leeg, brand: "mitsubishi_electric", entities: { climate: "climate.kamer" } };
+  assert.deepEqual(missingForControl(mitsu), [], "bij Mitsubishi Electric blijft hij optioneel");
+});
+
 // De eigenaar op 14-10-2026 over de airco: "De klant stelt gewoon op de kaart in welke temperatuur
 // het moet zijn", en na v0.119.0: "goedkoop uur mag de bewoner zelf kiezen dus 3 opties of op zon of
 // goedkope uren of beide" en "Bij apparaten toevoegen alleen nog de optie Mitsubishi Electric kunnen
 // kiezen." Het typeplaatje is van de installateur.
 proef("de airco: alleen Mitsubishi Electric, een climate, een vermogen, en de keuze van de bewoner (v0.119.1)", () => {
-  assert.deepEqual(brandsFor("airco").map((b) => b.id), ["mitsubishi_electric"], "één merk");
+  assert.deepEqual(brandsFor("airco").map((b) => b.id), ["mitsubishi_electric", "fujitsu"], "sinds v0.205.0 ook Fujitsu");
   const zonder = { type: "airco", controllable: true, entities: {} };
   assert.equal(canSteer(zonder), false, "zonder merk niet");
   assert.deepEqual(brandFields(zonder), [], "zonder merk nog geen velden");

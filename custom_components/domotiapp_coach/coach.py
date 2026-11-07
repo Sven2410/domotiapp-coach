@@ -754,6 +754,13 @@ BOILER_MIN_KWH = 0.05
 # ~60 s een nieuwe regel), en een opdracht gaat eerst de cloud in; vijf rondes
 # is ruim genoeg voor allebei.
 AIRCO_VOLGT = timedelta(minutes=5)
+# Na hoeveel aanzetpogingen die niet aankwamen de coach zegt dat de airco niet
+# luistert, en hoe lang hij daarna wacht voor hij het nog eens probeert (v0.205.0).
+# In een klantwoning op 06-11-2026 bleef een airco de hele nacht uit terwijl het
+# besluit zei dat hij verwarmde; de coach stuurde elke vijf minuten dezelfde
+# opdracht, en niemand hoorde het.
+AIRCO_MISLUKT = 2
+AIRCO_OPNIEUW = timedelta(minutes=30)
 
 
 def _gelijk(a: Any, b: Any) -> bool:
@@ -6176,6 +6183,9 @@ class ChargerCoach:
             # zonder typeplaatje de maat voor "genoeg zon". Het meeste, want een
             # airco begint hard en regelt terug als hij bijna op temperatuur is.
             "gemeten_w": None,
+            # Hoeveel aanzetpogingen achter elkaar niet aankwamen, wanneer de
+            # laatste was, en of dat gemeld is (v0.205.0).
+            "mislukt": 0, "poging": None, "gemeld": False,
         })
 
     def _airco_staat(self, device: dict[str, Any]) -> tuple[str, dict[str, Any]]:
@@ -6236,7 +6246,18 @@ class ChargerCoach:
             if hvac == sessie["verwacht"]:
                 sessie["verwacht"] = None
                 sessie["vorige"] = hvac
+                if sessie["mislukt"] or sessie["gemeld"]:
+                    if sessie["gemeld"]:
+                        await self._async_tell(t("{naam} reageert weer op de coach.", naam=naam), telefoon=False)
+                    sessie["mislukt"] = 0
+                    sessie["gemeld"] = False
+                    self._remember(device_id)
             elif now - sessie["verwacht_sinds"] > AIRCO_VOLGT:
+                # Aanzetten kwam niet aan (uit telt niet: dan laat de coach hem
+                # los, en staat hij aan als van de bewoner).
+                if sessie["verwacht"] != "off" and bereikbaar:
+                    sessie["mislukt"] += 1
+                    self._remember(device_id)
                 sessie["verwacht"] = None
         if sessie["temp_verwacht"] is not None:
             if _gelijk(temp, sessie["temp_verwacht"]):
@@ -6335,13 +6356,31 @@ class ChargerCoach:
             )
 
         mag = level == LEVEL_STEER or (level == LEVEL_PROPOSE and device_id in self._approved)
+        # Kwam aanzetten twee keer niet aan, dan zegt hij dat, één keer, en
+        # probeert hij het pas na een half uur opnieuw (v0.205.0). Zolang een
+        # opdracht onderweg is, is hij nog niet mislukt.
+        doof = (
+            besluit.aan is True and not aan and sessie["mislukt"] >= AIRCO_MISLUKT
+            and sessie["verwacht"] is None and mag and level not in (LEVEL_READ, LEVEL_ADVISE)
+        )
+        if doof and not sessie["gemeld"]:
+            sessie["gemeld"] = True
+            self._remember(device_id)
+            await self._async_tell(
+                t("{naam} reageert niet op de coach. Kijk of de integratie werkt.", naam=naam), kritiek=True
+            )
+        if doof:
+            besluit = AircoBesluit(
+                aan=True, modus=besluit.modus, stand="uit", rule="geen-gehoor",
+                reason=t("Hij reageert niet op de coach. Kijk of de integratie werkt."),
+            )
         self.state[device_id] = {
             "kind": "airco",
             "at": now.isoformat(),
             "level": level,
-            "applied": mag and level not in (LEVEL_READ, LEVEL_ADVISE),
+            "applied": mag and level not in (LEVEL_READ, LEVEL_ADVISE) and not doof,
             "approved": device_id in self._approved,
-            "charge": aan if besluit.aan is None else besluit.aan,
+            "charge": aan if besluit.aan is None or doof else besluit.aan,
             "rule": besluit.rule,
             "reason": besluit.reason,
             "plan": "",
@@ -6386,6 +6425,9 @@ class ChargerCoach:
                     reason=t("Er is nu geen ruimte op de aansluiting voor de airco. Zodra er ruimte is, gaat hij aan."),
                 )
                 return
+            if doof and sessie["poging"] is not None and _tussen(sessie["poging"], now) < AIRCO_OPNIEUW:
+                return
+            sessie["poging"] = now
             await self._async_airco_zetten(device, sessie, now, besluit.modus, airco.doel_c)
             sessie["aan_sinds"] = now
             sessie["reden"] = besluit.stand
@@ -6404,19 +6446,20 @@ class ChargerCoach:
         klimaat = (device.get("entities") or {}).get("climate")
         if not klimaat:
             return
-        if modus == "off":
-            dienst, data = "set_hvac_mode", {"entity_id": klimaat, "hvac_mode": "off"}
-        elif temperatuur is not None:
-            # Eén opdracht met de stand erin: een cloudkoppeling doet over elke
-            # opdracht een minuut.
-            dienst, data = "set_temperature", {"entity_id": klimaat, "temperature": temperatuur, "hvac_mode": modus}
+        # Eerst de stand, dan de temperatuur, als twee opdrachten (v0.205.0).
+        # Tot dan was het één `set_temperature` met `hvac_mode` erin, maar Home
+        # Assistant geeft die stand alleen als argument door aan de integratie, en
+        # niet elke integratie leest hem: in een klantwoning bleef een airco zo
+        # uit, zonder fout. De stand gaat bij elke integratie via `set_hvac_mode`.
+        opdrachten = [("set_hvac_mode", {"entity_id": klimaat, "hvac_mode": modus})]
+        if modus != "off" and temperatuur is not None:
+            opdrachten.append(("set_temperature", {"entity_id": klimaat, "temperature": temperatuur}))
             sessie["temp_verwacht"] = temperatuur
-        else:
-            dienst, data = "set_hvac_mode", {"entity_id": klimaat, "hvac_mode": modus}
         sessie["verwacht"] = modus
         sessie["verwacht_sinds"] = now
         try:
-            await self.hass.services.async_call("climate", dienst, data, blocking=True)
+            for dienst, data in opdrachten:
+                await self.hass.services.async_call("climate", dienst, data, blocking=True)
         except Exception:  # noqa: BLE001 - een airco die blijft staan is geen reden om te stoppen
             _LOGGER.exception("kon de airco %s niet zetten", klimaat)
             sessie["verwacht"] = None
@@ -16111,8 +16154,17 @@ class ChargerCoach:
                     self._vol_tot[device_id] = float(row["boost_to"])
                 except (TypeError, ValueError):
                     pass
-            if row.get("airco_on") or row.get("resident_until") or row.get("airco_w"):
+            if row.get("airco_on") or row.get("resident_until") or row.get("airco_w") or row.get("airco_miss"):
                 sessie = self._airco_sessie(device_id)
+                try:
+                    sessie["mislukt"] = int(row.get("airco_miss") or 0)
+                except (TypeError, ValueError):
+                    sessie["mislukt"] = 0
+                sessie["gemeld"] = bool(row.get("airco_miss_told"))
+                try:
+                    sessie["poging"] = datetime.fromisoformat(str(row["airco_try"])) if row.get("airco_try") else None
+                except ValueError:
+                    sessie["poging"] = None
                 try:
                     sessie["gemeten_w"] = float(row["airco_w"]) if row.get("airco_w") else None
                 except (TypeError, ValueError):
@@ -16463,7 +16515,9 @@ class ChargerCoach:
         # zon aanzette voor eeuwig van de bewoner lijken.
         airco = self._airco.get(device_id) or {}
         for sleutel, waarde in (("airco_on", airco.get("aan_sinds")), ("airco_reason", airco.get("reden")),
-                                ("resident_until", airco.get("bewoner_tot")), ("airco_w", airco.get("gemeten_w"))):
+                                ("resident_until", airco.get("bewoner_tot")), ("airco_w", airco.get("gemeten_w")),
+                                ("airco_miss", airco.get("mislukt")), ("airco_miss_told", airco.get("gemeld")),
+                                ("airco_try", airco.get("poging"))):
             if waarde:
                 aan[sleutel] = waarde.isoformat() if isinstance(waarde, datetime) else waarde
         try:
