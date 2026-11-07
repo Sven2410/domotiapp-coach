@@ -8789,8 +8789,11 @@ zon156(coach156, NU156, 1500)
 a156, d156 = asyncio.run(ronde156(hass156, coach156, NU156))
 print(f"  13:00 {a156.get('stand')}: {a156.get('reason')}")
 print(f"  naar de airco: {klimaatdiensten(d156)}")
-controle("27 graden, de bewoner wil 23, 1,5 kW zon over: koelen op 23, in één opdracht",
-         klimaatdiensten(d156) == [("set_temperature", {"temperature": 23.0, "hvac_mode": "cool"})], f"{d156}")
+controle("27 graden, de bewoner wil 23, 1,5 kW zon over: eerst koelen, dan 23 (twee opdrachten sinds v0.205.0)",
+         klimaatdiensten(d156) == [("set_hvac_mode", {"hvac_mode": "cool"}), ("set_temperature", {"temperature": 23.0})],
+         f"{d156}")
+controle("en de kaart zegt dat de coach hem aanzet, niet dat hij al koelt",
+         "De coach zet hem aan om te koelen naar 23" in (a156.get("reason") or ""), f"{a156.get('reason')}")
 controle("de stand is zon, en de coach weet dat hij hem aanzette",
          a156.get("stand") == "zon" and coach156._airco["dev-airco"]["aan_sinds"] == NU156, f"{a156}")
 
@@ -8838,7 +8841,8 @@ controle("ook na uitzetten en met 3 kW zon zet de coach hem vandaag niet meer aa
          klimaatdiensten(d156c) == [] and a156c.get("stand") == "bewoner", f"{a156c} {d156c}")
 zon156(coach156c, dt.datetime(2026, 7, 15, 13, 0), 3000)
 a156c, d156c = asyncio.run(ronde156(hass156c, coach156c, dt.datetime(2026, 7, 15, 13, 0)))
-controle("de volgende dag weer wel", klimaatdiensten(d156c) == [("set_temperature", {"temperature": 23.0, "hvac_mode": "cool"})],
+controle("de volgende dag weer wel",
+         klimaatdiensten(d156c) == [("set_hvac_mode", {"hvac_mode": "cool"}), ("set_temperature", {"temperature": 23.0})],
          f"{d156c}")
 
 # Een andere temperatuur op de afstandsbediening is geen schakelen, maar de nieuwe wens.
@@ -15935,6 +15939,128 @@ h245d.states.zet("input_button.vw_nu", "2026-09-08T05:01:00+00:00")
 b, m = asyncio.run(ronde121(h245d, c245d, T245 + dt.timedelta(minutes=1)))
 controle("een knop-helper als nu-startknop: vrij en nu", vrij121(i245d) and nu245(i245d) and len(m) == 1, f"{m}")
 controle("en de coach luistert naar die knop", "input_button.vw_nu" in c245d._watched, f"{c245d._watched}")
+
+print("=== 246. een airco die de stand in set_temperature negeert, en een airco die niet luistert (v0.205.0) ===")
+# Een klantwoning op 06-11-2026: "Zegt dat ie gaat verwarmen, maar doet uiteindelijk niks." De integratie
+# (Atlantic Cozytouch) leest `hvac_mode` in `set_temperature` niet; de coach stuurde elke vijf minuten
+# dezelfde opdracht, het besluit zei applied, en niemand hoorde het.
+FUJI246 = dict(AIRCO, brand="fujitsu", entities={"climate": "climate.woonkamer", "temperature": "sensor.kamer"},
+               airco={"power_w": 1200, "target_c": 20.0, "run_on": "zon", "paused": False})
+NU246 = dt.datetime(2026, 11, 7, 13, 0)
+
+
+def bouw246(sessies=None):
+    inst = instellingen(devices=[FUJI246], **({"sessions": sessies} if sessies else {}))
+    waarden = {**huis(status="disconnected", afname=0.0, teruglevering=1500.0),
+               "climate.woonkamer": klimaat156("off", current_temperature=None, temperature=16.0),
+               "sensor.kamer": "18.2"}
+    hass, store, coach = bouw(waarden, inst)
+    hass.data["domotiapp_coach"]["coach"] = coach
+    berichten = []
+
+    async def tell(bericht, kritiek=False, telefoon=True):
+        berichten.append((bericht, kritiek, telefoon))
+    coach._async_tell = tell
+    return hass, store, coach, berichten
+
+
+def cozy246(hass, diensten):
+    """Zoals Atlantic Cozytouch: de stand alleen via set_hvac_mode."""
+    volg156(hass, [(d, n, {k: v for k, v in data.items() if not (n == "set_temperature" and k == "hvac_mode")})
+                   for d, n, data in diensten])
+
+
+async def ronde246(hass, coach, nu, volgen=None):
+    hass.services.verstuurd.clear()
+    await hass.afmaken()
+    await coach._round(nu)
+    await hass.afmaken()
+    diensten = list(hass.services.verstuurd)
+    if volgen:
+        volgen(hass, diensten)
+    return coach.state.get("dev-airco") or {}, klimaatdiensten(diensten)
+
+
+# 1. Een integratie die de stand alleen via set_hvac_mode leest: hij gaat toch aan.
+h246, s246, c246, b246 = bouw246()
+zon156(c246, NU246, 1500)
+a246, d246 = asyncio.run(ronde246(h246, c246, NU246, cozy246))
+print(f"  13:00 naar de airco: {d246}, op de kaart: {a246.get('reason')}")
+controle("de stand gaat via set_hvac_mode, de temperatuur apart",
+         d246 == [("set_hvac_mode", {"hvac_mode": "heat"}), ("set_temperature", {"temperature": 20.0})], f"{d246}")
+controle("en de airco staat echt op verwarmen, op 20",
+         h246.states.get("climate.woonkamer").state == "heat"
+         and h246.states.get("climate.woonkamer").attributes["temperature"] == 20.0, "")
+a246, d246 = asyncio.run(ronde246(h246, c246, NU246 + dt.timedelta(minutes=1), cozy246))
+controle("de ronde erna: hij verwarmt, niets opnieuw, geen bewoner, geen melding",
+         d246 == [] and a246.get("stand") == "zon" and a246.get("applied") and b246 == [], f"{a246} {d246} {b246}")
+
+# 2. Een airco die helemaal niet luistert: twee pogingen, dan één melding, en niet elke vijf minuten.
+h246b, s246b, c246b, b246b = bouw246()
+pogingen246 = []
+for minuut in range(0, 75):
+    nu = NU246 + dt.timedelta(minutes=minuut)
+    zon156(c246b, nu, 1500)
+    a246b, d246b = asyncio.run(ronde246(h246b, c246b, nu))
+    if d246b:
+        pogingen246.append(minuut)
+    if minuut == 8:
+        tussen246 = dict(a246b)
+print(f"  pogingen op minuut {pogingen246}, meldingen {b246b}")
+print(f"  op de kaart: {a246b.get('stand')}, {a246b.get('rule')}: {a246b.get('reason')}")
+controle("twee pogingen vijf minuten uit elkaar, daarna een half uur tussen elke poging",
+         pogingen246 == [0, 6, 36, 66], f"{pogingen246}")
+controle("één melding, kritiek, met de naam en zonder entiteit-id",
+         b246b == [("Airco reageert niet op de coach. Kijk of de integratie werkt.", True, True)], f"{b246b}")
+controle("het besluit is niet meer applied, en de kaart zegt wat er is",
+         a246b.get("applied") is False and a246b.get("stand") == "uit" and a246b.get("rule") == "geen-gehoor"
+         and a246b.get("charge") is False and "reageert niet" in a246b.get("reason", ""), f"{a246b}")
+controle("tijdens de tweede poging nog gewoon de coach die hem aanzet",
+         tussen246.get("applied") is True and tussen246.get("rule") == "zon", f"{tussen246}")
+inst246b = s246b.instellingen
+rij246 = next(r for r in inst246b.get("sessions") or [] if r.get("device") == "dev-airco")
+controle("de telling en de melding staan in de opslag",
+         (rij246.get("airco_miss") or 0) >= 2 and rij246.get("airco_miss_told") is True and rij246.get("airco_try"), f"{rij246}")
+
+# 3. Een herstart: geen tweede melding, en niet meteen opnieuw proberen.
+h246c, s246c, c246c, b246c = bouw246(sessies=[dict(rij246, at=coachmod.dt_util.utcnow().isoformat())])
+nu246 = NU246 + dt.timedelta(minutes=75)
+zon156(c246c, nu246, 1500)
+a246c, d246c = asyncio.run(ronde246(h246c, c246c, nu246))
+controle("na een herstart: geen nieuwe melding, en de kaart weet het nog",
+         b246c == [] and a246c.get("rule") == "geen-gehoor", f"{b246c} {a246c.get('rule')}")
+controle("en de half uur pauze telt door", d246c == [], f"{d246c}")
+# Een half uur na de laatste poging (minuut 66) luistert hij weer: aan, en dat staat alleen in de geschiedenis.
+nu246 = NU246 + dt.timedelta(minutes=96)
+zon156(c246c, nu246, 1500)
+a246c, d246c = asyncio.run(ronde246(h246c, c246c, nu246, volg156))
+nu246 += dt.timedelta(minutes=1)
+zon156(c246c, nu246, 1500)
+a246c, d246c = asyncio.run(ronde246(h246c, c246c, nu246, volg156))
+controle("hij luistert weer: aan, applied, terug in de geschiedenis zonder telefoon",
+         a246c.get("applied") and a246c.get("rule") == "zon"
+         and b246c == [("Airco reageert weer op de coach.", False, False)], f"{a246c} {b246c}")
+controle("en de telling is weg", c246c._airco["dev-airco"]["mislukt"] == 0 and not c246c._airco["dev-airco"]["gemeld"], "")
+
+# 4. Een herstart midden in de eerste poging: die telt niet dubbel, de tweede wel.
+h246d, s246d, c246d, b246d = bouw246()
+zon156(c246d, NU246, 1500)
+asyncio.run(ronde246(h246d, c246d, NU246))
+for minuut in range(1, 7):
+    zon156(c246d, NU246 + dt.timedelta(minutes=minuut), 1500)
+    asyncio.run(ronde246(h246d, c246d, NU246 + dt.timedelta(minutes=minuut)))
+rij246d = next(r for r in s246d.instellingen.get("sessions") or [] if r.get("device") == "dev-airco")
+h246e, _, c246e, b246e = bouw246(sessies=[dict(rij246d, at=coachmod.dt_util.utcnow().isoformat())])
+poging246e = []
+for minuut in range(7, 20):
+    nu = NU246 + dt.timedelta(minutes=minuut)
+    zon156(c246e, nu, 1500)
+    _, d = asyncio.run(ronde246(h246e, c246e, nu))
+    if d:
+        poging246e.append(minuut)
+controle("de eerste mislukte poging overleeft de herstart: na de tweede de melding",
+         c246e._airco["dev-airco"]["mislukt"] >= 2 and len(b246e) == 1 and b246e[0][1] is True,
+         f"{rij246d.get('airco_miss')} {poging246e} {b246e}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

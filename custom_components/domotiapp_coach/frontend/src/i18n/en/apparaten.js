@@ -318,6 +318,10 @@ export const APPARATEN = {
     "Optional: a separate sensor in the room. Empty is the temperature the air conditioner measures itself.",
   "Voor Mitsubishi Electric is dat de airco zoals de MELCloud-integratie hem in Home Assistant zet. Die praat via de cloud: een opdracht van de coach staat er na ongeveer een minuut.":
     "For Mitsubishi Electric that is the air conditioner as the MELCloud integration adds it to Home Assistant. It talks through the cloud: a command from the coach arrives after about a minute.",
+  "Voor Fujitsu is dat de airco zoals de integratie Atlantic Cozytouch hem in Home Assistant zet, via de cloud. Die geeft de temperatuur in de kamer niet door, dus kies daarvoor een eigen sensor.":
+    "For Fujitsu that is the air conditioner as the Atlantic Cozytouch integration adds it to Home Assistant, through the cloud. It does not pass on the room temperature, so choose a separate sensor for it.",
+  "Een eigen sensor in de kamer. Atlantic Cozytouch geeft de temperatuur die de airco meet niet door, dus zonder deze sensor weet de coach niet wanneer hij aan moet.":
+    "A separate sensor in the room. Atlantic Cozytouch does not pass on the temperature the air conditioner measures, so without this sensor the coach does not know when to switch it on.",
   "Schakelaar": "Switch",
   "De smart plug, schakelaar of het relais waarmee de boiler stroom krijgt. Hier zet de coach hem mee aan en uit; hoe warm het water wordt blijft aan de thermostaat van de boiler zelf.":
     "The smart plug, switch or relay that powers the water heater. The coach turns it on and off with it; how hot the water gets is left to the water heater's own thermostat.",

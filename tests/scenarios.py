@@ -996,6 +996,13 @@ airco_goedkoop = dyn_geen_zon.kopie(
     airco_aan_op="goedkoop",
     begin="2026-09-07 00:05", duur_uren=23,
 )
+# Een klantwoning op 06-11-2026: een airco via Atlantic Cozytouch, dat de stand in
+# `set_temperature` niet leest. Tot v0.205.0 bleef hij daar de hele nacht uit.
+airco_cozytouch = airco_goedkoop.kopie(
+    naam="airco-cozytouch",
+    uitleg="dezelfde koude dag op goedkope uren, maar de integratie leest de stand alleen uit set_hvac_mode: hij moet toch aan",
+    airco=Airco(kamer_c=17.0, buiten={0: 6.0, 6: 4.0, 12: 9.0, 16: 10.0, 20: 7.0}, stand_in_temperatuur=False),
+)
 # En dezelfde dag zoals hij standaard staat, op zon: geen zon, dus nooit aan, hoe
 # koud het ook is. Hij is geen thermostaat.
 airco_geen_zon = airco_goedkoop.kopie(
@@ -1884,7 +1891,7 @@ ALLE = [
     wasmachine_miele, wasmachine_miele_gemeten, wasmachine_miele_onderbroken,
     forecast_solar_vast, forecast_solar_vaatwasser, forecast_solar_sensoren,
     boiler_leert, boiler_nacht, boiler_zon, boiler_stekker_stuk,
-    airco_zon, airco_plaatje, airco_bewoner, airco_goedkoop, airco_geen_zon,
+    airco_zon, airco_plaatje, airco_bewoner, airco_goedkoop, airco_geen_zon, airco_cozytouch,
     *KLANTWONING,
     *BATTERIJ,
     vast_zon_modus, bewolkt_zon_modus, half_zon_modus, dyn_continu,

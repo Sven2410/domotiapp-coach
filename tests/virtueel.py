@@ -776,6 +776,9 @@ class Airco:
     hvac: str = "off"
     doel_c: float = 24.0
     vertraging_s: float = 60.0
+    # Leest de integratie `hvac_mode` in `set_temperature`? MELCloud wel, Atlantic
+    # Cozytouch niet: daar gaat de stand alleen via `set_hvac_mode` (v0.205.0).
+    stand_in_temperatuur: bool = True
 
     # toestand
     wachtrij: list = field(default_factory=list)
@@ -2450,6 +2453,8 @@ class Diensten:
         elif domein == "climate" and data.get("entity_id") == E["airco_klimaat"]:
             if self.wereld.airco is not None:
                 stand = data.get("hvac_mode")
+                if dienst == "set_temperature" and not self.wereld.airco.stand_in_temperatuur:
+                    stand = None
                 self.wereld.airco.opdracht(self.wereld.nu, stand, data.get("temperature"))
                 self.verloop.airco_opdrachten.append((self.wereld.nu, stand, data.get("temperature")))
         elif data.get("entity_id") == E["boiler_switch"] and dienst in ("turn_on", "turn_off"):

@@ -218,6 +218,7 @@ BATTERIJ_SCHEMA: Final = ("growatt",)
 # naast `ALL_BRANDS`.
 AIRCO_BRANDS: Final = [
     "mitsubishi_electric",
+    "fujitsu",
 ]
 
 ALL_BRANDS: Final = sorted(

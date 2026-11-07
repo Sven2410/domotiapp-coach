@@ -1766,8 +1766,10 @@ for naam in ("airco-zon", "airco-plaatje"):
                  f"{airco_klok(vl.airco_aan)}")
         controle(f"{naam}: de kamer haalt de 23 graden van de bewoner, en niet lager",
                  abs((vl.airco_laagste or 0) - 23.0) < 0.05, f"{vl.airco_laagste}")
+        # Aanzetten is sinds v0.205.0 de stand en dan de temperatuur: twee opdrachten.
         controle(f"{naam}: met de temperatuur van de bewoner, in een handvol opdrachten",
-                 len(vl.airco_opdrachten) <= 6 and all(tp in (None, 23.0) for _, _, tp in vl.airco_opdrachten),
+                 len([s for _, s, _ in vl.airco_opdrachten if s]) <= 6
+                 and all(tp in (None, 23.0) for _, _, tp in vl.airco_opdrachten),
                  f"{vl.airco_opdrachten}")
         controle(f"{naam}: en als de zon op is gaat hij uit",
                  vl.airco_aan and vl.airco_aan[-1][1] is not None and vl.airco_aan[-1][1].hour < 20,
@@ -1801,6 +1803,18 @@ if (vl := v("airco-goedkoop")):
              f"{[(t.strftime('%H:%M'), round(p, 3)) for t, p in uit]}")
     controle("airco goedkoop: niet in de avondpiek, want die is niet goedkoop",
              not any(17 <= a.hour < 21 for a, _, _ in vl.airco_aan), f"{airco_klok(vl.airco_aan)}")
+
+for naam in ("airco-goedkoop", "airco-cozytouch"):
+    if (vl := v(naam)):
+        print(f"  {naam}: {vl.airco_kwh:.2f} kWh, kamer {vl.airco_laagste:.1f} tot {vl.airco_hoogste:.1f}, "
+              f"opdrachten {[(t.strftime('%H:%M'), s, tp) for t, s, tp in vl.airco_opdrachten][:4]}")
+        controle(f"{naam}: hij gaat echt aan en de kamer wordt warmer, ook als de stand alleen via set_hvac_mode gaat",
+                 vl.airco_kwh > 0.5 and (vl.airco_hoogste or 0) >= 19.5, f"{vl.airco_kwh:.2f} kWh, {vl.airco_hoogste}")
+        controle(f"{naam}: eerst de stand, dan de temperatuur",
+                 vl.airco_opdrachten[:2] and vl.airco_opdrachten[0][1] == "heat" and vl.airco_opdrachten[1][2] == 20.0,
+                 f"{vl.airco_opdrachten[:2]}")
+        controle(f"{naam}: geen melding dat hij niet reageert",
+                 not meldingen(vl, "reageert niet"), f"{meldingen(vl, 'reageert niet')}")
 
 if (vl := v("airco-geen-zon")):
     print(f"  airco-geen-zon: {len(vl.airco_opdrachten)} opdrachten, kamer {vl.airco_laagste:.1f} tot "
