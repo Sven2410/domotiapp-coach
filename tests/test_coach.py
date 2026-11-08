@@ -16062,6 +16062,143 @@ controle("de eerste mislukte poging overleeft de herstart: na de tweede de meldi
          c246e._airco["dev-airco"]["mislukt"] >= 2 and len(b246e) == 1 and b246e[0][1] is True,
          f"{rij246d.get('airco_miss')} {poging246e} {b246e}")
 
+print("=== 247. de airco leert hoe snel de kamer afkoelt en wat een graad kost (v0.207.0) ===")
+# Een bewoner op 07-11-2026: "Hoe snel koelt een woning af bij een bepaalde buitentemperatuur, en hoe snel
+# warmt een woning weer op om op een gewenste temperatuur te komen. Dit gekoppeld aan de verbruikte energie."
+# Stap 1: alleen leren en laten zien.
+import math as _math247  # noqa: E402
+from domotiapp_coach import kamer as kamer247  # noqa: E402
+
+LEER247 = dict(AIRCO, controllable=False, entity="sensor.airco_w",
+               entities={"climate": "climate.woonkamer", "temperature": "sensor.kamer", "outdoor": "sensor.buiten"})
+U247 = dt.timezone.utc
+
+
+def bouw247(device=LEER247, waarden=None):
+    inst = instellingen(devices=[device])
+    basis = {**huis(status="disconnected"), "climate.woonkamer": klimaat156("off"), "sensor.kamer": "20.0",
+             "sensor.buiten": "5.0", "sensor.airco_w": {"state": "3", "attributes": {"unit_of_measurement": "W"}}, "sun.sun": "below_horizon"}
+    hass, store, coach = bouw({**basis, **(waarden or {})}, inst)
+    hass.data["domotiapp_coach"]["coach"] = coach
+    asyncio.run(coach._async_geheugen_laden())
+    return inst, hass, store, coach
+
+
+def koel247(minuten, k=0.1, begin=20.0, buiten=5.0):
+    """De kamer zakt naar buiten toe, op een tiende graad gemeten zoals een echte sensor."""
+    return round(buiten + (begin - buiten) * _math247.exp(-k * minuten / 60.0), 1)
+
+
+# 1. Uit om 21:00, 's nachts: het eerste uur telt niet, dan een venster van twee uur. Om 23:00 een herstart.
+inst247, hass247, store247, coach247 = bouw247()
+T247 = dt.datetime(2026, 11, 7, 21, 0)
+uitkomsten247 = []
+for minuut in range(0, 185):
+    if minuut == 120:
+        coach247 = herstart213(hass247)
+        asyncio.run(coach247._async_geheugen_laden())
+    hass247.states.zet("sensor.kamer", f"{koel247(minuut):.1f}")
+    asyncio.run(coach247._async_airco_leren(T247 + dt.timedelta(minutes=minuut), inst247, LEER247))
+    rij = coach247._airco_geleerd(inst247, "dev-airco")
+    if rij.get("k_n") and (not uitkomsten247 or uitkomsten247[-1][1] != rij["k_n"]):
+        uitkomsten247.append((minuut, rij["k_n"], rij["k"]))
+print(f"  uitkomsten (minuut, aantal, k): {uitkomsten247}")
+controle("het eerste venster is af om 00:00: een uur na uit, dan twee uur, dwars door de herstart heen",
+         uitkomsten247[:1] and uitkomsten247[0][0] == 180 and uitkomsten247[0][1] == 1, f"{uitkomsten247}")
+controle("het verlies binnen 10% van de kamer (0,1 per uur per graad)",
+         uitkomsten247 and abs(uitkomsten247[0][2] - 0.1) <= 0.01, f"{uitkomsten247}")
+controle("in de opslag, als airco_learned", any(r.get("device") == "dev-airco" for r in store247.instellingen.get("airco_learned") or []),
+         f"{store247.instellingen.get('airco_learned')}")
+
+# 2. Wat geen venster is.
+G247 = {"device": "x"}
+N247 = dt.datetime(2026, 11, 7, 22, 0, tzinfo=U247)
+
+
+def venster247(stappen, soort="uit", nacht=True, uit_sinds=N247 - dt.timedelta(hours=2), geleerd=G247, watt=None):
+    venster, uit = None, []
+    for i, (kamer, buiten) in enumerate(stappen):
+        venster, r = kamer247.leer_stap(venster, N247 + dt.timedelta(minutes=i), kamer, buiten, soort, watt,
+                                        nacht, uit_sinds, geleerd)
+        if r:
+            uit.append(r)
+    return venster, uit
+
+
+rustig247 = [(koel247(i), 5.0) for i in range(125)]
+controle("een rustig venster geeft één uitkomst", len(venster247(rustig247)[1]) == 1, "")
+controle("overdag niet: de zon op het raam", venster247(rustig247, nacht=False) == (None, []), "")
+controle("niet in het eerste uur na uit",
+         venster247(rustig247, uit_sinds=N247 - dt.timedelta(minutes=30))[1] == [], "")
+sprong247 = list(rustig247)
+sprong247[60] = (sprong247[60][0] - 1.0, 5.0)
+controle("een sprong (een raam) breekt het venster", venster247(sprong247)[1] == [], "")
+gat247 = rustig247[:50] + [(None, 5.0)] * 10 + rustig247[60:]
+controle("een sensor die wegvalt breekt het venster", venster247(gat247)[1] == [], "")
+controle("minder dan drie graden verschil met buiten: niets",
+         venster247([(koel247(i, begin=7.0), 5.0) for i in range(125)])[1] == [], "")
+controle("zonder buitentemperatuur: niets", venster247([(koel247(i), None) for i in range(125)]) == (None, []), "")
+# Verwarmen: pas als het verlies vaak genoeg gemeten is.
+warm247 = [(round(5 + 13 * _math247.exp(-0.1 * i / 60) + (2.5 / 0.1) * (1 - _math247.exp(-0.1 * i / 60)), 3), 5.0)
+           for i in range(65)]
+weinig247 = {"device": "x", "k": 0.1, "k_n": kamer247.GENOEG - 1}
+genoeg247 = {"device": "x", "k": 0.1, "k_n": kamer247.GENOEG}
+controle("verwarmen leert niets zolang het verlies niet bekend is",
+         venster247(warm247, soort="heat", watt=1200.0, geleerd=weinig247) == (None, []), "")
+uit247 = venster247(warm247, soort="heat", watt=1200.0, geleerd=genoeg247)[1]
+print(f"  verwarmen: {uit247}")
+controle("verwarmen: 2,5 graad per uur op 1,2 kW is 2,08 graad per kWh, binnen 10%",
+         len(uit247) == 1 and uit247[0][0] == "heat" and abs(uit247[0][1] - 2.5 / 1.2) <= 0.21, f"{uit247}")
+controle("zonder vermogenssensor geen kilowatturen, dus niets",
+         venster247(warm247, soort="heat", watt=None, geleerd=genoeg247) == (None, []), "")
+controle("een airco op uit die toch 200 W trekt is niet uit", kamer247.soort_nu("off", 200.0) is None
+         and kamer247.soort_nu("off", 3.0) == "uit" and kamer247.soort_nu("fan_only", 50.0) is None, "")
+# Het gemiddelde: een nieuw venster weegt nooit minder dan 1 op 20.
+g247 = {"device": "x"}
+for waarde in [0.1] * 30:
+    g247 = kamer247.leer_erbij(g247, ("verlies", waarde))
+g247 = kamer247.leer_erbij(g247, ("verlies", 0.3))
+controle("een lopend gemiddelde dat blijft bijleren", g247["k_n"] == 31 and abs(g247["k"] - 0.11) < 1e-6, f"{g247}")
+
+# 3. Wat de kaart ziet: niets verzonnen tot vijf vensters, dan het getal.
+STUUR247 = dict(LEER247, controllable=True)
+inst247b, hass247b, store247b, coach247b = bouw247(STUUR247)
+asyncio.run(coach247b._round(dt.datetime(2026, 11, 7, 22, 0)))
+geleerd247 = coach247b.state["dev-airco"].get("learned") or {}
+controle("nog niets geleerd: geen getal, wel de buitentemperatuur en hoeveel er nodig zijn",
+         geleerd247.get("loss_per_c") is None and geleerd247.get("needed") == 5 and geleerd247.get("outdoor_c") == 5.0
+         and geleerd247.get("power_sensor") is True, f"{geleerd247}")
+store247b.instellingen["airco_learned"] = [{"device": "dev-airco", "k": 0.1, "k_n": 5, "heat": 2.5, "heat_n": 4}]
+asyncio.run(coach247b._round(dt.datetime(2026, 11, 7, 22, 1)))
+geleerd247 = coach247b.state["dev-airco"].get("learned") or {}
+controle("vijf vensters verlies: het getal; vier van verwarmen: nog niet",
+         geleerd247.get("loss_per_c") == 0.1 and geleerd247.get("heat_c_per_kwh") is None
+         and geleerd247.get("heat_c_per_kwh_n") == 4, f"{geleerd247}")
+sensoren247 = []
+asyncio.run(sensormod.async_setup_entry(hass247b, Invoer110(), lambda nieuw: sensoren247.extend(nieuw)))
+s247 = next(x for x in sensoren247 if x.unique_id == "dev-airco_coach")
+s247.hass = hass247b
+s247.bijwerken(coach247b.state["dev-airco"])
+a247 = s247.extra_state_attributes
+controle("de airco-kaart van Lovelace krijgt het erbij, en verder blijft alles (contract 1)",
+         a247["contract"] == 1 and a247["verlies_per_graad"] == 0.1 and a247["kwh_per_graad_verwarmen"] is None
+         and a247["buiten"] == 5.0 and a247["stand"] is not None, f"{a247}")
+store247b.instellingen["airco_learned"][0]["heat_n"] = 5
+asyncio.run(coach247b._round(dt.datetime(2026, 11, 7, 22, 2)))
+s247.bijwerken(coach247b.state["dev-airco"])
+controle("vijf keer verwarmen: 2,5 graad per kWh is 0,4 kWh per graad",
+         s247.extra_state_attributes["kwh_per_graad_verwarmen"] == 0.4, f"{s247.extra_state_attributes}")
+controle("een airco die de coach niet stuurt leert ook", "dev-airco" in coach247._airco_leer, "")
+
+# 4. Zonder eigen buitensensor: het weer van Home Assistant, ook in Fahrenheit.
+ZONDER247 = dict(LEER247, entities={"climate": "climate.woonkamer", "temperature": "sensor.kamer"})
+_, hass247c, _, coach247c = bouw247(ZONDER247, {"weather.thuis": {"state": "cloudy", "attributes": {
+    "temperature": 41.0, "temperature_unit": "°F"}}})
+hass247c.states.async_all = lambda domein: [_types.SimpleNamespace(entity_id="weather.thuis")] if domein == "weather" else []
+controle("het weer in Fahrenheit: 41 °F is 5 °C", abs((coach247c._airco_buiten(ZONDER247) or 0) - 5.0) < 1e-9, "")
+hass247c.states.async_all = lambda domein: []
+controle("zonder weer: geen buitentemperatuur", coach247c._airco_buiten(ZONDER247) is None, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

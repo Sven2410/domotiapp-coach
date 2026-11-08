@@ -1003,6 +1003,15 @@ airco_cozytouch = airco_goedkoop.kopie(
     uitleg="dezelfde koude dag op goedkope uren, maar de integratie leest de stand alleen uit set_hvac_mode: hij moet toch aan",
     airco=Airco(kamer_c=17.0, buiten={0: 6.0, 6: 4.0, 12: 9.0, 16: 10.0, 20: 7.0}, stand_in_temperatuur=False),
 )
+# Een bewoner op 07-11-2026 wil dat de coach leert hoe snel de kamer afkoelt en wat
+# opwarmen kost (v0.207.0, stap 1: alleen leren). Acht koude dagen op goedkope uren:
+# 's nachts uit en weer aan. De kamer verliest 0,12 per uur per graad verschil
+# (`lek_per_uur`), en de airco doet 2,5 graad per uur op 1200 W: 2,08 graad per kWh.
+airco_leren = airco_goedkoop.kopie(
+    naam="airco-leren",
+    uitleg="acht koude dagen op goedkope uren: de coach leert het verlies van de kamer en wat een graad verwarmen kost",
+    duur_uren=192,
+)
 # En dezelfde dag zoals hij standaard staat, op zon: geen zon, dus nooit aan, hoe
 # koud het ook is. Hij is geen thermostaat.
 airco_geen_zon = airco_goedkoop.kopie(
@@ -1891,7 +1900,7 @@ ALLE = [
     wasmachine_miele, wasmachine_miele_gemeten, wasmachine_miele_onderbroken,
     forecast_solar_vast, forecast_solar_vaatwasser, forecast_solar_sensoren,
     boiler_leert, boiler_nacht, boiler_zon, boiler_stekker_stuk,
-    airco_zon, airco_plaatje, airco_bewoner, airco_goedkoop, airco_geen_zon, airco_cozytouch,
+    airco_zon, airco_plaatje, airco_bewoner, airco_goedkoop, airco_geen_zon, airco_cozytouch, airco_leren,
     *KLANTWONING,
     *BATTERIJ,
     vast_zon_modus, bewolkt_zon_modus, half_zon_modus, dyn_continu,

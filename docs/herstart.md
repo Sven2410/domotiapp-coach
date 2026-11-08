@@ -24,6 +24,9 @@ stopt niets.
 | een programma dat vrijgegeven is maar nog niet draait, en uitruimen | `GeheugenStore`, `programma:<id>` | v0.172.0 |
 | iets anders stuurt de batterij, hij volgt niet, de Growatt weigert | `GeheugenStore`, `batterij:<id>` | v0.173.0 |
 | meldingen die al gedaan zijn | `GeheugenStore`, `meldingen` | v0.173.0 |
+| een airco die niet luistert: de pogingen en of het gemeld is | `sessions` (`airco_miss`, `airco_try`, `airco_miss_told`) | v0.205.0 |
+| wat een kamer met een airco doet: het geleerde | `airco_learned` in de instellingen | v0.207.0 |
+| het venster waarin de kamer gemeten wordt, sinds wanneer de airco uit staat | `GeheugenStore`, `airco-leren:<id>` | v0.207.0 |
 
 ## GeheugenStore (v0.172.0)
 

@@ -2691,6 +2691,46 @@ proef("de kaart van een Growatt: het schema, geen opdracht, de stand vertaald (v
   }
 });
 
+// Een bewoner op 07-11-2026 wil weten hoe snel de kamer afkoelt en wat opwarmen kost (v0.207.0). De kaart
+// zegt alleen wat de coach vaak genoeg mat; daarvoor dat hij nog leert.
+proef("de airco: wat de coach van de kamer leerde, op de kaart (v0.207.0)", async () => {
+  const { aircoRegels } = await import("../custom_components/domotiapp_coach/frontend/src/airco.js");
+  const rij = (besluit) => Object.fromEntries(aircoRegels(besluit).map((r) => [r.label, r.text]));
+  const basis = { kind: "airco", room_c: 20, learned: { needed: 5, power_sensor: true, outdoor_c: 6,
+    loss_per_c: null, loss_per_c_n: 2, heat_c_per_kwh: null, heat_c_per_kwh_n: 0, cool_c_per_kwh: null, cool_c_per_kwh_n: 0 } };
+  assert.deepEqual(aircoRegels({ kind: "batterij" }), [], "alleen een airco");
+  assert.deepEqual(aircoRegels({ kind: "airco" }), [], "een coach van voor v0.207.0: niets");
+  assert.deepEqual(rij(basis), { "Zonder airco": "nog aan het leren (2 van 5 metingen)" }, "nog geen getal, geen verwarmen");
+  assert.deepEqual(rij({ ...basis, learned: { ...basis.learned, outdoor_c: null } }),
+    { "Zonder airco": "weet hij niet zonder buitentemperatuur" });
+  const geleerd = { ...basis, learned: { ...basis.learned, loss_per_c: 0.05, loss_per_c_n: 6,
+    heat_c_per_kwh: 2.5, heat_c_per_kwh_n: 7, cool_c_per_kwh_n: 1 } };
+  assert.deepEqual(rij(geleerd), {
+    "Zonder airco": "zakt ongeveer 0,7 °C per uur, bij 20,0 °C binnen en 6,0 °C buiten",
+    "Verwarmen": "1 °C kost ongeveer 0,40 kWh",
+    "Koelen": "nog aan het leren (1 van 5 metingen)",
+  });
+  assert.equal(rij({ ...geleerd, room_c: 24, learned: { ...geleerd.learned, outdoor_c: 30 } })["Zonder airco"],
+    "stijgt ongeveer 0,3 °C per uur, bij 24,0 °C binnen en 30,0 °C buiten", "in de zomer warmt hij op");
+  assert.equal(rij({ ...geleerd, learned: { ...geleerd.learned, outdoor_c: 19.5 } })["Zonder airco"],
+    "ongeveer 0,1 °C per uur per graad verschil met buiten", "bijna geen verschil: het getal zelf");
+  assert.equal(rij({ ...basis, learned: { ...basis.learned, loss_per_c: 0.05, power_sensor: false } })["Verwarmen"],
+    "weet hij niet zonder vermogenssensor");
+  const i = await import("../custom_components/domotiapp_coach/frontend/src/i18n.js");
+  try {
+    i.kiesTaal("en");
+    assert.deepEqual(rij(geleerd), {
+      "Without air conditioning": "drops about 0.7 °C per hour, at 20.0 °C inside and 6.0 °C outside",
+      "Heating": "1 °C costs about 0.40 kWh",
+      "Cooling": "still learning (1 of 5 measurements)",
+    });
+  } finally {
+    i.kiesTaal("nl");
+  }
+  const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
+  assert.ok(kaart.includes("...aircoRegels(this.coach_?.[device.id])"), "op de kaart van het overzicht");
+});
+
 proef("alleen de eerste aaneengesloten netlading staat erop", () => {
   const net = volgendeNetlading(BESLUIT_BATTERIJ.hours);
   assert.equal(net.start, "2026-09-22T02:00:00");
@@ -3403,7 +3443,7 @@ proef("de airco: Fujitsu (Atlantic Cozytouch) met een eigen kamersensor (v0.205.
   assert.doesNotMatch(merk.note, /MELCloud/);
   const leeg = { type: "airco", controllable: true, brand: "fujitsu", entities: {}, airco: { power_w: 1200 } };
   assert.equal(canSteer(leeg), true);
-  assert.deepEqual(brandFields(leeg).map((f) => f.key), ["climate", "temperature"]);
+  assert.deepEqual(brandFields(leeg).map((f) => f.key), ["climate", "temperature", "outdoor"], "sinds v0.207.0 ook buiten");
   assert.deepEqual(missingForControl(leeg), ["Airco", "Kamertemperatuur"], "de kamersensor is nodig");
   assert.deepEqual(missingForControl({ ...leeg, entities: { climate: "climate.kamer", temperature: "sensor.kamer" } }), []);
   const mitsu = { ...leeg, brand: "mitsubishi_electric", entities: { climate: "climate.kamer" } };
@@ -3421,7 +3461,7 @@ proef("de airco: alleen Mitsubishi Electric, een climate, een vermogen, en de ke
   assert.deepEqual(brandFields(zonder), [], "zonder merk nog geen velden");
   const leeg = { ...zonder, brand: "mitsubishi_electric" };
   assert.equal(canSteer(leeg), true);
-  assert.deepEqual(brandFields(leeg).map((f) => f.key), ["climate", "temperature"]);
+  assert.deepEqual(brandFields(leeg).map((f) => f.key), ["climate", "temperature", "outdoor"], "sinds v0.207.0 ook buiten");
   assert.deepEqual(missingForControl(leeg), ["Airco", "Vermogenssensor of typeplaatje"]);
   assert.deepEqual(missingForControl({ ...leeg, entities: { climate: "climate.kamer" }, airco: { power_w: 1200 } }), []);
   assert.deepEqual(missingForControl({ ...leeg, entities: { climate: "climate.kamer" }, entity: "sensor.airco_w" }), []);

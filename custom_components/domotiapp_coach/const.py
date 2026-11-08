@@ -780,6 +780,10 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # ging. Per apparaat. De eigenaar op 19-09-2026: "alleen de switch invullen en
     # power invullen", de rest zelflerend. Zie `_one_boiler` in coach.py.
     "boiler_learned": [],
+    # Wat de coach van de kamer van een airco leerde (v0.207.0): het verlies `k` (°C per
+    # uur per °C verschil met buiten) en wat een kWh verwarmen of koelen doet, met het
+    # aantal vensters erbij. Zie `_async_airco_leren` in coach.py en kamer.py.
+    "airco_learned": [],
     # Wat de coach van een thuisbatterij bijhoudt, per apparaat: het gemeten
     # rendement, wanneer hij voor het laatst vol was (voor de wekelijkse volle
     # beurt), wat hij per dag verdiende (`earned_days`) en wat de zon die erin

@@ -198,6 +198,7 @@ from .storage import (
     async_get_zon,
 )
 from .zon import ZON_DAGEN, zon_dag_terug, zon_uit_opwek
+from .kamer import GENOEG as KAMER_GENOEG, geleerd_bekend, leer_erbij, leer_stap, soort_nu
 from .units import hour_to_watts, to_kwh, to_watts
 
 _LOGGER = logging.getLogger(__name__)
@@ -1983,6 +1984,9 @@ class ChargerCoach:
         self._boiler: dict[str, dict[str, Any]] = {}
         # Per airco: wie hem aanzette, wat de coach net vroeg, wat de bewoner deed (v0.119.0).
         self._airco: dict[str, dict[str, Any]] = {}
+        # Per airco wat hij nu leert over de kamer (v0.207.0): het lopende venster, sinds
+        # wanneer hij uit staat, en de buitentemperatuur van deze ronde.
+        self._airco_leer: dict[str, dict[str, Any]] = {}
         # Wat er de afgelopen METER_VENSTER per ronde naar het net ging:
         # (moment, watt). Zie `_meter_zeker`.
         self._meter: list[tuple[datetime, float]] = []
@@ -4473,7 +4477,14 @@ class ChargerCoach:
 
         # En de airco's (v0.119.0): aan of uit, met de temperatuur van de bewoner.
         for device in settings.get("devices") or []:
-            if device.get("type") != "airco" or not device.get("controllable"):
+            if device.get("type") != "airco":
+                continue
+            # Leren doet hij bij elke airco, ook een die hij niet mag sturen (v0.207.0).
+            try:
+                await self._async_airco_leren(moment, settings, device)
+            except Exception:  # noqa: BLE001 - leren mag het sturen niet kosten
+                _LOGGER.exception("kon niet leren van %s", device.get("id"))
+            if not device.get("controllable"):
                 continue
             try:
                 await self._one_airco(moment, settings, device, level)
@@ -6207,6 +6218,17 @@ class ChargerCoach:
                 continue
         return None
 
+    def _airco_kamer(self, device: dict[str, Any], attrs: dict[str, Any]) -> float | None:
+        """De kamertemperatuur: de eigen sensor, anders wat de airco zelf meet."""
+        eigen = (device.get("entities") or {}).get("temperature")
+        kamer = _number(self.hass, eigen) if eigen else None
+        if kamer is None:
+            try:
+                kamer = float(attrs["current_temperature"]) if attrs.get("current_temperature") is not None else None
+            except (TypeError, ValueError):
+                kamer = None
+        return kamer
+
     def _airco_neemt_w(self, device: dict[str, Any]) -> float:
         """Wat deze airco nu trekt: gemeten, of het typeplaatje als de coach hem aanzette."""
         gemeten = _watts(self.hass, device.get("entity"))
@@ -6300,12 +6322,7 @@ class ChargerCoach:
         except (TypeError, ValueError):
             plaatje = None
         vermogen = plaatje or sessie.get("gemeten_w")
-        kamer = _number(self.hass, entities.get("temperature")) if entities.get("temperature") else None
-        if kamer is None:
-            try:
-                kamer = float(attrs["current_temperature"]) if attrs.get("current_temperature") is not None else None
-            except (TypeError, ValueError):
-                kamer = None
+        kamer = self._airco_kamer(device, attrs)
         modi = [str(m).lower() for m in attrs.get("hvac_modes") or []]
         aan_op = str(eigen.get("run_on") or AIRCO_AAN_OP[0])
         if aan_op not in AIRCO_AAN_OP:
@@ -6397,6 +6414,7 @@ class ChargerCoach:
             "paused": bool(eigen.get("paused")),
             "dynamic": bool(prijzen),
             "resident_until": sessie["bewoner_tot"].isoformat() if sessie["bewoner_tot"] else None,
+            "learned": self._airco_geleerd_staat(settings, device),
         }
         await self._async_noteer_airco(naam, device_id, now)
         self._toezeggingen.pop(device_id, None)
@@ -6502,6 +6520,125 @@ class ChargerCoach:
             apparaten.append(device)
         saved = await store.async_save({"devices": apparaten})
         self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+
+    # ------------------------------------------------------------------
+    # Wat de kamer doet (v0.207.0)
+    #
+    # Een bewoner op 07-11-2026: "Hoe snel koelt een woning af bij een bepaalde
+    # buitentemperatuur, en hoe snel warmt een woning weer op om op een gewenste
+    # temperatuur te komen. Dit gekoppeld aan de verbruikte energie." Stap 1: leren en op
+    # de kaart laten zien. Het rekenwerk staat in kamer.py; hier de metingen en de opslag.
+
+    def _airco_buiten(self, device: dict[str, Any]) -> float | None:
+        """De buitentemperatuur: de eigen sensor van deze airco, anders het weer van Home Assistant."""
+        eigen = (device.get("entities") or {}).get("outdoor")
+        if eigen:
+            return _number(self.hass, eigen)
+        try:
+            namen = sorted(s.entity_id for s in self.hass.states.async_all("weather"))
+        except Exception:  # noqa: BLE001 - zonder weer geen buitentemperatuur
+            return None
+        for naam in namen:
+            attrs = getattr(self.hass.states.get(naam), "attributes", None) or {}
+            waarde = attrs.get("temperature")
+            if not isinstance(waarde, (int, float)):
+                continue
+            if "F" in str(attrs.get("temperature_unit") or ""):
+                return (float(waarde) - 32.0) * 5.0 / 9.0
+            return float(waarde)
+        return None
+
+    def _nacht(self, utc: datetime) -> bool:
+        """Of de zon onder is, voor een venster zonder zon op het raam."""
+        lat = getattr(self.hass.config, "latitude", None)
+        lon = getattr(self.hass.config, "longitude", None)
+        if lat is not None and lon is not None:
+            for dag in (utc.date() - timedelta(days=1), utc.date(), utc.date() + timedelta(days=1)):
+                tijden = prijsopbouw.zon_op_onder(dag, float(lat), float(lon))
+                if tijden is None:
+                    continue
+                if tijden[0] <= utc <= tijden[1]:
+                    return False
+            return True
+        zon = self.hass.states.get("sun.sun")
+        return getattr(zon, "state", None) == "below_horizon"
+
+    @staticmethod
+    def _airco_geleerd(settings: dict[str, Any], device_id: str) -> dict[str, Any]:
+        for rij in settings.get("airco_learned") or []:
+            if isinstance(rij, dict) and rij.get("device") == device_id:
+                return dict(rij)
+        return {"device": device_id}
+
+    def _airco_leer_sessie(self, device_id: str) -> dict[str, Any]:
+        if device_id not in self._airco_leer:
+            data = self._geheugen_terug.pop(f"airco-leren:{device_id}", None) or {}
+            self._airco_leer[device_id] = {
+                "venster": data.get("venster") if isinstance(data.get("venster"), dict) else None,
+                "uit_sinds": _uit_geheugen(data.get("uit_sinds")),
+                "soort": data.get("soort"),
+                "buiten_c": None,
+            }
+        return self._airco_leer[device_id]
+
+    async def _async_airco_leren(self, now: datetime, settings: dict[str, Any], device: dict[str, Any]) -> None:
+        """Eén meting van de kamer erbij, en een venster dat af is in de opslag."""
+        device_id = device.get("id", "")
+        if not (device.get("entities") or {}).get("climate"):
+            return
+        hvac, attrs = self._airco_staat(device)
+        leer = self._airco_leer_sessie(device_id)
+        buiten = self._airco_buiten(device)
+        leer["buiten_c"] = buiten
+        if hvac in ("", "unavailable", "unknown"):
+            return
+        watts = _watts(self.hass, device.get("entity"))
+        soort = soort_nu(hvac, watts)
+        utc = dt_util.as_utc(now)
+        # Sinds wanneer hij uit staat. Na een herstart weet de coach dat niet als het
+        # niet bewaard was, en telt hij vanaf nu: liever een uur te laat dan een venster
+        # met de warmte van de airco er nog in.
+        if soort == "uit":
+            if leer["soort"] != "uit" or leer["uit_sinds"] is None:
+                leer["uit_sinds"] = now
+        else:
+            leer["uit_sinds"] = None
+        leer["soort"] = soort
+        geleerd = self._airco_geleerd(settings, device_id)
+        uit_utc = dt_util.as_utc(leer["uit_sinds"]) if leer["uit_sinds"] is not None else None
+        leer["venster"], uitkomst = leer_stap(
+            leer["venster"], utc, self._airco_kamer(device, attrs), buiten, soort, watts, self._nacht(utc), uit_utc, geleerd,
+        )
+        self._onthoud(f"airco-leren:{device_id}", {
+            "venster": leer["venster"], "uit_sinds": _naar_geheugen(leer["uit_sinds"]), "soort": soort,
+        })
+        if uitkomst is None:
+            return
+        geleerd = leer_erbij(geleerd, uitkomst)
+        _LOGGER.info("%s: de kamer leerde %s = %.4f (%s keer)", device.get("name") or device_id,
+                     uitkomst[0], uitkomst[1], geleerd.get(f"{'k' if uitkomst[0] == 'verlies' else uitkomst[0]}_n"))
+        rows = [r for r in (settings.get("airco_learned") or [])
+                if isinstance(r, dict) and r.get("device") != device_id]
+        rows.append(geleerd)
+        try:
+            saved = await async_get_store(self.hass).async_save({"airco_learned": rows})
+        except Exception:  # noqa: BLE001 - een gemiste meting is geen reden om te stoppen
+            _LOGGER.exception("kon het geleerde van %s niet bewaren", device_id)
+            return
+        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+        settings["airco_learned"] = rows
+
+    def _airco_geleerd_staat(self, settings: dict[str, Any], device: dict[str, Any]) -> dict[str, Any]:
+        """Wat de kaart over de kamer laat zien: alleen wat hij vaak genoeg mat."""
+        device_id = device.get("id", "")
+        geleerd = self._airco_geleerd(settings, device_id)
+        uit: dict[str, Any] = {"needed": KAMER_GENOEG, "power_sensor": bool(device.get("entity"))}
+        for sleutel, naam in (("k", "loss_per_c"), ("heat", "heat_c_per_kwh"), ("cool", "cool_c_per_kwh")):
+            uit[naam] = geleerd_bekend(geleerd, sleutel)
+            uit[f"{naam}_n"] = int(geleerd.get(f"{sleutel}_n") or 0)
+        buiten = (self._airco_leer.get(device_id) or {}).get("buiten_c")
+        uit["outdoor_c"] = None if buiten is None else round(float(buiten), 1)
+        return uit
 
     async def _async_noteer_airco(self, naam: str, device_id: str, now: datetime) -> None:
         """Het besluit over een airco in de geschiedenis, bij verandering."""

@@ -1816,6 +1816,15 @@ for naam in ("airco-goedkoop", "airco-cozytouch"):
         controle(f"{naam}: geen melding dat hij niet reageert",
                  not meldingen(vl, "reageert niet"), f"{meldingen(vl, 'reageert niet')}")
 
+if (vl := v("airco-leren")):
+    g = vl.airco_geleerd
+    print(f"  airco-leren: {g}")
+    controle("airco leren: het verlies binnen 10% van de nagebouwde kamer (0,12 per uur per graad)",
+             g.get("k_n", 0) >= 5 and abs(float(g.get("k") or 0) - 0.12) <= 0.012, f"{g}")
+    controle("airco leren: een graad verwarmen binnen 10% van de nagebouwde airco (2,5 graad per uur op 1,2 kW)",
+             g.get("heat_n", 0) >= 5 and abs(float(g.get("heat") or 0) - 2.5 / 1.2) <= 0.1 * 2.5 / 1.2, f"{g}")
+    controle("airco leren: niet koelen, want hij koelde niet", not g.get("cool_n"), f"{g}")
+
 if (vl := v("airco-geen-zon")):
     print(f"  airco-geen-zon: {len(vl.airco_opdrachten)} opdrachten, kamer {vl.airco_laagste:.1f} tot "
           f"{vl.airco_hoogste:.1f}, standen {sorted({s for _, s in vl.airco_standen})}")

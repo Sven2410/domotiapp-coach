@@ -253,7 +253,7 @@ def _forget_removed_devices(data: dict[str, Any]) -> dict[str, Any]:
     # is: welke auto eraan hangt, wat de bewoner over de accustand zei en welke
     # knoppen aanstonden. Verdwijnt het apparaat, dan hoort dat mee weg.
     for sleutel in ("active_cars", "car_soc", "car_pace", "car_efficiency", "car_phases", "sessions", "program_measured",
-                    "boiler_learned", "battery_state"):
+                    "boiler_learned", "battery_state", "airco_learned"):
         data[sleutel] = [
             entry
             for entry in data.get(sleutel, [])
