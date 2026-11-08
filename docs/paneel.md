@@ -204,6 +204,28 @@ telefoon zijwaarts. Gemeten op 30-09-2026 met twaalf tabs: op 390 px breed een
 pagina van 1.227 px, met het anker 375; op 320 en 280 px net zo (305 en 265).
 Proef in test_rapport.mjs.
 
+## Twee kolommen op een telefoon (v0.206.0)
+
+Tot v0.206.0 stonden de aanstuurbare apparaten op het overzicht in één rij die
+opzij scrolde (`.steer-tabs`). Een bewoner met vijf apparaten zag op zijn iPhone
+(390 px) op 06-11-2026 er ruim één, met een half woord aan de rand, en niet
+welke er nog meer waren: "Bij mobiele weergave wordt dit lijstje
+horizontaal te lang. Idealiter maak je van apparaten 2 kolommen, en dan meerdere
+rijen."
+
+- **Smal scherm** (tot 560 px, dezelfde grens als de rest van het overzicht): een
+  raster van twee kolommen, zoveel rijen als nodig.
+- **Breed scherm**: de rij breekt af in plaats van opzij te scrollen, zodat daar
+  ook nooit een apparaat buiten beeld valt.
+- **Een lange naam** krijgt een beletselteken in de knop (`.tab-name`), met de
+  hele naam als `title`. De volgorde blijft die van `orderDevices`.
+
+Gemeten in Chrome met vijf knoppen met namen van vijf tot achttien tekens: op 390,
+320 en 280 px staan ze in drie rijen van twee, binnen de kaart, en is de pagina zo
+breed als het scherm. Op 390 px krijgt de naam van achttien tekens het
+beletselteken, op 280 px alles vanaf elf tekens. Op 1200 px staan ze naast elkaar zoals
+voorheen. Proef in test_rapport.mjs.
+
 ## Volgen zonder beheerder te zijn (v0.108.1)
 
 Home Assistant laat een gebruiker zonder beheerdersrechten zich niet abonneren op de
