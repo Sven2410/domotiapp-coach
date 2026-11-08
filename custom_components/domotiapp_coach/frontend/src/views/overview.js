@@ -584,20 +584,25 @@ class DacViewOverview extends DacElement {
      *
      * Underneath each other they turned the overview into a column you had to
      * scroll past on a phone before reaching the energy flow -- and the device
-     * you wanted was reliably the last one. The row scrolls sideways; the cards
-     * do not stack.
+     * you wanted was reliably the last one. The cards do not stack.
+     *
+     * Tot v0.206.0 scrolde de rij opzij. Een bewoner met vijf apparaten zag op
+     * zijn telefoon (390 px) er ruim één, met een half woord aan de rand, en
+     * niet welke er nog meer waren: "Idealiter maak je van apparaten 2
+     * kolommen, en dan meerdere rijen." Nu breekt de rij af, en op een smal
+     * scherm is het een raster van twee kolommen; een lange naam krijgt een
+     * beletselteken, met de hele naam als title.
      */
     .steer-tabs {
       display: flex;
+      flex-wrap: wrap;
       gap: 8px;
       margin-top: 14px;
-      overflow-x: auto;
-      overscroll-behavior-x: contain;
-      scrollbar-width: none;
-      scroll-snap-type: x proximity;
-      padding-bottom: 2px;
     }
-    .steer-tabs::-webkit-scrollbar { display: none; }
+    @media (max-width: 560px) {
+      .steer-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .steer-tabs .steer-tab { min-width: 0; }
+    }
     /* Het knopje om de volgorde aan te passen (v0.96.0): het icoon van
        "Indeling aanpassen", zonder tekst, rechtsboven in de kaart. */
     #steerable { position: relative; }
@@ -640,8 +645,8 @@ class DacViewOverview extends DacElement {
          meer apparaten dan er naast elkaar passen werd de hele pagina dan zo
          breed als de rij, 610 px op een scherm van 390 (v0.102.2). */
       position: relative;
-      flex: 0 0 auto;
-      scroll-snap-align: start;
+      flex: 0 1 auto;
+      max-width: 100%;
       display: inline-flex; align-items: center; gap: 8px;
       min-height: 38px;
       padding: 8px 14px;
@@ -668,6 +673,7 @@ class DacViewOverview extends DacElement {
       background: var(--dac-ink-3);
     }
     .steer-tab .dot.on { background: var(--dac-good); }
+    .steer-tab .tab-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 
     .steer-grid { margin-top: 12px; display: grid; gap: 12px; }
     .steer[hidden] { display: none; }
@@ -2835,7 +2841,7 @@ class DacViewOverview extends DacElement {
         <button class="steer-tab" type="button" role="tab" id="steer-tab-${slot}"
                 data-tab="${slot}" aria-controls="steer-panel-${slot}" aria-selected="false">
           <span class="dot" data-tab-dot="${slot}"></span>
-          <span data-tab-name="${slot}"></span>
+          <span class="tab-name" data-tab-name="${slot}"></span>
           <span class="sr" data-tab-state="${slot}"></span>
         </button>`
       )
@@ -3260,6 +3266,9 @@ class DacViewOverview extends DacElement {
       const name = this.$(`[data-tab-name="${slot}"]`);
       if (name) {
         name.textContent = this.labelFor_(device);
+        // De hele naam, voor als hij in de knop wordt afgekapt (v0.206.0).
+        const knop = name.parentElement;
+        if (knop) knop.title = name.textContent;
         // Groen is vrijgegeven, of aan het draaien. Alleen vrijgegeven was te
         // weinig: de eigenaar op 26-09-2026 zag de vaatwasser draaien met een
         // grijs bolletje, want thuis was hij met de hand gestart en de

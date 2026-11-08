@@ -1691,6 +1691,21 @@ proef("de rij apparaten in de volgorde van dit scherm, nieuwe apparaten achteraa
   assert.ok(kaart.includes("resetDeviceOrder();"), "standaard terugzetten zet ook de apparaten terug");
 });
 
+// Een bewoner op 07-11-2026, met vijf apparaten op een telefoon van 390 px: "Bij mobiele weergave wordt dit
+// lijstje horizontaal te lang. Idealiter maak je van apparaten 2 kolommen, en dan meerdere rijen." Gemeten in
+// Chrome op 390, 320 en 280 px: alle knoppen in beeld, twee per rij, geen horizontale scroll.
+proef("de rij apparaten: twee kolommen op een telefoon, afbreken op een breed scherm (v0.206.0)", () => {
+  const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
+  const rij = kaart.match(/\n    \.steer-tabs \{[^}]*\}/)[0];
+  assert.doesNotMatch(rij, /overflow-x/, "de rij scrolt niet meer opzij");
+  assert.match(rij, /flex-wrap: wrap;/, "op een breed scherm breekt hij af");
+  assert.match(kaart, /@media \(max-width: 560px\) \{\s*\.steer-tabs \{ display: grid; grid-template-columns: repeat\(2, minmax\(0, 1fr\)\); \}/,
+    "op een smal scherm twee kolommen");
+  assert.match(kaart, /\.steer-tab \.tab-name \{[^}]*text-overflow: ellipsis;/, "een lange naam krijgt een beletselteken");
+  assert.ok(kaart.includes('class="tab-name" data-tab-name='), "de naam in de knop is dat element");
+  assert.ok(kaart.includes("knop.title = name.textContent"), "en de hele naam staat in de title");
+});
+
 proef("de rij apparaten: het knopje van Indeling aanpassen, zonder tekst, en dan de pijltjes (v0.96.0, v0.102.1)", () => {
   // De eigenaar op 23-09-2026: "waarom kan ik hier de volgorde niet aanpassen,
   // drag en drop wat ik vroeg toch?" en daarna "niet lang indrukken maar het
