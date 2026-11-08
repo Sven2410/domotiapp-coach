@@ -430,6 +430,15 @@ def vakantie_max(eigen: dict[str, Any]) -> float:
         return float(HOLIDAY_MAX_DEFAULT)
 
 
+def _per_graad(graden_per_kwh: Any) -> float | None:
+    """Van °C per kWh naar kWh per °C, voor de kaart (v0.207.0)."""
+    try:
+        waarde = float(graden_per_kwh)
+    except (TypeError, ValueError):
+        return None
+    return round(1.0 / waarde, 3) if waarde > 0 else None
+
+
 class AircoCoachSensor(CoachEntiteit, SensorEntity):
     """Wat de coach met deze airco doet, voor de airco-kaart (v0.119.0).
 
@@ -439,7 +448,7 @@ class AircoCoachSensor(CoachEntiteit, SensorEntity):
     """
 
     _attr_icon = "mdi:air-conditioner"
-    _unrecorded_attributes = frozenset({"reason", "entiteiten"})
+    _unrecorded_attributes = frozenset({"reason", "entiteiten", "buiten"})
 
     def __init__(self, device: dict[str, Any], stand: dict[str, Any] | None, settings: dict[str, Any]) -> None:
         super().__init__(device, stand, "coach", settings)
@@ -476,4 +485,11 @@ class AircoCoachSensor(CoachEntiteit, SensorEntity):
             "dynamisch": bool(st.get("dynamic")),
             "bewoner_tot": met_zone(st.get("resident_until")),
             "entiteiten": entiteiten_van(self._device),
+            # Wat de coach van de kamer leerde (v0.207.0), pas als hij het vaak genoeg mat;
+            # anders None. Het verlies in °C per uur per °C verschil met buiten, en wat een
+            # graad verwarmen of koelen kost in kWh.
+            "verlies_per_graad": (st.get("learned") or {}).get("loss_per_c"),
+            "kwh_per_graad_verwarmen": _per_graad((st.get("learned") or {}).get("heat_c_per_kwh")),
+            "kwh_per_graad_koelen": _per_graad((st.get("learned") or {}).get("cool_c_per_kwh")),
+            "buiten": (st.get("learned") or {}).get("outdoor_c"),
         }

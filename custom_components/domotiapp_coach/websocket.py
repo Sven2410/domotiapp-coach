@@ -966,6 +966,11 @@ async def async_clear_measurements(
     # (v0.142.0). Wat hij verdiend heeft
     # blijft staan: dat is geen meting die verkeerd kan zijn gegaan maar een
     # kasboek.
+    # En wat er van de kamer van een airco geleerd is (v0.207.0).
+    kamers = [
+        row for row in (settings.get("airco_learned") or [])
+        if not (isinstance(row, dict) and row.get("device") == msg["device_id"])
+    ]
     batterijen = [
         {**row, "rte": None, "rte_accu": None, "rte_steps": None, "rte_power": None}
         if isinstance(row, dict) and row.get("device") == msg["device_id"]
@@ -973,7 +978,7 @@ async def async_clear_measurements(
         for row in (settings.get("battery_state") or [])
     ]
     settings = await store.async_save(
-        {"program_measured": rows, "boiler_learned": geleerd, "battery_state": batterijen}
+        {"program_measured": rows, "boiler_learned": geleerd, "battery_state": batterijen, "airco_learned": kamers}
     )
     hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
     connection.send_result(msg["id"], settings)

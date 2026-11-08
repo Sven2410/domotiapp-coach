@@ -730,4 +730,6 @@ export const APPARATEN = {
   "Zoek de laadstatus…": "Search for the charging status…",
   // v0.169.0: de fase bij elk apparaat.
   "Voor de zekeringbewaking, en op de kaart Belastingen in je huis. Weet je het niet, dan telt de zwaarste fase.": "For fuse monitoring, and on the Loads in your home card. If you do not know, the heaviest phase counts.",
+  "Buitentemperatuur": "Outdoor temperature",
+  "Optioneel: een sensor buiten. Leeg is de temperatuur van het weer in Home Assistant. Daarmee leert de coach hoe snel deze kamer afkoelt.": "Optional: a sensor outside. Empty is the weather temperature in Home Assistant. With it the coach learns how fast this room cools down.",
 };

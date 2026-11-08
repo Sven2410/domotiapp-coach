@@ -320,4 +320,13 @@ export const OVERZICHT = {
   "{voor} en {laatste}": "{voor} and {laatste}",
   "Fase onbekend": "Phase unknown",
   "onbekend ({naam})": "unknown ({naam})",
+  "nog aan het leren ({n} van {nodig} metingen)": "still learning ({n} of {nodig} measurements)",
+  "weet hij niet zonder buitentemperatuur": "unknown without an outdoor temperature",
+  "zakt ongeveer {c} per uur, bij {binnen} binnen en {buiten} buiten": "drops about {c} per hour, at {binnen} inside and {buiten} outside",
+  "stijgt ongeveer {c} per uur, bij {binnen} binnen en {buiten} buiten": "rises about {c} per hour, at {binnen} inside and {buiten} outside",
+  "ongeveer {c} per uur per graad verschil met buiten": "about {c} per hour per degree of difference with outside",
+  "Zonder airco": "Without air conditioning",
+  "Koelen": "Cooling",
+  "1 °C kost ongeveer {kwh}": "1 °C costs about {kwh}",
+  "weet hij niet zonder vermogenssensor": "unknown without a power sensor",
 };

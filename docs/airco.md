@@ -151,6 +151,71 @@ Het scenario `airco-cozytouch` in het virtuele huis is `airco-goedkoop` met een
 airco die de stand in `set_temperature` negeert: hij verwarmt net zo. Proef 246 in
 test_coach.py doet de rest.
 
+## Wat de kamer doet: leren (v0.207.0)
+
+Een bewoner op 07-11-2026: "Hoe snel koelt een woning af bij een bepaalde
+buitentemperatuur, en hoe snel warmt een woning weer op om op een gewenste
+temperatuur te komen. Dit gekoppeld aan de verbruikte energie. Op die manier kan
+coach super goed plannen wanneer hij het beste kan gaan verwarmen, hoeveel kWh aan
+energie in de woning moet, en wat dit gaat kosten." Dit is **stap 1: alleen leren
+en laten zien**. De coach stuurt er niets anders door. Stap 2, plannen met "warm
+om", komt pas als er een paar weken echte getallen zijn.
+
+Het rekenwerk staat in `kamer.py` (kent Home Assistant niet), de metingen en de
+opslag in `_async_airco_leren` in coach.py. Hij leert bij elke airco met een
+climate, ook een die hij niet mag sturen.
+
+- **Het verlies** `k`: °C per uur per °C verschil met buiten. Zonder airco zakt een
+  kamer naar buiten toe, `dT/dt = -k (binnen - buiten)`. Uit vensters van twee uur
+  (`VERLIES_DUUR`), en alleen als:
+  - de zon onder is (geen zon op het raam; uit de plek van Home Assistant, anders
+    `sun.sun`);
+  - de airco al een uur uit staat (`NA_UIT`) en minder dan 30 W trekt;
+  - binnen en buiten minstens drie graden verschillen (`MIN_VERSCHIL_C`);
+  - er geen sprong in zit van meer dan een halve graad tussen twee metingen (een raam,
+    `SPRONG_C`) en geen gat van meer dan vijf minuten (`GAT`).
+- **De winst**: °C per kWh, per stand (`heat`, `cool`). Uit vensters van een uur
+  (`WINST_DUUR`) waarin hij in die stand stond. Wat de airco deed is wat de kamer
+  deed plus wat hij in die tijd verloor: `(eind - begin) + k * gemiddeld verschil *
+  uren`, gedeeld door de kWh van de vermogenssensor. Op temperatuur klopt dat ook:
+  dan houdt hij precies het verlies bij. Pas als het verlies vijf keer gemeten is,
+  en alleen met een vermogenssensor.
+- **Een lopend gemiddelde** (`leer_erbij`), waarin een nieuw venster nooit minder dan
+  1 op 20 weegt (`GEWICHT`): een kamer die anders wordt (een ander seizoen, een
+  nieuw raam) leert hij bij. Wat geen kamer is (`k` boven 0,5, of meer dan 20 °C per
+  kWh) telt niet.
+- **De buitentemperatuur**: een eigen sensor bij de airco (het veld
+  Buitentemperatuur, `outdoor` in `entities`), anders de `temperature` van de eerste
+  weerentiteit in Home Assistant (in Fahrenheit omgerekend). De werkbon vroeg een
+  veld in Installatie; het werd een veld bij de airco, naast zijn kamersensor. Het
+  is optioneel, en het weer van Home Assistant is er bijna altijd.
+
+**Wat een herstart overleeft**: het geleerde staat in de instellingen
+(`airco_learned`: `k`, `heat`, `cool`, elk met `_n`), weggeschreven zodra er een
+venster af is. Het lopende venster en sinds wanneer hij uit staat staan in het
+geheugen (`airco-leren:<id>`, `docs/herstart.md`), zodat een venster dwars door een
+herstart loopt. "Vergeet wat er gemeten is" bij het apparaat wist het ook.
+
+**Op de kaart** (`aircoRegels` in airco.js), pas vanaf vijf vensters
+(`GENOEG`); daarvoor "nog aan het leren (2 van 5 metingen)". Nooit een getal dat
+hij niet mat:
+
+- Zonder airco: "zakt ongeveer 0,7 °C per uur, bij 20,0 °C binnen en 6,0 °C buiten"
+  (in de zomer "stijgt").
+- Verwarmen of Koelen: "1 °C kost ongeveer 0,40 kWh", alleen voor een stand waarin
+  hij gemeten heeft.
+
+Voor de airco-kaart van DomotiApp Lovelace kwamen er vier attributen bij op de
+sensor `coach` (contract blijft 1): `verlies_per_graad`, `kwh_per_graad_verwarmen`,
+`kwh_per_graad_koelen` (allebei None tot vijf vensters) en `buiten`.
+
+Het scenario `airco-leren` in het virtuele huis is acht koude dagen op goedkope
+uren met een kamer van 0,12 per uur per graad en een airco van 2,5 graad per uur
+op 1,2 kW. De coach leerde `k` 0,1198 (acht vensters) en 2,078 °C per kWh (37
+vensters, nagebouwd 2,083). Daarvoor regelt de nagebouwde airco sinds v0.207.0 bij
+zijn doel terug zoals een inverter; tot dan trok hij de hele stap vol en verloor hij
+wat boven het doel uitkwam, en dan kwam de coach op 1,85 uit.
+
 ## Het vermogen
 
 Het typeplaatje gaat voor. Zonder typeplaatje telt het meeste dat de
@@ -201,6 +266,11 @@ de bewoner.
 
 - test_planner.py proef 75: aan op zon en op een goedkoop uur, de marge, nooit
   wisselen, de wolk, alleen wat de coach aanzette uit, zonder meting niets.
+- test_coach.py proef 247 (v0.207.0): het verlies dwars door een herstart, wat
+  geen venster is (overdag, het eerste uur na uit, een sprong, een gat, te weinig
+  verschil, zonder buiten), verwarmen pas met een bekend verlies en een
+  vermogenssensor, het lopende gemiddelde, wat de kaart en Lovelace zien, en het weer
+  in Fahrenheit.
 - test_coach.py proef 246 (v0.205.0): een integratie die de stand alleen via
   `set_hvac_mode` leest, twee pogingen en één melding, een half uur tussen de
   pogingen daarna, een herstart, en weer luisteren.
@@ -216,6 +286,10 @@ de bewoner.
   `airco-geen-zon` (dezelfde koude dag standaard op zon: geen enkele opdracht).
 
 ## Niet gebouwd
+
+- Stap 2 van het leren (v0.207.0): een tijd "warm om" per airco, achteruit rekenen
+  wat het huis tot dan verliest en de kWh op de goedkoopste uren leggen. Pas als
+  stap 1 een paar weken echte getallen heeft.
 
 - Een airco in de voorrang bij zon en bij planningen; nu wijkt hij voor iedereen
   die erin staat.

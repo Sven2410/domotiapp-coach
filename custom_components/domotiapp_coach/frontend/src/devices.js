@@ -1294,6 +1294,13 @@ const AIRCO_FIELDS = [
     hint: nt("Optioneel: een eigen sensor in de kamer. Leeg is de temperatuur die de airco zelf meet."),
     filter: "temperature",
   },
+  {
+    // v0.207.0: om te leren hoe snel de kamer afkoelt.
+    key: "outdoor",
+    label: nt("Buitentemperatuur"),
+    hint: nt("Optioneel: een sensor buiten. Leeg is de temperatuur van het weer in Home Assistant. Daarmee leert de coach hoe snel deze kamer afkoelt."),
+    filter: "temperature",
+  },
 ];
 
 /**
@@ -1323,6 +1330,7 @@ export const AIRCO_BRANDS = [
         hint: nt("Een eigen sensor in de kamer. Atlantic Cozytouch geeft de temperatuur die de airco meet niet door, dus zonder deze sensor weet de coach niet wanneer hij aan moet."),
         needed: true,
       },
+      AIRCO_FIELDS[2],
     ],
   },
 ];

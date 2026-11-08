@@ -37,6 +37,7 @@ import {
   valueLabel,
 } from "../devices.js";
 import { batteryRows, nachtConclusie } from "../battery.js";
+import { aircoRegels } from "../airco.js";
 import { LiveSource, laadCoachPrijzen, laadbeurtRegels, meterReadings, priceForecast, prijsBevestigd, solarForecast, volgCoach } from "../data-source.js";
 import {
   planFor,
@@ -3082,6 +3083,7 @@ class DacViewOverview extends DacElement {
       const details = [
         ...(device.details ?? []),
         ...batteryRows(this.coach_?.[device.id], { aanschaf: this.aanschaf_(device) }),
+        ...aircoRegels(this.coach_?.[device.id]),
         ...laadbeurtRegels(this.feed_, device, this.settings_, this.coach_?.[device.id]),
       ];
       const rows = this.$(`[data-rows="${slot}"]`);

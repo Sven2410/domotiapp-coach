@@ -809,12 +809,19 @@ class Airco:
         uren = seconden / 3600.0
         self.kamer_c += (self.buiten_c(nu) - self.kamer_c) * self.lek_per_uur * uren
         watt = 0.0
-        if self.hvac == "cool" and self.kamer_c > self.doel_c:
-            self.kamer_c = max(self.doel_c, self.kamer_c - self.graden_per_uur * uren)
-            watt = self.vermogen_w
-        elif self.hvac == "heat" and self.kamer_c < self.doel_c:
-            self.kamer_c = min(self.doel_c, self.kamer_c + self.graden_per_uur * uren)
-            watt = self.vermogen_w
+        # Bij de temperatuur regelt hij terug, zoals een airco met een inverter: alleen
+        # wat er nog bij moet, en het vermogen naar rato (v0.207.0). Tot dan trok hij
+        # de hele stap vol en verloor hij wat boven het doel uitkwam, en dat kan een
+        # coach die leert wat een kWh doet niet uit elkaar houden.
+        stap = self.graden_per_uur * uren
+        if self.hvac == "cool" and self.kamer_c > self.doel_c and stap > 0:
+            deel = min(1.0, (self.kamer_c - self.doel_c) / stap)
+            self.kamer_c -= stap * deel
+            watt = self.vermogen_w * deel
+        elif self.hvac == "heat" and self.kamer_c < self.doel_c and stap > 0:
+            deel = min(1.0, (self.doel_c - self.kamer_c) / stap)
+            self.kamer_c += stap * deel
+            watt = self.vermogen_w * deel
         self.laagste_c = self.kamer_c if self.laagste_c is None else min(self.laagste_c, self.kamer_c)
         self.hoogste_c = self.kamer_c if self.hoogste_c is None else max(self.hoogste_c, self.kamer_c)
         return watt
@@ -1380,6 +1387,8 @@ class Verloop:
     airco_laagste: float | None = None
     airco_hoogste: float | None = None
     airco_standen: list = field(default_factory=list)
+    # Wat de coach van de kamer leerde (v0.207.0), `airco_learned` aan het eind.
+    airco_geleerd: dict = field(default_factory=dict)
     # De thuisbatterij: elke opdracht die de coach gaf, het verloop per stap
     # (tijd, meter, batterij, accustand, stand), wat het huis van het net nam en
     # eraan gaf, en wat de dag kostte met en zonder batterij.
@@ -1501,6 +1510,7 @@ E = {
     "boiler_switch": "switch.v_boiler",
     "airco_klimaat": "climate.v_airco",
     "airco_vermogen": "sensor.v_airco_vermogen",
+    "airco_buiten": "sensor.v_buiten",
     "bat_soc": "sensor.v_batterij_soc",
     "bat_vermogen": "sensor.v_batterij_vermogen",
     "bat_stuur": "number.v_batterij_vermogen",
@@ -1671,7 +1681,7 @@ def instellingen(s: Scenario) -> dict:
             "brand": "mitsubishi_electric",
             "controllable": True,
             "entity": "" if s.airco_plaatje else E["airco_vermogen"],
-            "entities": {"climate": E["airco_klimaat"]},
+            "entities": {"climate": E["airco_klimaat"], "outdoor": E["airco_buiten"]},
             "airco": {"power_w": s.airco.vermogen_w, "target_c": s.airco_doel,
                       "run_on": s.airco_aan_op, "paused": False},
         })
@@ -2172,6 +2182,10 @@ class Wereld:
                 "min_temp": 16, "max_temp": 31, "target_temp_step": 0.5,
             }})
             z(E["airco_vermogen"], w(f"{self.airco_w:.0f}", "W"))
+            # Om te leren hoe snel de kamer afkoelt (v0.207.0): buiten, en of de zon op is.
+            z(E["airco_buiten"], w(f"{self.airco.buiten_c(nu):.1f}", "°C"))
+            uur = nu.hour + nu.minute / 60.0
+            z("sun.sun", "above_horizon" if self.zon.opkomst <= uur < self.zon.onder else "below_horizon")
         if self.s.equalizer:
             z(E["equalizer"], w(f"{self.equalizer_vrij:.1f}", "A"))
             z(E["reden"], self.reden or "none")
@@ -2902,6 +2916,10 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
         verloop.boiler_geleerd = next(
             (r for r in inst.get("boiler_learned") or []
              if isinstance(r, dict) and r.get("device") == "boiler"), {}
+        )
+        verloop.airco_geleerd = next(
+            (r for r in inst.get("airco_learned") or []
+             if isinstance(r, dict) and r.get("device") == "airco"), {}
         )
         verloop.bat_stand = next(
             (r for r in inst.get("battery_state") or []
