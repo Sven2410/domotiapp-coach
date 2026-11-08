@@ -16407,6 +16407,344 @@ print(f"  Alfen: {b248a} {c248a.state.get('dev-alfen', {}).get('rule')}")
 controle("Alfen: dezelfde gewone melding en geen kritiek",
          len(b248a) == 1 and "niet thuis" in b248a[0][0] and not [b for b in b248a if b[1]], f"{b248a}")
 
+print("=== 249. de paal is offline: één keer herladen, het zeggen, en niets sturen (v0.209.0) ===")
+# Een klantwoning op 08-11-2026: de automaat van de Easee ging uit. De integratie bleef op loaded met de
+# laatste waarden, alleen de sensor online ging uit. De coach bleef "Laadt" zeggen en schreef elke minuut
+# "toch gestart" in het log, en niemand zei dat de paal weg was.
+ONLINE249 = "binary_sensor.laadpaal_online"
+
+
+def stempel249(moment):
+    return moment.replace(tzinfo=dt.timezone.utc)
+
+
+_rijen249 = [
+    types.SimpleNamespace(entity_id="sensor.laadpaal_vermogen", device_id="paal", device_class=None,
+                          original_device_class="power", disabled_by=None, config_entry_id="e-easee"),
+    types.SimpleNamespace(entity_id="binary_sensor.laadpaal_kabel", device_id="paal", device_class=None,
+                          original_device_class="plug", disabled_by=None, config_entry_id="e-easee"),
+    types.SimpleNamespace(entity_id=ONLINE249, device_id="paal", device_class=None,
+                          original_device_class="connectivity", disabled_by=None, config_entry_id="e-easee"),
+    types.SimpleNamespace(entity_id="binary_sensor.ander_online", device_id="ander", device_class=None,
+                          original_device_class="connectivity", disabled_by=None, config_entry_id="e-ander"),
+]
+register249 = types.ModuleType("homeassistant.helpers.entity_registry")
+register249.async_get = lambda hass: types.SimpleNamespace(
+    async_get=lambda eid: next((r for r in _rijen249 if r.entity_id == eid), None))
+register249.async_entries_for_device = lambda reg, device_id: [r for r in _rijen249 if r.device_id == device_id]
+oud249 = sys.modules.get("homeassistant.helpers.entity_registry")
+sys.modules["homeassistant.helpers.entity_registry"] = register249
+
+
+def bouw249(online="on", sinds=None, waarden=None, paal=LAADPAAL, done_by="07:00"):
+    inst = instellingen(devices=[paal])
+    inst["strategy"]["schedules"][0]["window"]["done_by"] = done_by
+    inst["car_soc"] = [{"device": paal["id"], "car": "car-1", "percent": 40.0, "meter": 100.0}]
+    hass, store, coach = bouw(waarden or huis(), inst)
+    if online is not None:
+        hass.states.zet(ONLINE249, online, last_updated=stempel249(sinds or dt.datetime(2026, 11, 8, 6, 0)))
+    entry = types.SimpleNamespace(domain="easee", title="Easee", state="loaded", disabled_by=None, entry_id="e-easee")
+    herladen = []
+
+    async def herlaad(entry_id):
+        herladen.append(entry_id)
+        # Herladen zet de entiteiten opnieuw neer: de sensor zegt weer uit, met een nieuwe last_changed.
+        hass.states.zet(ONLINE249, "off", last_updated=stempel249(herlaad.nu))
+    herlaad.nu = None
+    hass.config_entries = types.SimpleNamespace(
+        async_get_entry=lambda eid: entry if eid == "e-easee" else None, async_reload=herlaad)
+    berichten = []
+
+    async def tell(bericht, kritiek=False, telefoon=True):
+        berichten.append((bericht, kritiek, telefoon))
+    coach._async_tell = tell
+    asyncio.run(coach._async_geheugen_laden())
+    return inst, hass, coach, berichten, herladen, herlaad
+
+
+def rondes249(coach, inst, van, tot, stap=1, paal=LAADPAAL, herlaad=None):
+    uit = []
+    nu = van
+    while nu <= tot:
+        if herlaad is not None:
+            herlaad.nu = nu
+        besluit, verstuurd = asyncio.run(ronde(coach, inst, nu, paal))
+        uit.append((nu, dict(besluit), list(verstuurd)))
+        nu += dt.timedelta(minutes=stap)
+    return uit
+
+
+try:
+    # 1. Online: alles zoals altijd, en de sensor gevonden op het apparaat van de paal (de kabel en een ander
+    #    apparaat niet).
+    i249, h249, c249, b249, l249, f249 = bouw249()
+    gewoon249 = rondes249(c249, i249, dt.datetime(2026, 11, 8, 14, 0), dt.datetime(2026, 11, 8, 14, 5), herlaad=f249)
+    controle("de sensor online gevonden via het apparaat van de paal",
+             c249._online_entiteiten(LAADPAAL) == [ONLINE249], f"{c249._online_entiteiten(LAADPAAL)}")
+    controle("online: hij stuurt de paal", gewoon249[0][1]["charge"] and gewoon249[0][2], f"{gewoon249[0]}")
+    h249.data["domotiapp_coach"]["coach"] = c249
+    asyncio.run(c249._round(dt.datetime(2026, 11, 8, 14, 6)))
+    controle("de coach volgt de sensor online, zodat een paal die terugkomt meteen een ronde krijgt",
+             ONLINE249 in c249._watched, f"{sorted(c249._watched)}")
+
+    # 2. Offline om 14:00 (zon over, hij wil laden). Twee minuten knipperen mag, daarna offline.
+    i249, h249, c249, b249, l249, f249 = bouw249(online="off", sinds=dt.datetime(2026, 11, 8, 14, 0))
+    r249 = rondes249(c249, i249, dt.datetime(2026, 11, 8, 14, 0), dt.datetime(2026, 11, 8, 14, 14), herlaad=f249)
+    controle("tot 14:14 geen melding", b249 == [], f"{b249}")
+    r249 += rondes249(c249, i249, dt.datetime(2026, 11, 8, 14, 15), dt.datetime(2026, 11, 8, 14, 15), herlaad=f249)
+    controle("om 14:15 de melding", len(b249) == 1, f"{b249}")
+    r249 += rondes249(c249, i249, dt.datetime(2026, 11, 8, 14, 16), dt.datetime(2026, 11, 8, 14, 20), herlaad=f249)
+    per249 = {r[0].strftime("%H:%M"): r for r in r249}
+    print(f"  14:01 {per249['14:01'][1]['rule']}, 14:02 {per249['14:02'][1]['rule']}: {per249['14:02'][1]['reason']}")
+    controle("de eerste twee minuten stuurt hij nog", per249["14:01"][1]["rule"] != "offline", f"{per249['14:01'][1]['rule']}")
+    controle("na twee minuten: offline, met sinds wanneer",
+             per249["14:02"][1]["rule"] == "offline" and not per249["14:02"][1]["charge"]
+             and per249["14:02"][1]["reason"] == "Laadpaal is offline sinds 14:00. De coach stuurt hem weer zodra hij terug is."
+             and per249["14:02"][1]["offline_sinds"] == "2026-11-08T14:00:00", f"{per249['14:02'][1]}")
+    controle("offline: geen enkele opdracht naar de paal, dus geen 'toch gestart' elke minuut",
+             all(not r[2] for r in r249 if r[0] >= dt.datetime(2026, 11, 8, 14, 2)),
+             f"{[(r[0], r[2]) for r in r249 if r[2]]}")
+    controle("geen tijdlijn en geen accustand vragen voor een paal die offline is",
+             per249["14:10"][1]["plan_ahead"] is None and not per249["14:10"][1]["soc_ask"], f"{per249['14:10'][1]}")
+    controle("de kaart: stand offline en 'Offline sinds 14:00'",
+             entiteitmod.paal_stand(per249["14:10"][1]) == "offline"
+             and entiteitmod.paal_tekst(per249["14:10"][1]) == "Offline sinds 14:00",
+             f"{entiteitmod.paal_tekst(per249['14:10'][1])}")
+    controle("na vijf minuten één keer herladen, en daarna niet weer", l249 == ["e-easee"], f"{l249}")
+    controle("de sinds blijft 14:00, ook na het herladen", per249["14:20"][1]["offline_sinds"] == "2026-11-08T14:00:00",
+             f"{per249['14:20'][1]['offline_sinds']}")
+    print(f"  meldingen: {b249}")
+    controle("tien minuten na het herladen één gewone melding met wat de bewoner kan doen",
+             b249 == [("Laadpaal is sinds 14:00 offline en komt niet terug na herladen. Staat de automaat aan en heeft "
+                       "hij internet?", False, True)], f"{b249}")
+
+    # Wat de paal zegt is van voor hij wegviel: ook "klaar" is geen reden om hem opnieuw te starten (eis 7).
+    h249.states.zet("sensor.laadpaal_status", "completed")
+    rondes249(c249, i249, dt.datetime(2026, 11, 8, 14, 21), dt.datetime(2026, 11, 8, 14, 40), herlaad=f249)
+    controle("offline en 'klaar': geen herstart van de paal klaargezet", "dev-laadpaal" not in c249._herstart_open,
+             f"{c249._herstart_open}")
+    h249.states.zet("sensor.laadpaal_status", "awaiting_start")
+    # 3. Terug: meteen weer sturen, en alleen in de geschiedenis.
+    h249.states.zet(ONLINE249, "on", last_updated=stempel249(dt.datetime(2026, 11, 8, 14, 41)))
+    terug249 = rondes249(c249, i249, dt.datetime(2026, 11, 8, 14, 41), dt.datetime(2026, 11, 8, 14, 41), herlaad=f249)
+    controle("terug: meteen de gewone sturing en een opdracht naar de paal",
+             terug249[0][1]["rule"] != "offline" and terug249[0][1]["charge"] and terug249[0][2], f"{terug249[0]}")
+    controle("terug: 'weer online' alleen in de geschiedenis", b249[-1] == ("Laadpaal is weer online.", False, False),
+             f"{b249}")
+    controle("en de storing is vergeten", "dev-laadpaal" not in c249._offline, f"{c249._offline}")
+
+    # 4. Geen melding als hij niet wil laden: geen auto aan de paal.
+    i249g, h249g, c249g, b249g, l249g, f249g = bouw249(online="off", sinds=dt.datetime(2026, 11, 8, 9, 0),
+                                                       waarden=huis(status="disconnected"))
+    rg249 = rondes249(c249g, i249g, dt.datetime(2026, 11, 8, 9, 0), dt.datetime(2026, 11, 8, 12, 0), stap=5, herlaad=f249g)
+    controle("zonder auto die moet laden: wel offline op de kaart, wel herladen, geen melding",
+             rg249[-1][1]["rule"] == "offline" and l249g == ["e-easee"] and b249g == [], f"{b249g} {l249g}")
+
+    # 5. 's Nachts: geen melding, en om 07:00 wel als hij wilde laden.
+    i249n, h249n, c249n, b249n, l249n, f249n = bouw249(online="off", sinds=dt.datetime(2026, 11, 8, 23, 8),
+                                                       waarden=huis(teruglevering=0.0, afname=1800.0))
+    c249n.async_boost("dev-laadpaal", True)
+    rn249 = rondes249(c249n, i249n, dt.datetime(2026, 11, 8, 23, 8), dt.datetime(2026, 11, 9, 6, 58), stap=5, herlaad=f249n)
+    controle("'s nachts geen melding, wel herladen", b249n == [] and l249n == ["e-easee"], f"{b249n} {l249n}")
+    rn249b = rondes249(c249n, i249n, dt.datetime(2026, 11, 9, 7, 0), dt.datetime(2026, 11, 9, 7, 5), herlaad=f249n)
+    print(f"  07:00: {b249n}")
+    controle("om 07:00 de melding, met de dag erbij",
+             len(b249n) == 1 and "Laadpaal is sinds zondag om 23:08 offline" in b249n[0][0] and not b249n[0][1],
+             f"{b249n}")
+
+    # 6. Een herstart na het herladen: niet nog eens herladen, de sinds blijft, en één melding.
+    i249h, h249h, c249h, b249h, l249h, f249h = bouw249(online="off", sinds=dt.datetime(2026, 11, 8, 14, 0))
+    rondes249(c249h, i249h, dt.datetime(2026, 11, 8, 14, 0), dt.datetime(2026, 11, 8, 14, 7), herlaad=f249h)
+    c249h2 = herstart213(h249h)
+    b249h2 = []
+
+    async def tell249h(bericht, kritiek=False, telefoon=True):
+        b249h2.append((bericht, kritiek, telefoon))
+    c249h2._async_tell = tell249h
+    asyncio.run(c249h2._async_geheugen_laden())
+    h249h.states.zet(ONLINE249, "off", last_updated=stempel249(dt.datetime(2026, 11, 8, 14, 8)))
+    rh249 = rondes249(c249h2, i249h, dt.datetime(2026, 11, 8, 14, 8), dt.datetime(2026, 11, 8, 14, 30), herlaad=f249h)
+    controle("na de herstart: meteen offline, sinds 14:00, geen opdrachten",
+             rh249[0][1]["rule"] == "offline" and rh249[0][1]["offline_sinds"] == "2026-11-08T14:00:00"
+             and not any(r[2] for r in rh249), f"{rh249[0][1]}")
+    controle("na de herstart niet nog eens herladen", l249h == ["e-easee"], f"{l249h}")
+    controle("en één melding, om 14:15", len(b249h2) == 1 and "sinds 14:00 offline" in b249h2[0][0], f"{b249h2}")
+    c249h3 = herstart213(h249h)
+    b249h3 = []
+
+    async def tell249h3(bericht, kritiek=False, telefoon=True):
+        b249h3.append((bericht, kritiek, telefoon))
+    c249h3._async_tell = tell249h3
+    asyncio.run(c249h3._async_geheugen_laden())
+    rondes249(c249h3, i249h, dt.datetime(2026, 11, 8, 14, 31), dt.datetime(2026, 11, 8, 15, 0), stap=5, herlaad=f249h)
+    controle("nog een herstart na de melding: geen tweede", b249h3 == [] and l249h == ["e-easee"], f"{b249h3} {l249h}")
+
+    # 7. Knipperen: anderhalve minuut uit is geen storing.
+    i249k, h249k, c249k, b249k, l249k, f249k = bouw249(online="off", sinds=dt.datetime(2026, 11, 8, 19, 5))
+    k249 = rondes249(c249k, i249k, dt.datetime(2026, 11, 8, 19, 5), dt.datetime(2026, 11, 8, 19, 6), herlaad=f249k)
+    h249k.states.zet(ONLINE249, "on", last_updated=stempel249(dt.datetime(2026, 11, 8, 19, 6, 30)))
+    k249 += rondes249(c249k, i249k, dt.datetime(2026, 11, 8, 19, 7), dt.datetime(2026, 11, 8, 19, 15), herlaad=f249k)
+    controle("anderhalve minuut uit: nooit offline, niet herladen, niets gemeld",
+             not [r for r in k249 if r[1]["rule"] == "offline"] and l249k == [] and b249k == [], f"{b249k} {l249k}")
+
+    # 8. Onbekend of onbeschikbaar, of geen sensor: alles zoals altijd.
+    for staat249 in ("unavailable", "unknown", None):
+        i249u, h249u, c249u, b249u, l249u, f249u = bouw249(online=staat249, sinds=dt.datetime(2026, 11, 8, 14, 0))
+        u249 = rondes249(c249u, i249u, dt.datetime(2026, 11, 8, 14, 0), dt.datetime(2026, 11, 8, 14, 20), herlaad=f249u)
+        controle(f"online {staat249}: gewoon sturen, niet herladen",
+                 not [r for r in u249 if r[1]["rule"] == "offline"] and l249u == [] and u249[-1][1]["charge"],
+                 f"{u249[-1][1]['rule']} {l249u}")
+finally:
+    if oud249 is None:
+        sys.modules.pop("homeassistant.helpers.entity_registry", None)
+    else:
+        sys.modules["homeassistant.helpers.entity_registry"] = oud249
+
+# 9. Het veld Online zelf ingevuld, zonder register; en een Alfen.
+PAAL249v = {**LAADPAAL, "entities": {**LAADPAAL["entities"], "online": "binary_sensor.eigen_online"}}
+i249v, h249v, c249v, b249v, l249v, f249v = bouw249(online=None, paal=PAAL249v)
+h249v.states.zet("binary_sensor.eigen_online", "off", last_updated=stempel249(dt.datetime(2026, 11, 8, 14, 0)))
+v249 = rondes249(c249v, i249v, dt.datetime(2026, 11, 8, 14, 0), dt.datetime(2026, 11, 8, 14, 3), paal=PAAL249v, herlaad=f249v)
+controle("het veld Online: offline na twee minuten", v249[-1][1]["rule"] == "offline" and not v249[-1][2], f"{v249[-1][1]['rule']}")
+rondes249(c249v, i249v, dt.datetime(2026, 11, 8, 14, 4), dt.datetime(2026, 11, 8, 14, 20), paal=PAAL249v, herlaad=f249v)
+controle("zonder integratie om te herladen: de melding zonder 'na herladen'",
+         b249v == [("Laadpaal is sinds 14:00 offline. Staat de automaat aan en heeft hij internet?", False, True)]
+         and l249v == [], f"{b249v} {l249v}")
+ALFEN249 = {**ALFEN, "entities": {**ALFEN["entities"], "online": "binary_sensor.alfen_online"}}
+i249a, h249a, c249a, b249a, l249a, f249a = bouw249(online=None, paal=ALFEN249, waarden=huis90())
+h249a.states.zet("binary_sensor.alfen_online", "off", last_updated=stempel249(dt.datetime(2026, 11, 8, 14, 0)))
+a249 = []
+for minuut in range(0, 6):
+    h249a.services.verstuurd.clear()
+    asyncio.run(c249a._one(dt.datetime(2026, 11, 8, 14, minuut), i249a, ALFEN249, "steer"))
+    a249.append((minuut, c249a.state["dev-alfen"]["rule"], list(h249a.services.verstuurd)))
+controle("Alfen: dezelfde offline, en niets geschreven", a249[-1][1] == "offline" and not a249[-1][2] and a249[0][2],
+         f"{a249}")
+
+print("=== 250. klaar blijft klaar na een dip van de Equalizer (v0.209.0) ===")
+# Een klantwoning op 08-11-2026: de auto was op 07-11 om 04:38 klaar. Om 13:39 zette de Equalizer de paal
+# op 0 A, en de Easee sprong van `completed` naar `awaiting_start`. De coach plande opnieuw, wekte de auto om
+# 20:00 en meldde om 20:20 als kritiek dat hij geen stroom afnam.
+
+
+def bouw250(paal=LAADPAAL):
+    inst = instellingen(devices=[paal])
+    inst["strategy"]["schedules"][0]["window"]["done_by"] = "06:00"
+    inst["car_soc"] = [{"device": paal["id"], "car": "car-1", "percent": 72.0, "meter": 100.0}]
+    hass, store, coach = bouw(huis(status="completed"), inst)
+    berichten = []
+
+    async def tell(bericht, kritiek=False, telefoon=True):
+        berichten.append((bericht, kritiek, telefoon))
+    coach._async_tell = tell
+    asyncio.run(coach._async_geheugen_laden())
+    return inst, hass, coach, berichten
+
+
+def rondes250(coach, inst, van, tot, stap=1):
+    uit = []
+    nu = van
+    while nu <= tot:
+        besluit, verstuurd = asyncio.run(ronde(coach, inst, nu))
+        uit.append((nu, dict(besluit), list(verstuurd)))
+        nu += dt.timedelta(minutes=stap)
+    return uit
+
+
+def klaar250():
+    """Klaar om 04:38, de ene herstart van eis 7 gedaan, en daarna weer klaar."""
+    inst, hass, coach, berichten = bouw250()
+    rondes250(coach, inst, dt.datetime(2026, 11, 7, 4, 38), dt.datetime(2026, 11, 7, 6, 0))
+    return inst, hass, coach, berichten
+
+
+i250, h250, c250, b250 = klaar250()
+voor250 = c250.state["dev-laadpaal"]["rule"]
+herstart250 = [b for b in b250 if "opnieuw gestart" in b[0]]
+print(f"  voor de dip: {voor250}, {len(herstart250)} herstart")
+controle("eis 7 blijft: de ene herstart bij het eerste klaar", len(herstart250) == 1, f"{b250}")
+controle("en daarna klaar", voor250 == "complete", f"{voor250}")
+b250.clear()
+h250.states.zet("sensor.laadpaal_status", "awaiting_start")
+dip250 = rondes250(c250, i250, dt.datetime(2026, 11, 8, 13, 39), dt.datetime(2026, 11, 8, 21, 0), stap=5)
+print(f"  na de dip: {sorted({r[1]['rule'] for r in dip250})}, meldingen {b250}")
+controle("na de dip naar awaiting_start: klaar blijft klaar, ook met zon over",
+         all(r[1]["rule"] == "complete" for r in dip250), f"{[(r[0], r[1]['rule']) for r in dip250 if r[1]['rule'] != 'complete'][:3]}")
+controle("geen opdracht naar de paal, geen wekstroom", not any(r[2] for r in dip250), f"{[r for r in dip250 if r[2]][:2]}")
+controle("geen melding", b250 == [], f"{b250}")
+controle("de kaart zegt Vol", entiteitmod.paal_tekst(dip250[-1][1]) == "Vol", f"{entiteitmod.paal_tekst(dip250[-1][1])}")
+
+# Een herstart midden in de dip: nog steeds klaar.
+c250h = herstart213(h250)
+c250h._async_tell = c250._async_tell
+asyncio.run(c250h._async_geheugen_laden())
+# Zoals bij het opstarten: de lopende beurt, met wanneer de ene herstart gestuurd is (v0.99.0).
+asyncio.run(c250h._async_beurten_laden())
+# Na de opstart zegt de paal eerst even niets.
+h250.states.zet("sensor.laadpaal_status", "unavailable")
+rondes250(c250h, i250, dt.datetime(2026, 11, 8, 21, 1), dt.datetime(2026, 11, 8, 21, 2))
+h250.states.zet("sensor.laadpaal_status", "awaiting_start")
+h250r = rondes250(c250h, i250, dt.datetime(2026, 11, 8, 21, 5), dt.datetime(2026, 11, 8, 21, 30), stap=5)
+controle("na een herstart van Home Assistant nog steeds klaar",
+         all(r[1]["rule"] == "complete" for r in h250r) and not any(r[2] for r in h250r), f"{[r[1]['rule'] for r in h250r]}")
+
+# Wat er wel doorheen moet. De auto laadt zelf weer: dan geldt klaar niet meer.
+i250l, h250l, c250l, b250l = klaar250()
+h250l.states.zet("sensor.laadpaal_status", "charging")
+h250l.states.zet("sensor.laadpaal_stroom", "6")
+h250l.states.zet("sensor.laadpaal_vermogen", "1400")
+rondes250(c250l, i250l, dt.datetime(2026, 11, 8, 13, 39), dt.datetime(2026, 11, 8, 13, 41))
+h250l.states.zet("sensor.laadpaal_status", "awaiting_start")
+h250l.states.zet("sensor.laadpaal_stroom", "0")
+h250l.states.zet("sensor.laadpaal_vermogen", "0")
+l250 = rondes250(c250l, i250l, dt.datetime(2026, 11, 8, 13, 42), dt.datetime(2026, 11, 8, 13, 44))
+controle("laadde de auto zelf weer, dan geldt klaar daarna niet meer", l250[-1][1]["rule"] != "complete", f"{l250[-1][1]['rule']}")
+
+# Kabel eruit en weer erin: een nieuwe beurt.
+i250k, h250k, c250k, b250k = klaar250()
+h250k.states.zet("sensor.laadpaal_status", "disconnected")
+rondes250(c250k, i250k, dt.datetime(2026, 11, 8, 13, 0), dt.datetime(2026, 11, 8, 13, 5))
+h250k.states.zet("sensor.laadpaal_status", "awaiting_start")
+k250 = rondes250(c250k, i250k, dt.datetime(2026, 11, 8, 13, 6), dt.datetime(2026, 11, 8, 13, 8))
+controle("kabel eruit en erin: een nieuwe beurt, niet klaar", k250[-1][1]["rule"] != "complete", f"{k250[-1][1]['rule']}")
+
+# De bewoner kiest Snel.
+i250s, h250s, c250s, b250s = klaar250()
+h250s.states.zet("sensor.laadpaal_status", "awaiting_start")
+rondes250(c250s, i250s, dt.datetime(2026, 11, 8, 13, 39), dt.datetime(2026, 11, 8, 13, 40))
+c250s.async_boost("dev-laadpaal", True)
+s250 = rondes250(c250s, i250s, dt.datetime(2026, 11, 8, 13, 41), dt.datetime(2026, 11, 8, 13, 41))
+controle("de bewoner kiest Snel: dan laadt hij", s250[-1][1]["charge"] and s250[-1][2], f"{s250[-1][1]['rule']}")
+
+# Een nieuwe accustand opgeven.
+i250o, h250o, c250o, b250o = klaar250()
+h250o.states.zet("sensor.laadpaal_status", "awaiting_start")
+rondes250(c250o, i250o, dt.datetime(2026, 11, 8, 13, 39), dt.datetime(2026, 11, 8, 13, 40))
+i250o["car_soc"] = [{"device": "dev-laadpaal", "car": "car-1", "percent": 50.0, "meter": 100.0}]
+o250 = rondes250(c250o, i250o, dt.datetime(2026, 11, 8, 13, 41), dt.datetime(2026, 11, 8, 13, 41))
+controle("een nieuwe accustand: dan geldt klaar niet meer", o250[-1][1]["rule"] != "complete", f"{o250[-1][1]['rule']}")
+
+# Een Alfen leidt zijn klaar zelf af: daar verandert niets.
+c250a = bouw250(ALFEN)[2]
+c250a._klaar_beurt["dev-alfen"] = c250a._klaar_keuze(bouw250(ALFEN)[0], ALFEN)
+controle("Alfen: alleen wat de paal nu zegt", not c250a._klaar_blijft(bouw250(ALFEN)[0], ALFEN, "awaiting_start", True), "")
+
+print("=== 251. neemt de paal de limiet niet aan, dan gaat de melding over de paal (v0.209.0) ===")
+# Een klantwoning op 08-11-2026 om 20:20: "neemt al 20 minuten geen stroom af ... trek de kabel eruit",
+# terwijl de paal sinds 19:50 geen stroom had en zijn limiet op 0 A bleef staan.
+i251, h251, c251, b251 = bouw248(locatie="home", kabel="on")
+for minuut in range(30, 60):
+    h251.services.verstuurd.clear()
+    h251.states.zet("sensor.laadpaal_dyn", "0")
+    asyncio.run(c251._one(dt.datetime(2026, 11, 8, 4, minuut), i251, PAAL248, "steer"))
+print(f"  {b251}")
+controle("de melding noemt de paal en zijn limiet, niet de kabel van de auto",
+         len(b251) == 1 and b251[0][0].startswith("Laadpaal neemt al 20 minuten de stroom van de coach niet aan en blijft op 0 A staan.")
+         and "Tesla staat op 27%." in b251[0][0] and "Kijk of de paal stroom en internet heeft." in b251[0][0]
+         and "kabel" not in b251[0][0] and b251[0][1], f"{b251}")
+controle("met de limiet aangenomen: de melding over de auto zoals altijd",
+         [b for b in b248t if "Tesla aan Laadpaal neemt al" in b[0] and "kabel" in b[0]], f"{b248t}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

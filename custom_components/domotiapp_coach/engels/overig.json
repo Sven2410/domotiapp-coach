@@ -65,6 +65,8 @@
   "Geen auto": "No car",
   "Pauze": "Paused",
   "Storing": "Fault",
+  "Offline": "Offline",
+  "Offline sinds {tijd}": "Offline since {tijd}",
   "Wacht tot {tijd}": "Waiting until {tijd}",
   "Aan op zon": "Running on solar",
   "Aan op een goedkoop uur": "Running in a cheap hour",

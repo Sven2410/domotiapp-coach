@@ -796,6 +796,23 @@ STIL_AANBOD = timedelta(minutes=20)
 # gaat of een locatie die bij het wegrijden nog bijwerkt.
 AUTO_WEG_NA = timedelta(minutes=10)
 
+# Een paal die offline is terwijl zijn integratie gewoon geladen blijft (v0.209.0, `_async_paal_online`).
+# In een klantwoning op 08-11-2026 ging de automaat van de paal om 23:08 uit; de integratie bleef op
+# loaded met de laatste waarden, alleen de sensor online ging uit. De coach bleef "Laadt" zeggen en
+# schreef elke minuut "toch gestart" in het log. Twee minuten, want die sensor knippert ook: diezelfde
+# avond om 19:06 anderhalve minuut. Na vijf minuten één keer herladen; helpt dat na tien minuten niet,
+# dan één melding, alleen als de coach wil laden, en niet tussen 22:00 en 07:00.
+PAAL_OFFLINE_NA = timedelta(minutes=2)
+PAAL_OFFLINE_HERLADEN = timedelta(minutes=5)
+PAAL_OFFLINE_MELDEN = timedelta(minutes=10)
+PAAL_OFFLINE_RUST = (time(22, 0), time(7, 0))
+
+# Klaar blijft klaar (v0.209.0, `_klaar_blijft`). In een klantwoning was een auto op 07-11-2026 om 04:38 klaar;
+# op 08-11 om 13:39 zette de Equalizer de paal even op 0 A, en een Easee die `completed` is springt dan naar
+# `awaiting_start`. De coach plande de beurt opnieuw, wekte de auto om 20:00 en meldde om 20:20 als kritiek dat
+# hij geen stroom afnam. Een paal die in deze beurt al klaar meldde en daarna alleen weer wacht, is nog klaar.
+KLAAR_BLIJFT = ("awaiting_start", "ready_to_charge", "awaiting_load_balancing", "paused_due_to_equalizer")
+
 # Hoe vaak het huisverbruik en de zonverwachting opnieuw worden opgehaald. Het
 # eerste is een som over dagen en verandert niet binnen een uur; het tweede komt
 # van een dienst die zelf een paar keer per dag ververst. Elke ronde opnieuw
@@ -2089,6 +2106,13 @@ class ChargerCoach:
         # Zei de auto al dat hij weg was vóór dat moment, dan hing er sindsdien een andere auto aan.
         self._paal_laadde: dict[str, datetime] = {}
         self._locatie_van: dict[str, str | None] = {}
+        # Een paal die offline is (v0.209.0): sinds wanneer, wanneer de coach hem herlaadde, of het gemeld
+        # is en of hij 's nachts wilde laden. In het geheugen als `paal-offline:<paal>`.
+        self._offline: dict[str, dict[str, Any]] = {}
+        self._online_van: dict[str, list[str]] = {}
+        # Palen die deze beurt al klaar meldden (v0.209.0), met wat de bewoner toen gekozen had (de auto en de
+        # opgegeven accustand). In het geheugen als `paal-klaar:<paal>`.
+        self._klaar_beurt: dict[str, str] = {}
         # Laadpunten waarvan de klaar-tijd verstreken is terwijl de auto niet vol
         # was. Die laden door tot ze vol zijn, want vol worden weegt zwaarder dan
         # goedkoop laden. Vervalt zodra de auto vol is of de kabel eruit gaat.
@@ -2707,6 +2731,209 @@ class ChargerCoach:
                      paal=_hoofdletter(naam), auto=self._hoe_heet(car))
         return t("{paal} meldt een auto, maar de kabel zit niet in {auto}.",
                  paal=_hoofdletter(naam), auto=self._hoe_heet(car))
+
+    def _klaar_blijft(self, settings: dict[str, Any], device: dict[str, Any], status: str, verbonden: bool) -> bool:
+        """Of de auto klaar is: de paal zegt het nu, of zei het deze beurt al en wacht sindsdien (v0.209.0).
+
+        Alleen met een eigen statussensor: wat de coach bij een Alfen zelf afleidt (`_status_afgeleid`) blijft
+        zoals het was. Het houdt op als de kabel eruit gaat, als de auto weer laadt, als de coach de paal een
+        keer opnieuw start (eis 7), en als de bewoner iets kiest: Snel, een modus, een doel (`_klaar_vergeten`)
+        of een andere auto of accustand. De coach schrijft bij een klare auto niets (`NO_WRITE_RULES`), dus
+        geeft de lastbewaking daarna weer stroom vrij en wil de auto nog iets, dan gaat de paal vanzelf laden.
+        """
+        device_id = device.get("id", "")
+        if not (device.get("entities") or {}).get("status"):
+            return "complete" in status
+        keuze = self._klaar_keuze(settings, device)
+        if "complete" in status:
+            if self._klaar_beurt.get(device_id) != keuze:
+                self._klaar_beurt[device_id] = keuze
+            # Met de ene herstart van eis 7 erbij: zonder die zou een herstart van Home Assistant de paal
+            # nog een keer opnieuw starten, en dan was klaar weer weg.
+            self._onthoud(f"paal-klaar:{device_id}", {
+                "keuze": keuze, "herstart": _naar_geheugen(self._herstart_gedaan.get(device_id)),
+            }, meteen=True)
+            return True
+        if device_id not in self._klaar_beurt:
+            return False
+        # Na een opstart zegt de paal eerst even niets: dat is geen nieuwe beurt.
+        if not status:
+            return False
+        if verbonden and status in KLAAR_BLIJFT and self._klaar_beurt[device_id] == keuze:
+            return True
+        self._klaar_vergeten(device_id)
+        return False
+
+    def _klaar_keuze(self, settings: dict[str, Any], device: dict[str, Any]) -> str:
+        """Welke auto er hangt en welke accustand er is opgegeven: kiest de bewoner iets anders, dan telt klaar niet meer."""
+        auto = self._chosen_car(settings, device)[0]
+        rij = next((r for r in (settings.get("car_soc") or [])
+                    if isinstance(r, dict) and r.get("device") == device.get("id")), None) or {}
+        return f"{auto}|{rij.get('car')}|{rij.get('percent')}|{rij.get('meter')}"
+
+    def _klaar_vergeten(self, device_id: str) -> None:
+        if self._klaar_beurt.pop(device_id, None) is not None:
+            self._onthoud(f"paal-klaar:{device_id}", None, meteen=True)
+
+    def _online_entiteiten(self, device: dict[str, Any]) -> list[str]:
+        """Wat zegt of de paal verbinding heeft (v0.209.0).
+
+        Het veld Online van de paal, en anders elke `binary_sensor` met `device_class` connectivity op
+        hetzelfde apparaat als de paal (bij een Easee de sensor online). Geen merknamen, en zonder zo'n
+        sensor verandert er niets.
+        """
+        entities = device.get("entities") or {}
+        eigen = str(entities.get("online") or "").strip()
+        if eigen:
+            return [eigen]
+        device_id = device.get("id", "")
+        if device_id in self._online_van:
+            return self._online_van[device_id]
+        gevonden: list[str] = []
+        try:
+            from homeassistant.helpers import entity_registry as er
+
+            register = er.async_get(self.hass)
+            apparaat = None
+            for entity_id in (device.get("entity"), *entities.values()):
+                rij = register.async_get(entity_id) if isinstance(entity_id, str) and entity_id else None
+                if rij is not None and getattr(rij, "device_id", None):
+                    apparaat = rij.device_id
+                    break
+            if apparaat is not None:
+                gevonden = sorted(
+                    r.entity_id for r in er.async_entries_for_device(register, apparaat)
+                    if r.entity_id.startswith("binary_sensor.")
+                    and (getattr(r, "device_class", None) or getattr(r, "original_device_class", None)) == "connectivity"
+                    and not getattr(r, "disabled_by", None)
+                )
+        except Exception:  # noqa: BLE001 - zonder register geen sensor, en dan alles zoals altijd
+            gevonden = []
+        # Alleen wat gevonden is blijft bewaard: een integratie die na een herstart nog niet geladen is,
+        # krijgt de volgende ronde een nieuwe kans.
+        if gevonden:
+            self._online_van[device_id] = gevonden
+        return gevonden
+
+    async def _async_paal_online(self, now: datetime, device: dict[str, Any]) -> datetime | None:
+        """Sinds wanneer de paal offline is, of None (v0.209.0).
+
+        Offline: elke sensor van `_online_entiteiten` staat al `PAAL_OFFLINE_NA` op uit. De integratie kan
+        dan gewoon geladen blijven met de laatste waarden, en dan grijpen `_async_integraties` en
+        `_async_stil_herladen` niet in. Eén logregel als hij offline gaat en één als hij terugkomt. Na
+        `PAAL_OFFLINE_HERLADEN` herlaadt de coach zijn integratie één keer per storing; dat helpt als het
+        aan de kant van Home Assistant hangt, niet als de paal geen stroom of geen netwerk heeft. Onbekend
+        of onbeschikbaar (zoals tijdens dat herladen) laat de stand zoals hij was. Alles staat in het
+        geheugen, dus een herstart begint niet opnieuw te tellen en herlaadt niet nog eens.
+        """
+        device_id = device.get("id", "")
+        rec = self._offline.get(device_id)
+        paren = [
+            (e, s) for e, s in ((e, self.hass.states.get(e)) for e in self._online_entiteiten(device))
+            if s is not None and s.state in ("on", "off")
+        ]
+        staten = [s for _e, s in paren]
+        if not staten:
+            return rec["sinds"] if rec else None
+        if any(s.state == "on" for s in staten):
+            if rec is not None:
+                self._offline.pop(device_id, None)
+                self._offline_onthouden(device_id)
+                _LOGGER.info("%s is weer online", device_id)
+                if rec.get("herladen") or rec.get("gemeld"):
+                    await self._async_tell(
+                        t("{naam} is weer online.", naam=_hoofdletter(device.get("name") or t("de laadpaal"))),
+                        telefoon=False,
+                    )
+            return None
+        if rec is None:
+            sinds = max(dt_util.as_local(s.last_changed).replace(tzinfo=None) for s in staten)
+            if _tussen(sinds, now) < PAAL_OFFLINE_NA:
+                return None
+            rec = self._offline[device_id] = {"sinds": sinds}
+            self._offline_onthouden(device_id)
+            _LOGGER.warning(
+                "%s is sinds %s offline; de coach stuurt hem niet tot hij terug is",
+                device_id, sinds.isoformat(timespec="minutes"),
+            )
+        if rec.get("herladen") is None and _tussen(rec["sinds"], now) >= PAAL_OFFLINE_HERLADEN:
+            rec["herladen"] = now
+            self._offline_onthouden(device_id)
+            rec["herlaadde"] = await self._async_online_herladen(device_id, rec["sinds"], paren[0][0], now)
+            self._offline_onthouden(device_id)
+        return rec["sinds"]
+
+    async def _async_online_herladen(self, device_id: str, sinds: datetime, entity_id: str, now: datetime) -> bool:
+        """De integratie van de sensor online één keer herladen, zoals `_async_integraties` (v0.209.0).
+
+        Geeft terug of hij het deed: een integratie die er niet is of niet geladen is, herlaadt hij hier niet.
+        """
+        try:
+            from homeassistant.helpers import entity_registry as er
+
+            rij = er.async_get(self.hass).async_get(entity_id)
+            entry_id = getattr(rij, "config_entry_id", None) if rij is not None else None
+            entry = self.hass.config_entries.async_get_entry(entry_id) if entry_id else None
+        except Exception:  # noqa: BLE001 - zonder register niet herladen
+            entry = None
+        if entry is None or entry.domain == DOMAIN or getattr(entry, "disabled_by", None):
+            return False
+        # Een integratie die niet geladen is, herlaadt `_async_integraties` al.
+        if str(getattr(entry.state, "value", entry.state)) != "loaded":
+            return False
+        naam = entry.title or entry.domain
+        _LOGGER.warning(
+            "%s is al %d minuten offline; de coach herlaadt de integratie %s",
+            device_id, int(_tussen(sinds, now).total_seconds() // 60), naam,
+        )
+        try:
+            async with asyncio.timeout(INTEGRATIE_WACHT.total_seconds()):
+                await self.hass.config_entries.async_reload(entry.entry_id)
+        except Exception as err:  # noqa: BLE001 - het internet kan er nog niet zijn
+            _LOGGER.warning("de integratie %s herladen lukte niet: %s", naam, err)
+        return True
+
+    async def _async_offline_melden(self, now: datetime, device: dict[str, Any], wil: bool) -> None:
+        """Eén melding voor een paal die na het herladen offline blijft (v0.209.0).
+
+        Alleen als de coach wil laden: een automaat die bewust uit staat zonder auto die moet laden, hoort
+        niemand te storen. En niet tussen 22:00 en 07:00 (`PAAL_OFFLINE_RUST`); wilde hij 's nachts laden,
+        dan komt de melding om 07:00. Wat er gemeld is staat in het geheugen.
+        """
+        device_id = device.get("id", "")
+        rec = self._offline.get(device_id)
+        if rec is None or rec.get("gemeld"):
+            return
+        van, tot = PAAL_OFFLINE_RUST
+        nacht = now.time() >= van or now.time() < tot
+        if wil and nacht and not rec.get("wilde"):
+            rec["wilde"] = True
+            self._offline_onthouden(device_id)
+        if nacht or not (wil or rec.get("wilde")):
+            return
+        if rec.get("herladen") is None or _tussen(rec["herladen"], now) < PAAL_OFFLINE_MELDEN:
+            return
+        rec["gemeld"] = True
+        self._offline_onthouden(device_id)
+        naam = _hoofdletter(device.get("name") or t("de laadpaal"))
+        tijd = _wanneer(now, rec["sinds"])
+        await self._async_tell(
+            t("{naam} is sinds {tijd} offline en komt niet terug na herladen. Staat de automaat aan en heeft hij "
+              "internet?", naam=naam, tijd=tijd)
+            if rec.get("herlaadde") else
+            t("{naam} is sinds {tijd} offline. Staat de automaat aan en heeft hij internet?", naam=naam, tijd=tijd)
+        )
+
+    def _offline_onthouden(self, device_id: str) -> None:
+        rec = self._offline.get(device_id)
+        data = None if rec is None else {
+            "sinds": _naar_geheugen(rec["sinds"]),
+            "herladen": _naar_geheugen(rec.get("herladen")),
+            "gemeld": bool(rec.get("gemeld")),
+            "wilde": bool(rec.get("wilde")),
+            "herlaadde": bool(rec.get("herlaadde")),
+        }
+        self._onthoud(f"paal-offline:{device_id}", data, meteen=True)
 
     async def _async_auto_wekken(
         self, now: datetime, settings: dict[str, Any], device: dict[str, Any], connected: bool
@@ -4458,6 +4685,8 @@ class ChargerCoach:
                 for sleutel in ("status", "connected", "charging")
                 if (entity := (device.get("entities") or {}).get(sleutel))
             }
+            # Een paal die weer online komt, krijgt meteen een ronde (v0.209.0).
+            | {entity for device in chargers for entity in self._online_entiteiten(device)}
             | set(self._limiet_van)
             | set(self._slim_laden.values())
             # De startknop erbij: bij Home Connect Local komt die pas terug
@@ -10290,18 +10519,22 @@ class ChargerCoach:
         auto is nog niet begonnen met trekken.
         """
         device_id = device.get("id", "")
+        # Een paal die offline is (v0.209.0): wat hij zegt is van voor hij wegviel. Niet wekken, niet
+        # sturen, en de kaart zegt het.
+        offline = await self._async_paal_online(now, device)
         grid, car, charger, window = self._read(now, settings, device, reserved)
         self._fasen_bijhouden(settings, device, now)
         los = self._tweede_sturing(device, charger, now)
-        if self._app_hervat(device, charger, now):
+        if offline is None and self._app_hervat(device, charger, now):
             await self._async_app_hervat(device)
             charger = replace(charger, boost=True, paused_by_user=False, modus=self._modus_van(device))
         await self._async_soc_vast_melden(device, car)
-        await self._async_auto_weg(now, settings, device, car, charger)
-        try:
-            await self._async_auto_wekken(now, settings, device, charger.connected)
-        except ServiceNotFound:
-            _LOGGER.warning("%s: de wekknop van de auto bestaat niet (nog niet geladen?)", device_id)
+        if offline is None:
+            await self._async_auto_weg(now, settings, device, car, charger)
+            try:
+                await self._async_auto_wekken(now, settings, device, charger.connected)
+            except ServiceNotFound:
+                _LOGGER.warning("%s: de wekknop van de auto bestaat niet (nog niet geladen?)", device_id)
 
         # Wekken mag zolang de auto aan de kabel hangt, niet laadt en de poging
         # van deze sessie nog openstaat. Dat de coach ook wíl laden weet de
@@ -10388,7 +10621,18 @@ class ChargerCoach:
                 if een_fase:
                     car_nu = car_een
 
-        await self._async_proef_na(now, device, car, charger, decision)
+        # Offline: wat hij zou doen bepaalt alleen of er een melding komt (`_async_offline_melden`).
+        wil = decision.charge and charger.connected
+        if offline is not None:
+            omzetten = None
+            decision = Decision(
+                charge=False,
+                rule="offline",
+                reason=t("{naam} is offline sinds {tijd}. De coach stuurt hem weer zodra hij terug is.",
+                         naam=_hoofdletter(device.get("name") or t("de laadpaal")), tijd=_wanneer(now, offline)),
+            )
+        else:
+            await self._async_proef_na(now, device, car, charger, decision)
         if decision.rule == "complete":
             self._te_laat.discard(device_id)
         # Zet de coach de paal zelf uit omdat er geen ruimte is (v0.192.0), dan telt de stroom die
@@ -10421,8 +10665,15 @@ class ChargerCoach:
             self._asking_since.setdefault(device_id, now)
         else:
             self._asking_since.pop(device_id, None)
-        self._bijhouden(now, device, car, charger, window, decision, grid, settings)
-        self._tempo_leren(now, settings, device, car_nu, charger, grid)
+        if offline is None:
+            self._bijhouden(now, device, car, charger, window, decision, grid, settings)
+            self._tempo_leren(now, settings, device, car_nu, charger, grid)
+        else:
+            # Offline: het vermogen dat de paal laatst meldde blijft staan, en dat telt niet als geladen. Wat hij
+            # in die tijd echt deed, telt de teller zodra hij terug is. In het virtuele huis `paal-offline` telde
+            # de beurt anders 30 kWh waar er 15 in ging.
+            self._bijhouden(now, device, car, replace(charger, charging=False, actual_amps=0.0), window, decision,
+                            grid, settings)
         # Een nieuwe meting van het laadrendement bewaren (v0.94.0).
         if device_id in self._rend_meting:
             self.hass.async_create_task(self._async_rendement_bewaren(settings, device_id))
@@ -10459,7 +10710,7 @@ class ChargerCoach:
             # plant de vooruitblik ze en rekent de batterij erop (`_auto_laden`).
             "plan_ahead": (
                 None
-                if decision.rule == "disconnected"
+                if decision.rule in ("disconnected", "offline")
                 or (not window.enabled and charger.modus in MODI_ZONDER_SOM)
                 else self._tijdlijn(
                     now, settings, grid, car, charger, window,
@@ -10474,6 +10725,8 @@ class ChargerCoach:
             # Op hoeveel fasen een Alfen die mag wisselen nu staat (v0.104.0),
             # of niets als de coach daar niet over gaat.
             "phases_now": fasen_nu,
+            # Sinds wanneer de paal offline is (v0.209.0), of niets.
+            "offline_sinds": offline.isoformat() if offline is not None else None,
             # Welke modus er geldt, en of dat de keuze van deze beurt is of de
             # voorkeur van de paal. Snel is `boost`; een planning wint.
             "mode": "snel" if charger.boost else charger.modus,
@@ -10502,7 +10755,7 @@ class ChargerCoach:
             # in devices.js. De number `accustand` geeft het door aan de
             # laadpaalkaart van DomotiApp Lovelace, met `soc_sensor` voor de uitleg.
             "soc_ask": (
-                decision.rule != "disconnected" and not car.guest
+                decision.rule not in ("disconnected", "offline") and not car.guest
                 and car.capacity_kwh > 0 and device_id not in self._soc_ruw
                 and not device.get("goedkoop_blok")
             ),
@@ -10634,6 +10887,13 @@ class ChargerCoach:
         )
 
         if not may_act:
+            return 0.0
+
+        # Offline (v0.209.0): niets naar de paal, en dus ook geen "toch gestart" elke minuut. Vergeten wat
+        # hij het laatst stuurde, zodat hij zodra de paal terug is meteen weer schrijft.
+        if offline is not None:
+            self._last.pop(device_id, None)
+            await self._async_offline_melden(now, device, wil)
             return 0.0
 
         await self._async_verslag(now, device, car, charger, window, decision)
@@ -12818,8 +13078,9 @@ class ChargerCoach:
             actual_amps=charger_amps,
             # De paal zegt het zelf als de auto vol is, en dat is beter dan het
             # afleiden uit een stroom die bijna nul is: dat laatste lijkt sprekend
-            # op een auto die om een andere reden niets vraagt.
-            complete="complete" in status,
+            # op een auto die om een andere reden niets vraagt. En wat hij deze beurt
+            # al zei blijft gelden als hij daarna alleen weer wacht (v0.209.0).
+            complete=self._klaar_blijft(settings, device, status, verbonden),
             boost=device.get("id", "") in self._boost,
             modus=self._modus_van(device),
             continu_amps=int(device.get("continuous_amps") or MIN_AMPS),
@@ -12969,7 +13230,7 @@ class ChargerCoach:
         # En niet voor een auto die zelf zegt dat hij weg is of dat er geen kabel in zit (v0.208.0): de
         # accustand van een auto die wegreed zegt niets over de paal.
         if (charger.complete and gedaan is None and bezonken and self._niet_vol(car) and not charger.goedkoop_blok
-                and device_id not in self._weg_nu):
+                and device_id not in self._weg_nu and device_id not in self._offline):
             charger.complete = False
             self._herstart_open.add(device_id)
             # De herstart is een nieuw aanbod (v0.99.0): de auto krijgt weer een
@@ -12979,6 +13240,8 @@ class ChargerCoach:
             self._afgeleid_klaar.discard(device_id)
             self._stil_sinds.pop(device_id, None)
             self._asking_since.pop(device_id, None)
+            # Na de herstart oordeelt de paal opnieuw: meldt hij weer klaar, dan geldt dat weer.
+            self._klaar_vergeten(device_id)
         else:
             self._herstart_open.discard(device_id)
 
@@ -15600,16 +15863,35 @@ class ChargerCoach:
                 if car.soc_percent is not None
                 else ""
             )
-            await self._async_tell(
-                t(
-                    "{auto} aan {naam} neemt al {minuten} minuten geen stroom af terwijl de coach hem "
-                    "aanbiedt.{stand} Zo wordt {klok} niet gehaald. Meestal helpt het om de kabel er "
-                    "even uit te trekken en er weer in te doen.",
-                    auto=_hoofdletter(self._hoe_heet(car)), naam=naam, minuten=minuten, stand=stand,
-                    klok=f"{window.deadline:%H:%M}",
-                ),
-                kritiek=True,
-            )
+            # Nam de paal de limiet van de coach niet aan, dan ligt het aan de paal en niet aan de auto
+            # (v0.209.0). In een klantwoning op 08-11-2026 om 20:20 gaf deze melding de auto de schuld, met
+            # het advies de kabel opnieuw in te steken, terwijl de paal sinds 19:50 geen stroom had en zijn
+            # limiet op 0 A bleef staan.
+            limiet = _number(self.hass, (device.get("entities") or {}).get("dynamic_limit"))
+            paal_neemt_niet = limiet is not None and decision.amps and limiet < min(decision.amps, MIN_AMPS) - 0.5
+            if paal_neemt_niet:
+                await self._async_tell(
+                    t(
+                        "{paal} neemt al {minuten} minuten de stroom van de coach niet aan en blijft op {limiet} A "
+                        "staan.{stand} Zo wordt {klok} niet gehaald. Kijk of de paal stroom en internet heeft.",
+                        paal=_hoofdletter(naam), minuten=minuten, limiet=f"{limiet:.0f}",
+                        stand=(" " + t("{auto} staat op {pct}%.", auto=_hoofdletter(self._hoe_heet(car)),
+                                       pct=round(car.soc_percent)) if car.soc_percent is not None else ""),
+                        klok=f"{window.deadline:%H:%M}",
+                    ),
+                    kritiek=True,
+                )
+            else:
+                await self._async_tell(
+                    t(
+                        "{auto} aan {naam} neemt al {minuten} minuten geen stroom af terwijl de coach hem "
+                        "aanbiedt.{stand} Zo wordt {klok} niet gehaald. Meestal helpt het om de kabel er "
+                        "even uit te trekken en er weer in te doen.",
+                        auto=_hoofdletter(self._hoe_heet(car)), naam=naam, minuten=minuten, stand=stand,
+                        klok=f"{window.deadline:%H:%M}",
+                    ),
+                    kritiek=True,
+                )
 
         # De coach heeft de paal zojuist opnieuw gestart omdat de auto volgens
         # zijn accustand nog niet vol was. Dat hoort de bewoner te lezen, ook
@@ -16552,6 +16834,20 @@ class ChargerCoach:
             elif sleutel.startswith("auto-weg:"):
                 if data.get("soort") in ("weg", "kabel"):
                     self._weg_gemeld[sleutel.split(":", 1)[1]] = str(data["soort"])
+            elif sleutel.startswith("paal-klaar:"):
+                if data.get("keuze") is not None:
+                    self._klaar_beurt[sleutel.split(":", 1)[1]] = str(data["keuze"])
+                    herstart = _uit_geheugen(data.get("herstart"))
+                    if herstart is not None:
+                        self._herstart_gedaan.setdefault(sleutel.split(":", 1)[1], herstart)
+            elif sleutel.startswith("paal-offline:"):
+                sinds = _uit_geheugen(data.get("sinds"))
+                if sinds is not None:
+                    self._offline[sleutel.split(":", 1)[1]] = {
+                        "sinds": sinds, "herladen": _uit_geheugen(data.get("herladen")),
+                        "gemeld": bool(data.get("gemeld")), "wilde": bool(data.get("wilde")),
+                        "herlaadde": bool(data.get("herlaadde")),
+                    }
             elif sleutel == "water":
                 self._water_loopt_sinds = _uit_geheugen(data.get("sinds"))
                 self._water_gemeld = bool(data.get("gemeld")) and self._water_loopt_sinds is not None
@@ -16904,6 +17200,7 @@ class ChargerCoach:
             # Twee tegengestelde opdrachten van dezelfde persoon: de laatste
             # telt. Anders zou snelladen aanstaan terwijl er niets gebeurt.
             self._paused.discard(device_id)
+            self._klaar_vergeten(device_id)
         else:
             self._boost.discard(device_id)
             self._nul_gezien.discard(device_id)
@@ -16946,6 +17243,7 @@ class ChargerCoach:
             return
         self._boost.discard(device_id)
         self._snel_app.discard(device_id)
+        self._klaar_vergeten(device_id)
         # Wat de bewoner kiest wint (v0.197.1): pas een 0 die de coach daarna ziet staan, en dan een sprong
         # naar het maximum, is weer een hervat in de app.
         self._nul_gezien.discard(device_id)
@@ -16970,6 +17268,7 @@ class ChargerCoach:
             self._doel.pop(device_id, None)
         else:
             self._doel[device_id] = max(10.0, min(100.0, float(percent)))
+        self._klaar_vergeten(device_id)
         self._remember(device_id)
         self.async_refresh()
 

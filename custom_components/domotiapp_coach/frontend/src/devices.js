@@ -262,6 +262,15 @@ export const CHARGER_BRANDS = [
         hint: nt("Wat de lader op dit moment levert, in ampère."),
         filter: "all",
       },
+      {
+        // Of de paal verbinding heeft (v0.209.0). Leeg: de coach zoekt zelf een sensor met
+        // device_class connectivity op hetzelfde apparaat.
+        key: "online",
+        label: nt("Online"),
+        hint: nt("Of de paal verbinding heeft. Leeg laten mag: dan zoekt de coach hem zelf. Is de paal offline, dan herlaadt de coach de integratie één keer en zegt hij het op de kaart."),
+        filter: "all",
+        values: { on: nt("Online"), off: nt("Offline") },
+      },
     ],
   },
   {
@@ -340,6 +349,15 @@ export const CHARGER_BRANDS = [
         label: nt("Bruikbare fasen"),
         hint: nt("De keuzelijst met 1 Phase en 3 Phases. Alleen nodig als de coach van fasen mag wisselen."),
         filter: "all",
+      },
+      {
+        // Of de paal verbinding heeft (v0.209.0). Leeg: de coach zoekt zelf een sensor met
+        // device_class connectivity op hetzelfde apparaat.
+        key: "online",
+        label: nt("Online"),
+        hint: nt("Of de paal verbinding heeft. Leeg laten mag: dan zoekt de coach hem zelf. Is de paal offline, dan herlaadt de coach de integratie één keer en zegt hij het op de kaart."),
+        filter: "all",
+        values: { on: nt("Online"), off: nt("Offline") },
       },
     ],
   },

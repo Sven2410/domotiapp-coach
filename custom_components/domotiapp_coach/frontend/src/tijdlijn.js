@@ -153,7 +153,8 @@ export function standVan(item, device) {
   if (soort === "laadpaal") {
     if (item.rule !== undefined || item.charge !== undefined) {
       if (item.charge) return { stand: "laden", bron: PAAL_ZON.has(regel) ? "zon" : "net" };
-      if (regel === "disconnected") return null;
+      // Een paal die offline is (v0.209.0): wat hij doet is niet te zien.
+      if (regel === "disconnected" || regel === "offline") return null;
       if (regel === "complete") return { stand: "vol" };
       return { stand: "wacht" };
     }

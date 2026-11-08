@@ -97,6 +97,8 @@ export const APPARATEN = {
     "The fixed limit of the circuit the charger is on, in amps. The coach takes the lower of this and the dynamic limit above.",
   "Stroom (wat de lader levert, in ampère)": "Current",
   "Wat de lader op dit moment levert, in ampère.": "What the charger is delivering right now, in amps.",
+  "Online": "Online",
+  "Of de paal verbinding heeft. Leeg laten mag: dan zoekt de coach hem zelf. Is de paal offline, dan herlaadt de coach de integratie één keer en zegt hij het op de kaart.": "Whether the charger has a connection. You may leave this empty: the coach then finds it itself. If the charger goes offline, the coach reloads the integration once and says so on the card.",
 
   // devices.js: de laadpaal, Alfen
   "Alfen gaat via de integratie alfen_modbus; zet in de paal de geldigheidsduur van de Modbus-stroomlimiet op minstens drie minuten.":

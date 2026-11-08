@@ -2869,5 +2869,51 @@ if (weg_a := v("alfen-auto-weg")) and (gast_a := v("alfen-auto-weg-gast")):
              and not meldingen(gast_a, "laadt weer") and not meldingen(gast_a, "geen stroom af"),
              f"{[(t.strftime('%H:%M'), m[:40]) for t, m in gast_a.meldingen]}")
 
+# De paal is offline (v0.209.0). Een Easee in een klantwoning op 08-11-2026: de automaat ging uit, de integratie
+# bleef geladen, en de coach bleef "Laadt" zeggen en elke minuut een start sturen die nergens aankwam.
+if (off_v := v("paal-offline")) and (nacht_v := v("paal-offline-nacht")):
+    print(f"  paal offline: {off_v.geladen_kwh:.1f} kWh, meldingen {[(t.strftime('%H:%M'), m[:50]) for t, m in off_v.meldingen]}")
+    print(f"  's nachts: {nacht_v.geladen_kwh:.1f} kWh, meldingen {[(t.strftime('%a %H:%M'), m[:50]) for t, m in nacht_v.meldingen]}")
+    begin_off = off_v.regels[0].tijd.replace(hour=11, minute=2)
+    eind_off = off_v.regels[0].tijd.replace(hour=15, minute=0)
+    stil_off = [r for r in off_v.regels if begin_off <= r.tijd < eind_off]
+    controle("paal-offline: na twee minuten offline, tot hij terug is",
+             stil_off and all(r.regel == "offline" for r in stil_off),
+             f"{sorted({r.regel for r in stil_off})}")
+    controle("paal-offline: geen opdrachten naar een paal die offline is",
+             not [o for o in off_v.paal_offline_opdrachten if o[0] >= begin_off], f"{off_v.paal_offline_opdrachten[-3:]}")
+    controle("paal-offline: het besluit zegt sinds wanneer",
+             any("Laadpaal is offline sinds 11:00." in r.reden for r in stil_off), "")
+    controle("paal-offline: één melding, een kwartier nadat hij offline ging",
+             [(t.strftime("%H:%M"), m) for t, m in off_v.meldingen if "offline" in m]
+             == [("11:15", "Laadpaal is sinds 11:00 offline. Staat de automaat aan en heeft hij internet?")],
+             f"{off_v.meldingen}")
+    controle("paal-offline: geen kritieke melding", not [g for g in off_v.geschiedenis if g.get("kind") == "kritiek"],
+             f"{[g.get('message') for g in off_v.geschiedenis if g.get('kind') == 'kritiek']}")
+    controle("paal-offline: terug om 15:00, meteen weer laden, en 'weer online' alleen in de geschiedenis",
+             any(r.tijd == eind_off and r.regel != "offline" and r.amps > 0 for r in off_v.regels)
+             and not meldingen(off_v, "weer online")
+             and any("Laadpaal is weer online." in str(g.get("message")) for g in off_v.geschiedenis),
+             f"{[(r.tijd, r.regel) for r in off_v.regels if r.tijd == eind_off]}")
+    controle("paal-offline: de auto wordt nog vol", off_v.klaar_op is not None, "")
+    controle("paal-offline-nacht: 's nachts geen melding, om 07:00 wel",
+             [(t.strftime("%a %H:%M"), m.startswith("Laadpaal is sinds maandag om 21:50 offline."))
+              for t, m in nacht_v.meldingen if "offline" in m] == [("Tue 07:00", True)], f"{nacht_v.meldingen}")
+    controle("paal-offline-nacht: en geen kritieke 'neemt al ... geen stroom af' over de auto",
+             not meldingen(nacht_v, "minuten geen stroom af"), f"{meldingen(nacht_v, 'minuten geen stroom af')}")
+
+# Klaar blijft klaar (v0.209.0). In een klantwoning sprong een Easee na een dip van de Equalizer van completed naar
+# awaiting_start, en plande de coach de beurt opnieuw.
+if (eq_v := v("klaar-equalizer-dip")):
+    dip = eq_v.regels[0].tijd.replace(hour=13, minute=39) + dt.timedelta(days=1)
+    na_dip = [r for r in eq_v.regels if r.tijd >= dip]
+    print(f"  na de dip: {sorted({r.regel for r in na_dip})}, status {sorted({r.status for r in na_dip})}")
+    controle("klaar-equalizer-dip: de paal zegt awaiting_start", na_dip and all(r.status == "awaiting_start" for r in na_dip),
+             f"{sorted({r.status for r in na_dip})}")
+    controle("klaar-equalizer-dip: klaar blijft klaar, geen nieuw plan en geen wekstroom",
+             all(r.regel == "complete" and r.amps == 0 for r in na_dip), f"{sorted({(r.regel, r.amps) for r in na_dip})}")
+    controle("klaar-equalizer-dip: geen melding na de dip", not [m for t, m in eq_v.meldingen if t >= dip],
+             f"{[m for t, m in eq_v.meldingen if t >= dip]}")
+
 print(f"\n{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

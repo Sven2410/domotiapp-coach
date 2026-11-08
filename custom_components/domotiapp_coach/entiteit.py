@@ -326,6 +326,8 @@ PAAL_TEKST = {
     "geen_auto": nt("Geen auto"),
     "pauze": nt("Pauze"),
     "storing": nt("Storing"),
+    # De paal is offline (v0.209.0): de toestand zegt sinds wanneer.
+    "offline": nt("Offline"),
 }
 # De modus van een beurt op de kaart, en hoe de coach hem kent (`async_mode`).
 PAAL_MODI = {"planning": "goedkoopst", "snel": "snel", "continu": "continu", "zon": "zon"}
@@ -353,6 +355,8 @@ def paal_stand(stand: dict[str, Any] | None) -> str:
     if not stand:
         return "geen_auto"
     regel = str(stand.get("rule") or "").split("+")[0]
+    if regel == "offline":
+        return "offline"
     if stand.get("paused"):
         return "pauze"
     if regel == "disconnected":
@@ -438,6 +442,8 @@ def paal_tekst(stand: dict[str, Any] | None) -> str:
                          if b.get("charging")), None)
         if volgende and volgende.get("start"):
             tekst = t("Wacht tot {tijd}", tijd=str(volgende['start'])[11:16])
+    elif sleutel == "offline" and (stand or {}).get("offline_sinds"):
+        tekst = t("Offline sinds {tijd}", tijd=str(stand["offline_sinds"])[11:16])
     return tekst
 
 

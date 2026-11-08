@@ -472,6 +472,13 @@ class Paal:
     teller_zichtbaar: float = 100.0
     teller_bij: dt.datetime | None = None
     ontvangen: list = field(default_factory=list)
+    # De automaat van de paal staat uit (v0.209.0, `automaat`): geen stroom, geen netwerk. De integratie
+    # houdt de laatste waarden en alleen de sensor online gaat uit, zoals een Easee in een klantwoning op
+    # 08-11-2026; de cloud neemt een opdracht aan en die komt nergens.
+    uit: bool = False
+    # Een Easee die klaar is en van de Equalizer 0 A krijgt, springt naar `awaiting_start` (v0.209.0,
+    # `equalizer_nul`). Tot de kabel eruit gaat.
+    wacht_na_klaar: bool = False
 
     def opdracht(self, dienst: str, data: dict, nu: dt.datetime) -> None:
         self.ontvangen.append((nu, dienst, dict(data)))
@@ -509,11 +516,13 @@ class Paal:
             self.terugvallen += 1
 
     def aanbod(self) -> float:
-        return min(self.dyn_limit, self.max_amps) if self.kabel else 0.0
+        return min(self.dyn_limit, self.max_amps) if self.kabel and not self.uit else 0.0
 
     def status(self, auto: Auto) -> str:
         if not self.kabel:
             return "disconnected"
+        if auto.klaar and self.wacht_na_klaar:
+            return "awaiting_start"
         if auto.klaar or (auto.storing and not auto.storing_bij_inpluggen):
             return "completed"
         if auto.trekt_amps > 0:
@@ -1351,6 +1360,9 @@ class Verloop:
     groep_boven: list = field(default_factory=list)
     # Opdrachten aan de paal die niet aankwamen (`paal_onbereikbaar`, v0.163.3).
     paal_geweigerd: int = 0
+    # Opdrachten die de coach stuurde terwijl de automaat van de paal uit stond (v0.209.0). Hoort na de
+    # eerste twee minuten nul te zijn.
+    paal_offline_opdrachten: list = field(default_factory=list)
     # Hoe vaak een Alfen op zijn veilige stroom terugviel omdat de coach
     # zijn limiet niet op tijd opnieuw schreef. Hoort nul te zijn.
     paal_terugvallen: int = 0
@@ -1499,6 +1511,7 @@ E = {
     "auto_status": "sensor.v_auto_laadstatus",
     "auto_plek": "device_tracker.v_auto",
     "auto_kabel": "binary_sensor.v_auto_kabel",
+    "online": "binary_sensor.v_paal_online",
     "equalizer": "sensor.v_equalizer",
     "reden": "sensor.v_paal_reden",
     "prijs": "sensor.v_prijs",
@@ -1782,6 +1795,7 @@ def instellingen(s: Scenario) -> dict:
                 "no_current_reason": E["reden"] if s.equalizer else "",
                 "circuit_limit": E["circuit"]
                 if s.paal.circuit_amps is not None and s.paal.circuit_zichtbaar else "",
+                "online": E["online"],
             },
             "cars": [{
                 "id": "auto",
@@ -1916,6 +1930,7 @@ class Wereld:
         self.weg: dict[str, dt.datetime] = {}
         # Tot wanneer een opdracht aan de paal niet aankomt (`paal_onbereikbaar`, v0.163.3).
         self.paal_weg_tot: dt.datetime | None = None
+        self.online_sinds: dt.datetime | None = None
         self.reden = ""
         self.oven_w = s.oven_w
         if s.kabel_erin is None:
@@ -2045,6 +2060,41 @@ class Wereld:
         hass.states.zet(E["bat_stuur"], {"state": "0", "attributes": {
             "unit_of_measurement": "W", "max_charge_power": 7000, "max_discharge_power": 2500}})
 
+    def publiceer_paal(self, hass, z, w) -> None:
+        """Wat de paal zelf meldt. Met de automaat uit blijft het staan zoals het was (v0.209.0)."""
+        nu = self.nu
+        status = self.paal.status(self.auto)
+        z(E["status"], status)
+        if self.paal.merk == "alfen":
+            # Zoals alfen_modbus het meldt: twee aan/uit-sensoren en de modus
+            # 3-toestand. "Completed" kent een Alfen niet: een volle auto is
+            # een auto met aanbod die niets neemt, B2.
+            z(E["alfen_connected"], "off" if status == "disconnected" else "on")
+            z(E["alfen_charging"], "on" if status == "charging" else "off")
+            z(E["alfen_mode3"], {"disconnected": "A", "charging": "C2"}.get(
+                status, "B2" if self.paal.dyn_limit >= MIN_AMPS else "B1"))
+            z(E["alfen_limit"], w(f"{self.paal.dyn_limit:.1f}", "A"))
+            if self.paal.fasen_keuze is not None:
+                z(E["alfen_fasen"], {"state": "1 Phase" if self.paal.fasen_keuze == 1 else "3 Phases",
+                                     "attributes": {"options": ["1 Phase", "3 Phases"]}})
+        if self.paal.stroom_meldt_wissel:
+            amps = self.auto.trekt_amps
+            if amps > 0:
+                amps += STROOM_RUIS[(nu.hour * 60 + nu.minute) % len(STROOM_RUIS)]
+            if f"{amps:.2f}" != self.stroom_gemeld[0]:
+                self.stroom_gemeld = (f"{amps:.2f}", nu)
+            z(E["stroom"], w(self.stroom_gemeld[0], "A"),
+              last_updated=self.stroom_gemeld[1].replace(tzinfo=dt.timezone.utc))
+            z(E["vermogen"], w(f"{self.paal_w:.0f}", "W"), last_updated=nu.replace(tzinfo=dt.timezone.utc))
+        else:
+            z(E["stroom"], w(f"{self.auto.trekt_amps:.2f}", "A"))
+            z(E["vermogen"], w(f"{self.paal_w:.0f}", "W"))
+        z(E["max"], w(f"{self.paal.max_amps:.0f}", "A"))
+        z(E["dyn"], w(f"{self.paal.dyn_limit:.0f}", "A"))
+        if self.paal.circuit_amps is not None:
+            z(E["circuit"], w(f"{self.paal.circuit_amps:.0f}", "A"))
+        z(E["teller"], w(f"{self.paal.teller(nu):.3f}", "kWh"))
+
     def publiceer(self, hass) -> None:
         """Alle sensoren zetten zoals Home Assistant ze nu zou tonen."""
         nu = self.nu
@@ -2113,38 +2163,10 @@ class Wereld:
         for naam, a in zip(("l1", "l2", "l3"), self.fase_amps()):
             z(E[naam], weg if p1_weg else w(f"{a:.{cijfers}f}", "A"))
 
-        status = self.paal.status(self.auto)
-        z(E["status"], status)
-        if self.paal.merk == "alfen":
-            # Zoals alfen_modbus het meldt: twee aan/uit-sensoren en de modus
-            # 3-toestand. "Completed" kent een Alfen niet: een volle auto is
-            # een auto met aanbod die niets neemt, B2.
-            z(E["alfen_connected"], "off" if status == "disconnected" else "on")
-            z(E["alfen_charging"], "on" if status == "charging" else "off")
-            z(E["alfen_mode3"], {"disconnected": "A", "charging": "C2"}.get(
-                status, "B2" if self.paal.dyn_limit >= MIN_AMPS else "B1"))
-            z(E["alfen_limit"], w(f"{self.paal.dyn_limit:.1f}", "A"))
-            if self.paal.fasen_keuze is not None:
-                z(E["alfen_fasen"], {"state": "1 Phase" if self.paal.fasen_keuze == 1 else "3 Phases",
-                                     "attributes": {"options": ["1 Phase", "3 Phases"]}})
-        if self.paal.stroom_meldt_wissel:
-            amps = self.auto.trekt_amps
-            if amps > 0:
-                amps += STROOM_RUIS[(nu.hour * 60 + nu.minute) % len(STROOM_RUIS)]
-            if f"{amps:.2f}" != self.stroom_gemeld[0]:
-                self.stroom_gemeld = (f"{amps:.2f}", nu)
-            z(E["stroom"], w(self.stroom_gemeld[0], "A"),
-              last_updated=self.stroom_gemeld[1].replace(tzinfo=dt.timezone.utc))
-            z(E["vermogen"], w(f"{self.paal_w:.0f}", "W"), last_updated=nu.replace(tzinfo=dt.timezone.utc))
-        else:
-            z(E["stroom"], w(f"{self.auto.trekt_amps:.2f}", "A"))
-            z(E["vermogen"], w(f"{self.paal_w:.0f}", "W"))
-        z(E["max"], w(f"{self.paal.max_amps:.0f}", "A"))
-        z(E["dyn"], w(f"{self.paal.dyn_limit:.0f}", "A"))
-        if self.paal.circuit_amps is not None:
-            z(E["circuit"], w(f"{self.paal.circuit_amps:.0f}", "A"))
-        z(E["teller"], w(f"{self.paal.teller(nu):.3f}", "kWh"))
-
+        z(E["online"], "off" if self.paal.uit else "on",
+          last_updated=(self.online_sinds or nu).replace(tzinfo=dt.timezone.utc))
+        if not self.paal.uit:
+            self.publiceer_paal(hass, z, w)
         soc = self.auto.gemelde_soc(nu)
         z(E["soc"], "unavailable" if soc is None else w(str(soc), "%"))
         # De laadstatus in de woorden van de Ford-integratie.
@@ -2348,6 +2370,7 @@ class Wereld:
             self.auto.herstel_op = None
             self.paal.kabel = False
             self.paal.gestart = False
+            self.paal.wacht_na_klaar = False
             self.auto.wakker = False
             self.auto.klaar = False
             return "de kabel gaat eruit"
@@ -2431,6 +2454,15 @@ class Wereld:
             naam, minuten = arg
             self.weg[naam] = self.nu + dt.timedelta(minutes=int(minuten))
             return f"de sensor {E[naam]} ({naam}) valt {minuten} minuten weg"
+        if actie == "automaat":
+            # De automaat van de paal gaat uit (False) of weer aan (True), v0.209.0.
+            self.paal.uit = not bool(arg)
+            self.online_sinds = self.nu
+            return "de automaat van de paal gaat " + ("aan" if arg else "uit")
+        if actie == "equalizer_nul":
+            # Een klare auto: de Equalizer zet de paal even op 0 A, en de Easee springt naar awaiting_start.
+            self.paal.wacht_na_klaar = True
+            return "de Equalizer zet de paal even op 0 A; de paal zegt nu awaiting_start"
         if actie == "paal_onbereikbaar":
             # Een paal die zichzelf herstart: elke opdracht faalt, en hij doet wat hij deed.
             self.paal_weg_tot = self.nu + dt.timedelta(minutes=int(arg))
@@ -2476,6 +2508,10 @@ class Diensten:
                 and (domein == "easee" or (domein == "number" and data.get("entity_id") == E["alfen_limit"]))):
             self.verloop.paal_geweigerd += 1
             raise OSError("Failed to connect")
+        if self.wereld.paal.uit and (domein == "easee" or (domein == "number" and data.get("entity_id") == E["alfen_limit"])):
+            # De cloud neemt hem aan, en hij komt nergens: de limiet blijft staan zoals hij was.
+            self.verloop.paal_offline_opdrachten.append((self.wereld.nu, dienst, dict(data)))
+            return
         self.verstuurd.append((domein, dienst, dict(data)))
         if domein == "easee":
             self.wereld.paal.opdracht(dienst, data, self.wereld.nu)

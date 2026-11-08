@@ -1786,3 +1786,98 @@ Proef 248 in test_coach.py:
 - een Alfen.
 
 In het virtuele huis `alfen-auto-weg` en `alfen-auto-weg-gast`.
+
+## De paal is offline: één keer herladen, en het zeggen (v0.209.0)
+
+In een klantwoning op 08-11-2026 ging de automaat van de Easee uit. De integratie bleef op loaded met de laatste
+waarden; alleen de sensor online ging uit (`binary_sensor` met device_class connectivity). De herlaadregels van
+v0.166.0 (een integratie die niet geladen is) en v0.188.0 (alles een uur `unavailable`) grepen dus niet in. De coach
+bleef "Laadt" zeggen, schreef elke minuut "bevestigde de limiet niet; toch gestart" in het log, en niemand zei dat
+de paal weg was.
+
+Nu (`_async_paal_online`, `_async_offline_melden`):
+- **Welke sensor:** het nieuwe veld Online van de paal (`entities.online`, Easee en Alfen), en leeg elke
+  `binary_sensor` met device_class connectivity op hetzelfde apparaat als de paal (`_online_entiteiten`). Geen
+  merknamen. Geen sensor, of onbekend of onbeschikbaar: alles zoals altijd.
+- **Offline** is elke sensor al `PAAL_OFFLINE_NA` (twee minuten) uit. Die sensor knippert ook: diezelfde avond om
+  19:06 anderhalve minuut.
+- **Wat er dan gebeurt:**
+  - Het besluit wordt `offline`: "Laadpaal is offline sinds 23:08. De coach stuurt hem weer zodra hij terug is."
+  - De sensor van de paal zegt "Offline sinds 23:08", met `stand` offline en het attribuut `offline_sinds`.
+  - Niets naar de paal, dus ook geen "toch gestart". Eén logregel als hij offline gaat en één als hij terugkomt.
+  - Geen wekken, geen proefladen, geen tijdlijn, en geen accustand vragen.
+  - De herstart van eis 7 en "de auto is weg" (v0.208.0) wachten. Wat de paal laatst zei is van voor hij wegviel.
+- **Herladen, één keer per storing:** na `PAAL_OFFLINE_HERLADEN` (vijf minuten) de integratie van de sensor, met
+  dezelfde tijdslimiet als v0.166.0. Dat helpt als het aan de kant van Home Assistant hangt. Heeft de paal geen
+  stroom of geen netwerk, dan blijft hij offline. Tijdens het herladen is de sensor even onbeschikbaar; dat laat de
+  stand zoals hij was, en "sinds" blijft het moment dat hij echt offline ging.
+- **Eén melding** `PAAL_OFFLINE_MELDEN` (tien minuten) na het herladen: "Laadpaal is sinds 23:08 offline en komt niet
+  terug na herladen. Staat de automaat aan en heeft hij internet?" Zonder integratie om te herladen zonder "na
+  herladen". Alleen als de coach zonder de storing zou laden. Een automaat die bewust uit staat zonder auto die moet
+  laden, stoort niemand. Niet tussen 22:00 en 07:00 (`PAAL_OFFLINE_RUST`); wilde hij 's nachts laden, dan komt de
+  melding om 07:00. Een gewone melding, geen kritieke.
+- **Terug:** de sensor online staat in de lijst die de coach volgt (`_watch`), dus zodra hij aangaat komt er een
+  ronde, en de coach vergat wat hij het laatst stuurde (`_last`), dus hij schrijft meteen. "Laadpaal is weer online."
+  gaat alleen in de geschiedenis, en alleen als er herladen of gemeld was.
+- **Herstart:** sinds wanneer, of er herladen is, of het gemeld is en of hij 's nachts wilde laden staat in
+  `paal-offline:<paal>` in het geheugen. Na een herstart herlaadt hij dus niet nog eens en meldt hij niet twee keer.
+
+Proef 249 in test_coach.py:
+- online;
+- offline na twee minuten, herladen, de melding om 14:15;
+- terug;
+- zonder auto die moet laden;
+- de nacht;
+- twee herstarts;
+- knipperen;
+- onbekend;
+- het veld zelf;
+- een Alfen.
+
+In het virtuele huis `paal-offline` (overdag) en `paal-offline-nacht` (de melding om 07:00).
+
+## Klaar blijft klaar na een dip van de Equalizer (v0.209.0)
+
+In een klantwoning was een auto op 07-11-2026 om 04:38 klaar, op een geschatte 72%. Op 08-11 om 13:39 zette de
+Equalizer de paal op 0 A, en een Easee die `completed` is springt dan naar `awaiting_start`. Eerdere dips naar 6 A
+die dag lieten `completed` staan. De coach las alleen de status van nu en plande de beurt opnieuw. Hij wekte de auto
+om 20:00 en meldde om 20:20 als kritiek dat hij geen stroom afnam.
+
+Nu (`_klaar_blijft`, `KLAAR_BLIJFT`): meldde de paal deze beurt `completed`, en wacht hij daarna alleen weer
+(`awaiting_start`, `ready_to_charge`, de wachtstanden van de lastbewaking), dan is de auto nog klaar. Dat houdt op als:
+- de kabel eruit gaat, of de paal iets anders meldt, zoals een storing;
+- de auto zelf weer laadt (`charging`);
+- de coach de paal een keer opnieuw start (eis 7): meldt hij daarna weer klaar, dan geldt dat weer;
+- de bewoner iets kiest: Snel, een modus, een doel (`_klaar_vergeten`), of een andere auto of accustand
+  (`_klaar_keuze`).
+
+De coach schrijft bij een klare auto niets (`NO_WRITE_RULES`). Geeft de Equalizer daarna weer stroom en wil de auto nog
+iets, dan gaat de paal vanzelf laden en ziet de coach dat.
+
+Alleen met een eigen statussensor: wat de coach bij een Alfen zelf afleidt (`_status_afgeleid`) blijft zoals het was.
+
+In het geheugen als `paal-klaar:<paal>`, met het moment van de ene herstart erbij. Zonder dat moment startte een
+herstart van Home Assistant de paal nog een keer opnieuw, en dan was klaar weer weg.
+
+Proef 250 in test_coach.py:
+- de dip;
+- een herstart;
+- de auto die zelf weer laadt;
+- kabel eruit en erin;
+- Snel;
+- een nieuwe accustand;
+- een Alfen.
+
+In het virtuele huis `klaar-equalizer-dip`.
+
+## Neemt de paal de limiet niet aan, dan gaat de melding over de paal (v0.209.0)
+
+Dezelfde avond om 20:20: "neemt al 20 minuten geen stroom af ... trek de kabel eruit". De paal had toen sinds 19:50
+geen stroom. Zijn limiet bleef op 0 A staan terwijl de coach 16 en daarna 6 A schreef.
+
+Staat de teruggelezen limiet (`dynamic_limit`) bij die melding onder wat de coach aanbiedt (en onder `MIN_AMPS`), dan
+gaat de melding over de paal: "Laadpaal neemt al 20 minuten de stroom van de coach niet aan en blijft op 0 A staan.
+Tesla staat op 27%. Zo wordt 07:00 niet gehaald. Kijk of de paal stroom en internet heeft." Nog steeds kritiek. Zonder
+teruggelezen limiet, of als hij klopt, gaat de melding over de auto, zoals altijd.
+
+Proef 251 in test_coach.py.
