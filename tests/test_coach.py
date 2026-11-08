@@ -16199,6 +16199,214 @@ controle("het weer in Fahrenheit: 41 °F is 5 °C", abs((coach247c._airco_buiten
 hass247c.states.async_all = lambda domein: []
 controle("zonder weer: geen buitentemperatuur", coach247c._airco_buiten(ZONDER247) is None, "")
 
+print("=== 248. de paal meldt een auto, maar de auto zegt zelf dat hij weg is (v0.208.0) ===")
+# Een klantwoning op 07-11-2026: de Alfen bleef "auto aangesloten" melden nadat de Tesla om 15:38 wegreed
+# (kabel uit, 15:48 niet thuis). Om 02:20 kwam de kritieke melding dat hij geen stroom afnam, de coach
+# wekte hem elk uur, en om 02:00 nam hij de batterij over "want de laadpaal gaat laden".
+AUTO248 = {**LAADPAAL["cars"][0], "name": "Tesla", "soc_entity": "sensor.tesla_soc",
+           "wake_entity": "button.tesla_wek", "wake_mode": "hourly",
+           "location_entity": "device_tracker.tesla", "plug_entity": "binary_sensor.tesla_kabel"}
+PAAL248 = {**LAADPAAL, "cars": [AUTO248]}
+
+
+def stempel248(uur, minuut):
+    # Zoals het virtuele huis: de lokale tijd met UTC erop, want het harnas kent maar één klok.
+    return dt.datetime(2026, 11, 7, uur, minuut, tzinfo=dt.timezone.utc)
+
+
+def bouw248(locatie="not_home", kabel="off", soc="27", paal=PAAL248, waarden=None):
+    inst = instellingen(devices=[paal])
+    inst["strategy"]["schedules"][0]["window"]["done_by"] = "07:00"
+    hass, store, coach = bouw({**(waarden or huis(status="ready_to_charge", teruglevering=0.0, afname=1800.0)),
+                               "sensor.tesla_soc": soc}, inst)
+    if locatie:
+        hass.states.zet("device_tracker.tesla", locatie, last_updated=stempel248(15, 48))
+    if kabel:
+        hass.states.zet("binary_sensor.tesla_kabel", kabel, last_updated=stempel248(15, 38))
+    berichten = []
+
+    async def tell(bericht, kritiek=False, telefoon=True):
+        berichten.append((bericht, kritiek, telefoon))
+    coach._async_tell = tell
+    asyncio.run(coach._async_geheugen_laden())
+    return inst, hass, coach, berichten
+
+
+def nacht248(inst, coach, van, tot, paal=PAAL248):
+    uit = []
+    nu = van
+    while nu <= tot:
+        besluit, verstuurd = asyncio.run(ronde(coach, inst, nu, paal))
+        uit.append((nu, dict(besluit), list(verstuurd)))
+        nu += dt.timedelta(minutes=1)
+    return uit
+
+
+# 1. Ter vergelijking: de auto zegt thuis en kabel erin. Dan komt de kritieke melding zoals altijd.
+i248t, h248t, c248t, b248t = bouw248(locatie="home", kabel="on")
+t248 = nacht248(i248t, c248t, dt.datetime(2026, 11, 8, 4, 30), dt.datetime(2026, 11, 8, 5, 0))
+controle("thuis en kabel erin: de kritieke 'geen stroom af' zoals altijd",
+         [b for b in b248t if "geen stroom af" in b[0] and b[1]], f"{b248t}")
+
+# 2. Niet thuis en geen kabel in de auto: één gewone melding, geen kritiek, en het besluit zegt het.
+i248, h248, c248, b248 = bouw248()
+n248 = nacht248(i248, c248, dt.datetime(2026, 11, 8, 4, 30), dt.datetime(2026, 11, 8, 5, 0))
+print(f"  meldingen: {b248}")
+print(f"  besluit: {n248[-1][1]['rule']} {n248[-1][1]['amps']} A, {n248[-1][1]['reason']}")
+controle("geen kritieke melding over een auto die er niet is", not [b for b in b248 if b[1]], f"{b248}")
+controle("wel één gewone melding: niet thuis, en wat de bewoner kan doen",
+         len(b248) == 1 and "Laadpaal meldt een auto, maar Tesla is niet thuis." in b248[0][0]
+         and "kies die dan op de kaart" in b248[0][0] and b248[0][2] is True, f"{b248}")
+controle("het besluit zegt het erbij", "Tesla is niet thuis" in n248[-1][1]["reason"], f"{n248[-1][1]['reason']}")
+controle("de sturing van de paal blijft zoals hij was",
+         [(r[1]["rule"], r[1]["amps"]) for r in n248] == [(r[1]["rule"], r[1]["amps"]) for r in t248],
+         f"{[(r[1]['rule'], r[1]['amps']) for r in n248][:5]}")
+controle("zonder entiteit-id in de melding", "device_tracker" not in b248[0][0] if b248 else False, f"{b248}")
+
+# 3. Alleen de kabel: de auto is thuis, maar zegt dat er geen kabel in zit.
+i248k, h248k, c248k, b248k = bouw248(locatie="home", kabel="off")
+nacht248(i248k, c248k, dt.datetime(2026, 11, 8, 4, 30), dt.datetime(2026, 11, 8, 5, 0))
+controle("thuis zonder kabel: 'de kabel zit niet in', geen kritiek",
+         len(b248k) == 1 and "de kabel zit niet in Tesla" in b248k[0][0] and not b248k[0][1], f"{b248k}")
+
+# 4. Pas na tien minuten: een kabel die net uit ging telt nog niet.
+i248j, h248j, c248j, b248j = bouw248(locatie="home", kabel=None)
+asyncio.run(ronde(c248j, i248j, dt.datetime(2026, 11, 8, 4, 0), PAAL248))
+h248j.states.zet("binary_sensor.tesla_kabel", "off", last_updated=dt.datetime(2026, 11, 8, 4, 25, tzinfo=dt.timezone.utc))
+j248 = nacht248(i248j, c248j, dt.datetime(2026, 11, 8, 4, 30), dt.datetime(2026, 11, 8, 4, 40))
+eerst248 = next((r[0] for r in j248 if "kabel zit niet" in r[1]["reason"]), None)
+controle("de kabel 10 minuten uit: vanaf 04:35, niet eerder", eerst248 == dt.datetime(2026, 11, 8, 4, 35), f"{eerst248}")
+# En de paal moet de auto ook tien minuten melden: een gastauto die net ingeplugd is, is geen paal die hangt.
+i248p, h248p, c248p, b248p = bouw248(waarden=huis(status="disconnected", teruglevering=0.0, afname=1800.0))
+asyncio.run(ronde(c248p, i248p, dt.datetime(2026, 11, 8, 4, 29), PAAL248))
+h248p.states.zet("sensor.laadpaal_status", "ready_to_charge")
+p248 = nacht248(i248p, c248p, dt.datetime(2026, 11, 8, 4, 30), dt.datetime(2026, 11, 8, 4, 45))
+eerst248p = next((r[0] for r in p248 if "niet thuis" in r[1]["reason"]), None)
+controle("net ingeplugd terwijl de eigen auto al uren weg is: pas na tien minuten", eerst248p == dt.datetime(2026, 11, 8, 4, 40),
+         f"{eerst248p} {b248p}")
+
+# 5. Een gastauto laadt terwijl de eigen auto weg is: gewoon laden, geen melding meer, en het einde
+#    alleen in de geschiedenis.
+h248.states.zet("sensor.laadpaal_status", "charging")
+h248.states.zet("sensor.laadpaal_stroom", "13.5")
+h248.states.zet("sensor.laadpaal_vermogen", "3100")
+g248 = nacht248(i248, c248, dt.datetime(2026, 11, 8, 5, 1), dt.datetime(2026, 11, 8, 5, 5))
+print(f"  gastauto: {[(r[1]['rule'], r[1]['amps']) for r in g248]} {b248[1:]}")
+controle("de andere auto laadt gewoon door", all(r[1]["amps"] > 0 for r in g248), f"{g248}")
+controle("'laadt weer' alleen in de geschiedenis",
+         b248[1:] == [("Laadpaal laadt weer.", False, False)], f"{b248[1:]}")
+controle("en het besluit zegt niets meer over een auto die weg is",
+         "niet thuis" not in g248[-1][1]["reason"], f"{g248[-1][1]['reason']}")
+# De gastauto is vol en de paal meldt hem nog: geen melding, want de eigen auto zei het al voor de gast laadde.
+h248.states.zet("sensor.laadpaal_status", "ready_to_charge")
+h248.states.zet("sensor.laadpaal_stroom", "0.0")
+h248.states.zet("sensor.laadpaal_vermogen", "0")
+v248 = nacht248(i248, c248, dt.datetime(2026, 11, 8, 5, 6), dt.datetime(2026, 11, 8, 5, 30))
+controle("een gastauto die vol is: geen nieuwe melding over de eigen auto", b248[2:] == [] and "dev-laadpaal" not in c248._weg,
+         f"{b248[2:]}")
+
+# 6. Elk uur wekken: niet als de auto zegt dat hij weg is.
+def wek248(locatie, kabel):
+    inst, hass, coach, _b = bouw248(locatie=locatie, kabel=kabel, soc="unavailable")
+    rondes = nacht248(inst, coach, dt.datetime(2026, 11, 7, 18, 50), dt.datetime(2026, 11, 7, 21, 0))
+    return [r[0] for r in rondes for d in r[2] if d[1] == "press" and d[2].get("entity_id") == "button.tesla_wek"]
+
+
+weg248w, thuis248w = wek248("not_home", "off"), wek248("home", "on")
+print(f"  gewekt: weg {weg248w}, thuis {thuis248w}")
+controle("thuis wordt hij elk uur gewekt (de vergelijking)", len(thuis248w) >= 2, f"{thuis248w}")
+controle("weg: geen enkele keer", weg248w == [], f"{weg248w}")
+
+# 7. De batterij en de boiler: een paal waarvan de auto weg is zegt niets toe.
+def toezegging248(locatie, kabel):
+    _i, hass, coach, _b = bouw248(locatie=locatie, kabel=kabel)
+    hass.data["domotiapp_coach"]["coach"] = coach
+    # De paal meldt de auto al een uur, zoals bij de klant (sinds 05:45 de dag ervoor).
+    coach._paal_auto_sinds["dev-laadpaal"] = dt.datetime(2026, 11, 8, 3, 30)
+    # De eerste ronde: dan vraagt de paal stroom die de auto nog niet trekt, en die toezegging
+    # nam bij de klant om 02:00:11 de batterij over. Na twee ronden zonder afname valt hij al weg.
+    asyncio.run(coach._round(dt.datetime(2026, 11, 8, 4, 30)))
+    return dict(coach._toezeggingen.get("dev-laadpaal") or {}), dict(coach._weg)
+
+
+thuis248z, _w = toezegging248("home", "on")
+weg248z, w248z = toezegging248("not_home", "off")
+print(f"  toezegging thuis {thuis248z}, weg {weg248z} {w248z}")
+controle("thuis zegt de paal in de eerste ronde zijn stroom toe (de vergelijking)", (thuis248z.get("amps") or 0) > 0, f"{thuis248z}")
+controle("weg: niets", w248z.get("dev-laadpaal") == "weg" and weg248z.get("amps") == 0.0, f"{weg248z}")
+controle("ook niet voor een groep zonder meter", weg248z.get("totaal") == 0.0, f"{weg248z}")
+
+# 8. Een herstart midden in de situatie: geen tweede melding, en geen vals "weer thuis" in de tien minuten
+#    waarin `last_changed` na de herstart opnieuw begint.
+i248h, h248h, c248h, b248h = bouw248()
+nacht248(i248h, c248h, dt.datetime(2026, 11, 8, 2, 0), dt.datetime(2026, 11, 8, 2, 12))
+c248h2 = herstart213(h248h)
+b248h2 = []
+
+
+async def tell248h(bericht, kritiek=False, telefoon=True):
+    b248h2.append((bericht, kritiek, telefoon))
+c248h2._async_tell = tell248h
+asyncio.run(c248h2._async_geheugen_laden())
+na248 = dt.datetime(2026, 11, 8, 4, 0)
+for entiteit in ("device_tracker.tesla", "binary_sensor.tesla_kabel"):
+    h248h.states.zet(entiteit, h248h.states.get(entiteit).state, last_updated=na248.replace(tzinfo=dt.timezone.utc))
+h248 = nacht248(i248h, c248h2, na248, na248 + dt.timedelta(minutes=40))
+print(f"  voor de herstart {b248h}, erna {b248h2}")
+controle("voor de herstart één melding", len(b248h) == 1, f"{b248h}")
+controle("na de herstart geen tweede, geen kritiek en geen 'weer thuis'", b248h2 == [], f"{b248h2}")
+controle("en na tien minuten zegt het besluit het weer", "niet thuis" in h248[-1][1]["reason"], f"{h248[-1][1]['reason']}")
+h248h.states.zet("device_tracker.tesla", "home", last_updated=(na248 + dt.timedelta(minutes=41)).replace(tzinfo=dt.timezone.utc))
+h248h.states.zet("binary_sensor.tesla_kabel", "on", last_updated=(na248 + dt.timedelta(minutes=41)).replace(tzinfo=dt.timezone.utc))
+nacht248(i248h, c248h2, na248 + dt.timedelta(minutes=41), na248 + dt.timedelta(minutes=42))
+controle("komt hij thuis, dan alleen in de geschiedenis", b248h2 == [("Tesla is weer thuis.", False, False)], f"{b248h2}")
+nacht248(i248h, c248h2, na248 + dt.timedelta(minutes=43), na248 + dt.timedelta(minutes=55))
+controle("en 'neemt geen stroom af' telt pas vanaf dat hij thuis is, niet over de tijd dat hij weg was",
+         not [b for b in b248h2 if "geen stroom af" in b[0]], f"{b248h2}")
+
+# 9. Een auto zonder locatie of kabelsensor: alles zoals altijd.
+AUTO248z = {k: v for k, v in AUTO248.items() if k not in ("location_entity", "plug_entity")}
+i248o, h248o, c248o, b248o = bouw248(paal={**LAADPAAL, "cars": [AUTO248z]})
+nacht248(i248o, c248o, dt.datetime(2026, 11, 8, 4, 30), dt.datetime(2026, 11, 8, 5, 0), {**LAADPAAL, "cars": [AUTO248z]})
+controle("zonder die velden (en zonder register): de kritieke melding zoals altijd",
+         [b for b in b248o if "geen stroom af" in b[0] and b[1]] and not c248o._weg, f"{b248o}")
+
+# 10. Leeg veld: de device_tracker op hetzelfde apparaat als de accustand, uit het register.
+register248 = types.ModuleType("homeassistant.helpers.entity_registry")
+
+
+class _Rij248:
+    def __init__(self, entity_id, device_id):
+        self.entity_id, self.device_id = entity_id, device_id
+
+
+_rijen248 = [_Rij248("sensor.tesla_soc", "tesla"), _Rij248("device_tracker.tesla", "tesla"),
+             _Rij248("device_tracker.telefoon", "telefoon")]
+register248.async_get = lambda hass: types.SimpleNamespace(
+    async_get=lambda eid: next((r for r in _rijen248 if r.entity_id == eid), None))
+register248.async_entries_for_device = lambda reg, device_id: [r for r in _rijen248 if r.device_id == device_id]
+sys.modules["homeassistant.helpers.entity_registry"] = register248
+try:
+    i248r, h248r, c248r, b248r = bouw248(paal={**LAADPAAL, "cars": [AUTO248z]})
+    controle("de locatie gevonden via het apparaat van de accustand",
+             c248r._auto_locatie(AUTO248z) == "device_tracker.tesla", f"{c248r._auto_locatie(AUTO248z)}")
+    nacht248(i248r, c248r, dt.datetime(2026, 11, 8, 4, 30), dt.datetime(2026, 11, 8, 5, 0), {**LAADPAAL, "cars": [AUTO248z]})
+    controle("en daarmee dezelfde gewone melding", len(b248r) == 1 and "niet thuis" in b248r[0][0] and not b248r[0][1],
+             f"{b248r}")
+finally:
+    del sys.modules["homeassistant.helpers.entity_registry"]
+
+# 11. Een Alfen: de paalsturing kent geen merk, de melding dus ook niet.
+ALFEN248 = {**ALFEN, "cars": [AUTO248]}
+i248a, h248a, c248a, b248a = bouw248(paal=ALFEN248, waarden=huis90(aangesloten="on", laadt="off", modus="B1",
+                                                                     teruglevering=0.0, afname=1800.0))
+for minuut in range(30, 60):
+    h248a.services.verstuurd.clear()
+    asyncio.run(c248a._one(dt.datetime(2026, 11, 8, 4, minuut), i248a, ALFEN248, "steer"))
+print(f"  Alfen: {b248a} {c248a.state.get('dev-alfen', {}).get('rule')}")
+controle("Alfen: dezelfde gewone melding en geen kritiek",
+         len(b248a) == 1 and "niet thuis" in b248a[0][0] and not [b for b in b248a if b[1]], f"{b248a}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

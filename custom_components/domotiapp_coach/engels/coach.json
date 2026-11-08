@@ -285,5 +285,12 @@
   "{naam} levert niets terwijl het huis van het net haalt. Kijk in de app van de batterij of hij in storing staat of een andere stand heeft.": "{naam} delivers nothing while the house draws from the grid. Check in the battery's app whether it has a fault or is in another mode.",
   "Hij reageert niet op de coach. Kijk of de integratie werkt.": "It does not respond to the coach. Check whether the integration works.",
   "{naam} reageert niet op de coach. Kijk of de integratie werkt.": "{naam} does not respond to the coach. Check whether the integration works.",
-  "{naam} reageert weer op de coach.": "{naam} responds to the coach again."
+  "{naam} reageert weer op de coach.": "{naam} responds to the coach again.",
+  "{paal} meldt een auto, maar {auto} is niet thuis.": "{paal} reports a car, but {auto} is not at home.",
+  "{paal} meldt een auto, maar de kabel zit niet in {auto}.": "{paal} reports a car, but the cable is not in {auto}.",
+  "Hangt er een andere auto aan, kies die dan op de kaart. Anders hangt de paal: haal de kabel eruit en doe hem er weer in.": "If another car is connected, choose it on the card. Otherwise the charger is stuck: unplug the cable and plug it back in.",
+  "{naam} meldt geen auto meer.": "{naam} no longer reports a car.",
+  "{naam} laadt weer.": "{naam} is charging again.",
+  "{auto} is weer thuis.": "{auto} is home again.",
+  "De kabel zit weer in {auto}.": "The cable is back in {auto}."
 }

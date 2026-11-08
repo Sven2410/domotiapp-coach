@@ -203,8 +203,10 @@ for naam, vl in V.items():
     # Een auto die al vol was toen de proef begon heeft geen beurt en dus geen
     # verslag; dat zijn de vaatwasserscenario's.
     if vl.klaar_op is not None and s.auto.laadgrens >= 100 and s.auto.meldt_soc and vl.geladen_kwh > 0.1:
-        controle(f"{naam}: precies één keer 'is vol' gemeld",
-                 len(meldingen(vl, "is vol")) == 1, f"{meldingen(vl, 'is vol')}")
+        # Een gastauto aan dezelfde paal (v0.208.0) is een eigen beurt, met een eigen verslag.
+        gasten = sum(1 for g in s.gebeurtenissen if g[1] == "gast_in")
+        controle(f"{naam}: precies één keer 'is vol' gemeld per auto",
+                 len(meldingen(vl, "is vol")) == 1 + gasten, f"{meldingen(vl, 'is vol')}")
     # De eigenaar op 04-09-2026: "De eindtijd is heel belangrijk. Een uur daarvoor
     # moet hij altijd klaar zijn." Vijf minuten speling voor de aanloop.
     # `afbouw-krap` is met opzet de beurt waarin de coach nog niet weet dat de
@@ -2842,6 +2844,30 @@ if ((zonder_zo := v("growatt-zon-onzeker-zonder")) and (met_zo := v("growatt-zon
              f"€{met_zo.bat_kosten_met:.3f} tegen €{zonder_zo.bat_kosten_met:.3f}")
     controle("zon onzeker: zat de verwachting te hoog, dan laadt hij niet minder dan zonder",
              abs(_nacht_net(hoog_zo) - _nacht_net(zonder_zo)) < 0.01, f"{_nacht_net(hoog_zo):.2f} tegen {_nacht_net(zonder_zo):.2f}")
+
+# De paal meldt een auto die weg is (v0.208.0). Een Alfen in een klantwoning op 07-11-2026 bleef "auto
+# aangesloten" melden nadat de Tesla wegreed; om 02:20 kwam de kritieke melding dat hij geen stroom afnam.
+if (weg_a := v("alfen-auto-weg")) and (gast_a := v("alfen-auto-weg-gast")):
+    print(f"  auto weg: {weg_a.geladen_kwh:.1f} kWh, meldingen {[m for _, m in weg_a.meldingen]}")
+    print(f"  gastauto: {gast_a.geladen_kwh:.1f} kWh, meldingen {[m for _, m in gast_a.meldingen]}")
+    controle("alfen-auto-weg: geen kritieke 'geen stroom af' over een auto die er niet is",
+             not meldingen(weg_a, "geen stroom af"), f"{meldingen(weg_a, 'geen stroom af')}")
+    controle("alfen-auto-weg: één gewone melding dat hij niet thuis is", len(meldingen(weg_a, "is niet thuis")) == 1,
+             f"{meldingen(weg_a, 'is niet thuis')}")
+    na_weg = [r for r in weg_a.regels if r.tijd >= weg_a.regels[0].tijd.replace(hour=15, minute=40)]
+    controle("alfen-auto-weg: na het wegrijden trekt de paal niets", na_weg and all(r.paal_w < 50 for r in na_weg),
+             f"{max((r.paal_w for r in na_weg), default=None)}")
+    controle("alfen-auto-weg: het besluit zegt waarom", any("is niet thuis" in r.reden for r in na_weg), "")
+    controle("alfen-auto-weg: de paal niet opnieuw gestart voor een auto die wegreed",
+             not meldingen(weg_a, "en dat is niet vol"), f"{meldingen(weg_a, 'en dat is niet vol')}")
+    controle("alfen-auto-weg-gast: de gastauto laadt", gast_a.geladen_kwh > weg_a.geladen_kwh + 5,
+             f"{gast_a.geladen_kwh:.1f} tegen {weg_a.geladen_kwh:.1f}")
+    # Twee keer "niet thuis": om 15:48 de paal die hangt, en om 22:10 de gastauto die tien minuten op het
+    # goedkope uur wacht terwijl op de kaart de eigen auto gekozen is. Dat is wat de melding zegt: kies hem.
+    controle("alfen-auto-weg-gast: één melding per aansluiting, geen kritiek, 'laadt weer' niet op de telefoon",
+             [t.strftime("%H:%M") for t, m in gast_a.meldingen if "is niet thuis" in m] == ["15:48", "22:10"]
+             and not meldingen(gast_a, "laadt weer") and not meldingen(gast_a, "geen stroom af"),
+             f"{[(t.strftime('%H:%M'), m[:40]) for t, m in gast_a.meldingen]}")
 
 print(f"\n{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

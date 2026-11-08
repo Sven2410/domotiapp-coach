@@ -1438,6 +1438,16 @@ class DacViewDevices extends DacEditorElement {
             <dac-entity-picker data-car-status="${index}:${slot}"></dac-entity-picker>
             <span class="sub">${t("Zegt de auto in Home Assistant of hij laadt of in storing staat, wijs die sensor dan aan. Meldt hij een storing terwijl hij wacht, dan start de coach het laden even om hem eruit te halen.")}</span>
           </div>
+          <div class="row">
+            <label>${t("Locatie (optioneel)")}</label>
+            <dac-entity-picker data-car-location="${index}:${slot}"></dac-entity-picker>
+            <span class="sub">${t("Zegt de auto waar hij is, dan gelooft de coach een paal niet die een auto meldt terwijl de auto niet thuis is. Leeg: de locatie van hetzelfde apparaat als het accupercentage.")}</span>
+          </div>
+          <div class="row">
+            <label>${t("Kabel in de auto (optioneel)")}</label>
+            <dac-entity-picker data-car-plug="${index}:${slot}"></dac-entity-picker>
+            <span class="sub">${t("Zegt de auto zelf of er een kabel in zit, wijs die aan. Dan gelooft de coach een paal niet die een auto meldt terwijl er geen kabel in de auto zit.")}</span>
+          </div>
           <label class="check" for="proef-${index}-${slot}">
             <input type="checkbox" id="proef-${index}-${slot}" data-car-proef="${index}:${slot}"
                    ${car.proefladen === false ? "" : "checked"}>
@@ -1656,6 +1666,30 @@ class DacViewDevices extends DacEditorElement {
       });
     }
 
+    for (const picker of list.querySelectorAll("[data-car-location]")) {
+      const [index, slot] = picker.dataset.carLocation.split(":").map(Number);
+      picker.filter = "all";
+      picker.placeholder = t("Zoek de locatie van de auto…");
+      picker.stateFeed = this.feed_;
+      picker.value = this.draft_.devices[index].cars[slot].location_entity ?? "";
+      picker.addEventListener("dac-entity-change", (ev) => {
+        this.draft_.devices[index].cars[slot].location_entity = ev.detail.value;
+        this.syncSaveBar_();
+      });
+    }
+
+    for (const picker of list.querySelectorAll("[data-car-plug]")) {
+      const [index, slot] = picker.dataset.carPlug.split(":").map(Number);
+      picker.filter = "all";
+      picker.placeholder = t("Zoek de kabelsensor van de auto…");
+      picker.stateFeed = this.feed_;
+      picker.value = this.draft_.devices[index].cars[slot].plug_entity ?? "";
+      picker.addEventListener("dac-entity-change", (ev) => {
+        this.draft_.devices[index].cars[slot].plug_entity = ev.detail.value;
+        this.syncSaveBar_();
+      });
+    }
+
     for (const box of list.querySelectorAll("[data-car-proef]")) {
       const [index, slot] = box.dataset.carProef.split(":").map(Number);
       box.addEventListener("change", () => {
@@ -1702,6 +1736,8 @@ class DacViewDevices extends DacEditorElement {
           wake_entity: "",
           wake_mode: "manual",
           status_entity: "",
+          location_entity: "",
+          plug_entity: "",
           proefladen: true,
         });
         this.paintDevices_();
