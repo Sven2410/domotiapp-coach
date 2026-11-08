@@ -293,6 +293,8 @@ class LaadpaalCoachSensor(CoachEntiteit, SensorEntity):
             "taal": taal(),
             "type": "laadpaal",
             "stand": paal_stand(st),
+            # Sinds wanneer de paal offline is, als `stand` offline is (v0.209.0).
+            "offline_sinds": met_zone(st.get("offline_sinds")),
             "rule": st.get("rule") or "",
             "amps": st.get("amps"),
             "reason": st.get("reason") or "",

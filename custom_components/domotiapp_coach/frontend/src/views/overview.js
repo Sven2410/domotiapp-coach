@@ -2173,6 +2173,8 @@ class DacViewOverview extends DacElement {
     const batterij = besluit.kind === "batterij";
     const kan =
       besluit.rule !== "disconnected"
+      // Een paal die offline is (v0.209.0) luistert niet.
+      && besluit.rule !== "offline"
       && besluit.level !== "advise"
       && besluit.kind !== "programma"
       && besluit.kind !== "boiler"
@@ -2299,7 +2301,7 @@ class DacViewOverview extends DacElement {
     for (const device of this.lastDevices_ ?? []) {
       const besluit = this.coach_?.[device.id];
       if (!besluit || !besluit.applied) continue;
-      if (besluit.rule === "disconnected" || besluit.rule === "complete") continue;
+      if (besluit.rule === "disconnected" || besluit.rule === "complete" || besluit.rule === "offline") continue;
       if (besluit.paused) continue;
       // Een apparaat met een programma (de vaatwasser) telt alleen zolang hij
       // draait of nu start, en een boiler alleen terwijl hij werkelijk
@@ -3154,7 +3156,7 @@ class DacViewOverview extends DacElement {
       const socPick = this.$(`[data-soc-pick="${slot}"]`);
       const gekozen = cars.find((car) => car.id === (this.activeCar_(device.id) ?? cars[0]?.id));
       const oordeel = this.coach_?.[device.id];
-      const hangt = Boolean(oordeel) && oordeel.rule !== "disconnected";
+      const hangt = Boolean(oordeel) && oordeel.rule !== "disconnected" && oordeel.rule !== "offline";
       socPick.hidden = !(hangt && vraagAccustand(gekozen, this.feed_, device));
       if (!socPick.hidden) {
         const opgave = (this.settings_?.car_soc ?? []).find((row) => row?.device === device.id);

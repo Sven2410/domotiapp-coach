@@ -1859,6 +1859,31 @@ alfen_auto_weg_gast = alfen_auto_weg.kopie(
     uitleg="alfen-auto-weg, en om 21:50 gaat de kabel eruit en om 22:00 hangt er een gastauto op 40% aan",
     gebeurtenissen=[("15:38", "auto_weg", 27), ("21:50", "kabel_uit", None), ("22:00", "gast_in", 40)],
 )
+# De automaat van de paal gaat uit (v0.209.0). Een Easee in een klantwoning op 08-11-2026: de integratie bleef
+# geladen met de laatste waarden, alleen de sensor online ging uit, en de coach bleef "Laadt" zeggen en elke
+# minuut een start sturen die nergens aankwam.
+paal_offline = vast_zonnig.kopie(
+    naam="paal-offline",
+    uitleg="vast-zonnig; om 11:00 gaat de automaat van de paal uit, om 15:00 weer aan",
+    gebeurtenissen=[("11:00", "automaat", False), ("15:00", "automaat", True)],
+)
+paal_offline_nacht = vast_bewolkt.kopie(
+    naam="paal-offline-nacht",
+    uitleg="vast-bewolkt; om 21:50 gaat de automaat van de paal uit, de volgende ochtend om 08:00 weer aan",
+    duur_uren=28.0,
+    gebeurtenissen=[("21:50", "automaat", False), ("+1 08:00", "automaat", True)],
+)
+# Klaar blijft klaar (v0.209.0). In een klantwoning was een auto op 07-11-2026 om 04:38 klaar op een geschatte
+# 72%; op 08-11 om 13:39 zette de Equalizer de paal op 0 A, de Easee sprong naar awaiting_start, en de coach
+# plande opnieuw, wekte om 20:00 en meldde om 20:20 als kritiek dat de auto geen stroom afnam.
+klaar_equalizer = vast_zonnig.kopie(
+    naam="klaar-equalizer-dip",
+    uitleg="geen accustand uit de auto, 30% opgegeven, de auto stopt zelf op 80%; de volgende dag om 13:39 "
+           "zet de Equalizer de paal op 0 A en zegt de paal awaiting_start",
+    auto=replace(BUS, meldt_soc=False, laadgrens=80.0),
+    duur_uren=40.0,
+    gebeurtenissen=[("07:30", "soc_opgeven", 30), ("+1 13:39", "equalizer_nul", None)],
+)
 # Een paal en een batterij op dezelfde kast (v0.164.0). In een klantwoning plande de batterij op 26-10-2026
 # 2,5 kW van het net in de uren dat de paal er 13 A per fase op zette, op een kast van 3x16 A. De regelaar
 # hield de zekering heel, maar het uurplan rekende met goedkope kWh die niet kwamen.
@@ -1887,7 +1912,7 @@ groep_paal_batterij_zonder_meter = groep_paal_batterij.kopie(
 )
 
 ALLE = [
-    alfen_auto_weg, alfen_auto_weg_gast,
+    alfen_auto_weg, alfen_auto_weg_gast, paal_offline, paal_offline_nacht, klaar_equalizer,
     groep_paal_batterij, groep_paal_batterij_los, groep_paal_batterij_zonder_meter,
     alfen_zonnig, alfen_dyn, alfen_paal_weg, klant_paal_weg, alfen_doel_80, alfen_laadgrens,
     alfen_drie_zon, alfen_fasen_zon, alfen_fasen_wisselend, alfen_fasen_helder, alfen_drie_dyn, alfen_fasen_dyn,

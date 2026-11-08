@@ -292,5 +292,11 @@
   "{naam} meldt geen auto meer.": "{naam} no longer reports a car.",
   "{naam} laadt weer.": "{naam} is charging again.",
   "{auto} is weer thuis.": "{auto} is home again.",
-  "De kabel zit weer in {auto}.": "The cable is back in {auto}."
+  "De kabel zit weer in {auto}.": "The cable is back in {auto}.",
+  "{naam} is offline sinds {tijd}. De coach stuurt hem weer zodra hij terug is.": "{naam} has been offline since {tijd}. The coach steers it again as soon as it is back.",
+  "{naam} is sinds {tijd} offline en komt niet terug na herladen. Staat de automaat aan en heeft hij internet?": "{naam} has been offline since {tijd} and did not come back after a reload. Is its circuit breaker on, and does it have internet?",
+  "{naam} is weer online.": "{naam} is online again.",
+  "{naam} is sinds {tijd} offline. Staat de automaat aan en heeft hij internet?": "{naam} has been offline since {tijd}. Is its circuit breaker on, and does it have internet?",
+  "{auto} staat op {pct}%.": "{auto} is at {pct}%.",
+  "{paal} neemt al {minuten} minuten de stroom van de coach niet aan en blijft op {limiet} A staan.{stand} Zo wordt {klok} niet gehaald. Kijk of de paal stroom en internet heeft.": "{paal} has not accepted the coach's current for {minuten} minutes and stays at {limiet} A.{stand} {klok} will not be met this way. Check whether the charger has power and internet."
 }
