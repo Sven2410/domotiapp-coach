@@ -124,6 +124,12 @@ _CAR = _schema(
         # terwijl de auto wacht, dan haalt de coach hem eruit met een proef;
         # zie `_auto_storing` in coach.py.
         vol.Optional("status_entity", default=""): _ENTITY,
+        # Waar de auto zegt dat hij is, en of er volgens hemzelf een kabel in zit (v0.208.0). Zegt hij
+        # tien minuten dat hij weg is terwijl de paal een auto meldt, dan gelooft de coach de paal niet
+        # meer; zie `_auto_zegt` in coach.py. Leeg is de locatie de device_tracker op het apparaat van
+        # de accustand.
+        vol.Optional("location_entity", default=""): _ENTITY,
+        vol.Optional("plug_entity", default=""): _ENTITY,
         # Bij het inpluggen eerst even laden om te zien of de auto stroom
         # aanneemt (v0.153.0). De eigenaar op 23-10-2026: per auto in te stellen.
         vol.Optional("proefladen", default=True): bool,

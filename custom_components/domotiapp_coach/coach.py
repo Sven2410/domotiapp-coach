@@ -782,11 +782,19 @@ FASEMETING_RONDEN = 3
 FASE_BEURTEN = 2
 
 # Hoe lang de coach stroom aanbiedt aan een auto die niets afneemt voor hij er
-# iets over zegt, en alleen als de klaar-tijd erdoor in gevaar komt. Bij Van den
-# Dam gaf de Ford er op 30-08-2026 om 04:34 de brui aan; het eerste bericht
+# iets over zegt, en alleen als de klaar-tijd erdoor in gevaar komt. In een
+# klantwoning gaf de Ford er op 30-08-2026 om 04:34 de brui aan; het eerste bericht
 # daarover kwam om 07:00, toen de klaar-tijd al voorbij was. Twintig minuten is
 # ruim langer dan elke auto nodig heeft om wakker te worden.
 STIL_AANBOD = timedelta(minutes=20)
+
+# Zo lang moet de auto zelf zeggen dat hij niet thuis is, of dat er geen kabel in
+# hem zit, voor de coach een paal die een auto meldt niet meer gelooft (v0.208.0,
+# `_auto_zegt`). In een klantwoning op 07-11-2026 bleef een Alfen "auto aangesloten"
+# melden nadat de auto om 15:38 wegreed, en om 02:20 kwam de kritieke melding dat
+# hij geen stroom afnam. Tien minuten: lang genoeg voor een kabel die er even uit
+# gaat of een locatie die bij het wegrijden nog bijwerkt.
+AUTO_WEG_NA = timedelta(minutes=10)
 
 # Hoe vaak het huisverbruik en de zonverwachting opnieuw worden opgehaald. Het
 # eerste is een som over dagen en verandert niet binnen een uur; het tweede komt
@@ -2065,6 +2073,22 @@ class ChargerCoach:
         # auto doet niets". Een tijdstip en geen teller: een ronde is niet altijd
         # een minuut, want een statuswissel van de paal start er ook een.
         self._asking_since: dict[str, datetime] = {}
+        # Laadpunten die een auto melden terwijl de auto zelf al `AUTO_WEG_NA` zegt
+        # dat hij niet thuis is ("weg") of dat er geen kabel in zit ("kabel"), en
+        # waarvoor de melding al ging (v0.208.0). Het tweede overleeft een herstart
+        # (`auto-weg:<paal>` in het geheugen).
+        self._weg: dict[str, str] = {}
+        self._weg_gemeld: dict[str, str] = {}
+        # Wanneer de auto weer bleek te zijn waar de paal zei: daarvoor telt "neemt geen stroom af" niet.
+        self._weg_eind: dict[str, datetime] = {}
+        # Wat de auto nu zegt, ook korter dan `AUTO_WEG_NA` ("weg", "kabel"), en sinds wanneer de paal
+        # onafgebroken een auto meldt. Een gastauto die net ingeplugd is krijgt zo geen melding.
+        self._weg_nu: dict[str, str] = {}
+        self._paal_auto_sinds: dict[str, datetime] = {}
+        # Wanneer de paal in deze aansluiting voor het laatst laadde (`paal-laadde:<paal>` in het geheugen).
+        # Zei de auto al dat hij weg was vóór dat moment, dan hing er sindsdien een andere auto aan.
+        self._paal_laadde: dict[str, datetime] = {}
+        self._locatie_van: dict[str, str | None] = {}
         # Laadpunten waarvan de klaar-tijd verstreken is terwijl de auto niet vol
         # was. Die laden door tot ze vol zijn, want vol worden weegt zwaarder dan
         # goedkoop laden. Vervalt zodra de auto vol is of de kabel eruit gaat.
@@ -2547,6 +2571,143 @@ class ChargerCoach:
         _LOGGER.info("%s: %s gewekt om zijn accustand te horen", device_id, profile.get("name") or "de auto")
         return True
 
+    def _auto_locatie(self, profile: dict[str, Any]) -> str | None:
+        """Waar de auto zegt dat hij is: het veld in zijn profiel, of de `device_tracker` op hetzelfde apparaat
+        als zijn accustand (v0.208.0). Zo werkt het bij een Tesla of een Ford zonder dat iemand iets invult."""
+        eigen = str(profile.get("location_entity") or "").strip()
+        if eigen:
+            return eigen
+        soc = str(profile.get("soc_entity") or "").strip()
+        if not soc:
+            return None
+        if soc not in self._locatie_van:
+            gevonden = None
+            try:
+                from homeassistant.helpers import entity_registry as er
+
+                register = er.async_get(self.hass)
+                rij = register.async_get(soc)
+                if rij is not None and rij.device_id:
+                    gevonden = next(
+                        (r.entity_id for r in er.async_entries_for_device(register, rij.device_id)
+                         if r.entity_id.startswith("device_tracker.")),
+                        None,
+                    )
+            except Exception:  # noqa: BLE001 - zonder register geen locatie, en dan alles zoals altijd
+                gevonden = None
+            self._locatie_van[soc] = gevonden
+        return self._locatie_van[soc]
+
+    def _auto_zegt(
+        self, profile: dict[str, Any] | None, now: datetime, na: datetime | None = None
+    ) -> tuple[str | None, str | None]:
+        """Of de auto zelf zegt dat hij niet aan de paal kan hangen (v0.208.0).
+
+        Geeft de soort ("weg" of "kabel") als hij dat al `AUTO_WEG_NA` zegt, en wat hij nu zegt.
+        "weg": zijn locatie is iets anders dan thuis (`not_home` of een zone). "kabel": zijn eigen
+        kabelsensor staat uit. Onbekend of onbeschikbaar telt niet, en een auto zonder die sensoren
+        zegt niets: dan gaat alles zoals altijd. Het tweede is er voor een herstart: dan begint
+        `last_changed` opnieuw, en mag wat al gemeld was niet als "weer thuis" tellen.
+        """
+        if not profile:
+            return None, None
+        zegt: str | None = None
+        # `na`: wanneer de paal voor het laatst laadde. Zegt de auto het al van daarvoor, dan laadde er
+        # sindsdien een andere auto (een gast die vol is), en dan zegt het niets over de paal.
+        for soort, entiteit, weg in (
+            ("weg", self._auto_locatie(profile), lambda staat: staat != "home"),
+            ("kabel", str(profile.get("plug_entity") or "").strip() or None, lambda staat: staat == "off"),
+        ):
+            state = self.hass.states.get(entiteit) if entiteit else None
+            if state is None or state.state in ("unknown", "unavailable", "") or not weg(state.state):
+                continue
+            sinds = self._stekker_weg_sinds(entiteit, now)
+            if na is not None and sinds <= na:
+                continue
+            zegt = zegt or soort
+            if _tussen(sinds, now) >= AUTO_WEG_NA:
+                return soort, soort
+        return None, zegt
+
+    async def _async_auto_weg(
+        self, now: datetime, settings: dict[str, Any], device: dict[str, Any], car: Car, charger: Charger
+    ) -> None:
+        """Een paal die een auto meldt terwijl de auto zelf zegt dat hij weg is: één gewone melding (v0.208.0).
+
+        In plaats van de kritieke "neemt geen stroom af" midden in de nacht, die de bewoner niets laat doen:
+        er zit geen kabel in de auto. De sturing van de paal blijft zoals altijd, want er kan een andere auto
+        aan hangen; laadt die, dan is er niets aan de hand. Eén keer per keer dat het gebeurt, en het einde
+        alleen in de geschiedenis.
+        """
+        device_id = device.get("id", "")
+        naam = device.get("name") or t("de laadpaal")
+        if charger.charging:
+            self._paal_laadde[device_id] = now
+            self._onthoud(f"paal-laadde:{device_id}", {"om": _naar_geheugen(now)})
+        elif not charger.connected and self._paal_laadde.pop(device_id, None) is not None:
+            self._onthoud(f"paal-laadde:{device_id}", None, meteen=True)
+        soort, zegt = (
+            self._auto_zegt(self._chosen_car(settings, device)[1], now, self._paal_laadde.get(device_id))
+            if charger.connected and not charger.charging
+            else (None, None)
+        )
+        if charger.connected:
+            self._paal_auto_sinds.setdefault(device_id, now)
+        else:
+            self._paal_auto_sinds.pop(device_id, None)
+        # Wat de auto nu zegt, ook van voor de paal laadde: een auto die zegt dat hij weg is krijgt geen
+        # kritieke melding en geen herstart van de paal, ook niet als er een gast aan hing die vol is.
+        ruw = (
+            self._auto_zegt(self._chosen_car(settings, device)[1], now)[1]
+            if charger.connected and not charger.charging else None
+        )
+        if ruw:
+            self._weg_nu[device_id] = ruw
+        else:
+            self._weg_nu.pop(device_id, None)
+        # En de paal moet die auto ook al zo lang melden: een gastauto die net ingeplugd is en zo gaat
+        # laden, terwijl de eigen auto weg is, is geen paal die hangt.
+        if soort and _tussen(self._paal_auto_sinds.get(device_id, now), now) < AUTO_WEG_NA:
+            soort = None
+        if soort:
+            self._weg[device_id] = soort
+        else:
+            self._weg.pop(device_id, None)
+        gemeld = self._weg_gemeld.get(device_id)
+        if soort and gemeld is None:
+            self._weg_gemeld[device_id] = soort
+            self._onthoud(f"auto-weg:{device_id}", {"soort": soort}, meteen=True)
+            await self._async_tell(
+                self._weg_zin(soort, naam, car) + " " + t(
+                    "Hangt er een andere auto aan, kies die dan op de kaart. Anders hangt de paal: "
+                    "haal de kabel eruit en doe hem er weer in."
+                )
+            )
+            return
+        if gemeld is None or soort or (zegt and charger.connected and not charger.charging):
+            return
+        self._weg_gemeld.pop(device_id, None)
+        self._weg_eind[device_id] = now
+        self._onthoud(f"auto-weg:{device_id}", None, meteen=True)
+        auto = _hoofdletter(self._hoe_heet(car))
+        if not charger.connected:
+            tekst = t("{naam} meldt geen auto meer.", naam=_hoofdletter(naam))
+        elif charger.charging:
+            tekst = t("{naam} laadt weer.", naam=_hoofdletter(naam))
+        elif gemeld == "weg":
+            tekst = t("{auto} is weer thuis.", auto=auto)
+        else:
+            tekst = t("De kabel zit weer in {auto}.", auto=self._hoe_heet(car))
+        await self._async_tell(tekst, telefoon=False)
+
+    def _weg_zin(self, soort: str, naam: str, car: Car) -> str:
+        """De eerste zin van de melding, en wat het besluit erbij zegt."""
+        if soort == "weg":
+            return t("{paal} meldt een auto, maar {auto} is niet thuis.",
+                     paal=_hoofdletter(naam), auto=self._hoe_heet(car))
+        return t("{paal} meldt een auto, maar de kabel zit niet in {auto}.",
+                 paal=_hoofdletter(naam), auto=self._hoe_heet(car))
+
     async def _async_auto_wekken(
         self, now: datetime, settings: dict[str, Any], device: dict[str, Any], connected: bool
     ) -> None:
@@ -2565,6 +2726,12 @@ class ChargerCoach:
         if not profile or not profile.get("wake_entity") or not profile.get("soc_entity"):
             return
         if not self._slaapt(profile.get("soc_entity")):
+            return
+        # Een auto die zelf zegt dat hij weg is, of dat er geen kabel in zit, valt niets te
+        # vragen (v0.208.0). In een klantwoning werd hij op 07-11-2026 van 19:00 tot 01:00
+        # elk uur gewekt terwijl hij niet thuis was. Niet thuis telt meteen; een kabelsensor
+        # kan bij het inpluggen even achterlopen, dus die pas na `AUTO_WEG_NA`.
+        if device_id in self._weg or self._auto_zegt(profile, now)[1] == "weg":
             return
         laatst = self._gewekt.get(device_id)
         if connected and not zat_erin:
@@ -4409,8 +4576,14 @@ class ChargerCoach:
                 sleutels = self._groep_sleutels(settings, device)
                 for sleutel in sleutels:
                     vergeven[sleutel] = vergeven.get(sleutel, 0.0) + claim
+                # Een paal die een auto meldt die zelf zegt dat hij weg is, zegt de batterij en de boiler
+                # niets toe (v0.208.0). In een klantwoning nam de coach op 08-11-2026 om 02:00 de batterij
+                # over "want de laadpaal gaat laden", en er laadde niets.
+                weg = device.get("id", "") in self._weg
                 self._toezeggingen[device.get("id", "")] = {
-                    "amps": claim, "totaal": self._paal_stroom.get(device.get("id", ""), claim), "sleutels": sleutels,
+                    "amps": 0.0 if weg else claim,
+                    "totaal": 0.0 if weg else self._paal_stroom.get(device.get("id", ""), claim),
+                    "sleutels": sleutels,
                 }
             except ServiceNotFound as fout:
                 # Gebeurt bij het opstarten: de coach draait al voordat de
@@ -10124,6 +10297,7 @@ class ChargerCoach:
             await self._async_app_hervat(device)
             charger = replace(charger, boost=True, paused_by_user=False, modus=self._modus_van(device))
         await self._async_soc_vast_melden(device, car)
+        await self._async_auto_weg(now, settings, device, car, charger)
         try:
             await self._async_auto_wekken(now, settings, device, charger.connected)
         except ServiceNotFound:
@@ -10259,6 +10433,13 @@ class ChargerCoach:
         self._holding[device_id] = (
             self._holding.get(device_id, 0) + 1 if decision.holding else 0
         )
+
+        # De paal meldt een auto die zelf zegt dat hij weg is (v0.208.0): het besluit zegt het erbij.
+        if device_id in self._weg:
+            decision = replace(
+                decision,
+                reason=f"{decision.reason} {self._weg_zin(self._weg[device_id], device.get('name') or t('de laadpaal'), car)}",
+            )
 
         # Remembered before anything is sent, so the panel can show what the
         # coach would do even at a level where it does nothing.
@@ -12785,7 +12966,10 @@ class ChargerCoach:
             now, self._klaar_sinds.get(device_id), self._soc_op.get(device_id), car
         )
         # Zonder accustand, in de goedkope uren (v0.185.0): niet opnieuw starten voor "niet vol".
-        if charger.complete and gedaan is None and bezonken and self._niet_vol(car) and not charger.goedkoop_blok:
+        # En niet voor een auto die zelf zegt dat hij weg is of dat er geen kabel in zit (v0.208.0): de
+        # accustand van een auto die wegreed zegt niets over de paal.
+        if (charger.complete and gedaan is None and bezonken and self._niet_vol(car) and not charger.goedkoop_blok
+                and device_id not in self._weg_nu):
             charger.complete = False
             self._herstart_open.add(device_id)
             # De herstart is een nieuw aanbod (v0.99.0): de auto krijgt weer een
@@ -15391,8 +15575,15 @@ class ChargerCoach:
         # Alleen als er een klaar-tijd is die nog moet komen, want zonder
         # afspraak is een auto die niets afneemt geen probleem maar een keuze
         # van de auto. En één keer per laadbeurt.
-        biedt_aan = decision.charge and charger.connected and not charger.charging
+        # Zegt de auto zelf dat hij weg is, dan ging er al een gewone melding (`_async_auto_weg`, v0.208.0).
+        biedt_aan = (
+            decision.charge and charger.connected and not charger.charging
+            and device_id not in self._weg and device_id not in self._weg_nu
+        )
         sinds = self._asking_since.get(device_id)
+        # Wat er werd aangeboden terwijl de auto zei dat hij weg was, telt niet mee.
+        if sinds is not None and self._weg_eind.get(device_id, sinds) > sinds:
+            sinds = self._weg_eind[device_id]
         if (
             biedt_aan
             and sinds is not None
@@ -16354,6 +16545,13 @@ class ChargerCoach:
                 rij["kwh"] = float(rij.get("kwh") or 0.0)
                 rij["vast"], rij["gemeld"], rij["terug"] = bool(rij["vast"]), bool(rij["gemeld"]), False
                 self._soc_vast[sleutel.split(":", 1)[1]] = rij
+            elif sleutel.startswith("paal-laadde:"):
+                moment = _uit_geheugen(data.get("om"))
+                if moment is not None:
+                    self._paal_laadde[sleutel.split(":", 1)[1]] = moment
+            elif sleutel.startswith("auto-weg:"):
+                if data.get("soort") in ("weg", "kabel"):
+                    self._weg_gemeld[sleutel.split(":", 1)[1]] = str(data["soort"])
             elif sleutel == "water":
                 self._water_loopt_sinds = _uit_geheugen(data.get("sinds"))
                 self._water_gemeld = bool(data.get("gemeld")) and self._water_loopt_sinds is not None

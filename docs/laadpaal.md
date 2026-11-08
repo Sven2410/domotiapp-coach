@@ -1723,3 +1723,66 @@ Stekkers die na elkaar wegvallen staan in `docs/smart-plug.md`. Proef 244 in tes
 herstelpoging, nog weg na de rust, later weggevallen, een herstart halverwege), een paal die geen opdracht aanneemt
 vanaf de opstart en vanaf een minuut later, het vermogen van de paal in een hele ronde, en de stekkers. Elke beveiliging
 is met een mutatie nagekeken. Vijf oudere proeven bleven ongewijzigd groen.
+
+## De paal meldt een auto, maar de auto zegt dat hij weg is (v0.208.0)
+
+In een klantwoning op 07-11-2026 reed de Tesla om 15:38 weg. De Alfen bleef "auto aangesloten" en modus 3 `B1`
+melden, ook na een herstart van Home Assistant om 18:49. De coach geloofde de paal, plande "wacht tot 02:00" en bood
+om 02:00 13 A aan. Om 02:20 kwam de kritieke melding: "neemt al 20 minuten geen stroom af ... Meestal helpt het om de
+kabel er even uit te trekken". Er zat geen kabel in een auto. Daarnaast wekte de coach de Tesla van 19:00 tot 01:00
+elk uur. Om 02:00:11 nam hij ook de batterij over, "want de laadpaal gaat laden". De Tesla wist het de hele tijd:
+kabel `off`, laadklep dicht, locatie `not_home`.
+
+Nu mag de auto de paal tegenspreken (`_auto_zegt`):
+- **Twee velden in het autoprofiel, allebei optioneel.**
+  - **Locatie** (`location_entity`): leeg is de `device_tracker` op hetzelfde apparaat als het accupercentage, uit
+    het register (`_auto_locatie`). Zo werkt het bij een Tesla zonder dat iemand iets invult.
+  - **Kabel in de auto** (`plug_entity`): een binary_sensor. De kabelsensor van een Tesla heeft device_class
+    connectivity, niet plug, dus de coach raadt niet en gebruikt alleen wat aangewezen is.
+- **Wanneer:** zegt de auto `AUTO_WEG_NA` (tien minuten) dat hij niet thuis is (alles behalve `home`, ook een zone),
+  of dat er geen kabel in zit, terwijl de paal een auto meldt en niet laadt. Onbekend of onbeschikbaar telt niet. De
+  tien minuten komen uit `last_changed`. Daarbij nog twee voorwaarden:
+  - De paal meldt de auto zelf ook al tien minuten (`_paal_auto_sinds`). Een gastauto die net ingeplugd is terwijl
+    de eigen auto weg is, is geen paal die hangt.
+  - Wat de auto zei telt alleen als het begon na de laatste keer dat de paal in deze aansluiting laadde
+    (`_paal_laadde`, `paal-laadde:<paal>` in het geheugen). Bij de klant laadde de Tesla tot 05:45 en reed hij om
+    15:38 weg; dat telt. Een gast die geladen heeft en vol is, terwijl de eigen auto al eerder weg was, telt niet.
+- **Wat er dan gebeurt:**
+  - Geen kritieke "neemt geen stroom af".
+  - Eén gewone melding: "{paal} meldt een auto, maar {auto} is niet thuis. Hangt er een andere auto aan, kies die dan
+    op de kaart. Anders hangt de paal: haal de kabel eruit en doe hem er weer in." Of "... maar de kabel zit niet in
+    {auto}." Eén keer per keer dat het gebeurt. Of hij al gemeld is, overleeft een herstart (`auto-weg:<paal>` in het
+    geheugen).
+  - Het besluit zegt de eerste zin erbij.
+  - Geen wekken, ook niet elk uur. Niet thuis telt daarvoor meteen; een kabelsensor kan bij het inpluggen even
+    achterlopen, dus die pas na de tien minuten.
+  - De paal zegt de batterij en de boiler niets toe (`_toezeggingen`), ook niet voor een groep zonder meter.
+- **Wat de auto nu zegt, ook korter dan tien minuten** (`_weg_nu`): geen kritieke "neemt geen stroom af" over
+  die auto, en geen herstart van de paal omdat de accustand "niet vol" zegt. In het virtuele huis was de auto om
+  15:12 vol, reed hij om 15:38 weg op 27%, en startte de coach de paal opnieuw met een kritieke melding over 27%.
+- **De sturing van de paal blijft zoals hij was**, voor Easee en Alfen gelijk: er kan een andere auto aan hangen.
+  Laadt die, dan is er niets aan de hand. Het einde staat alleen in de geschiedenis: "{paal} meldt geen auto meer",
+  "{paal} laadt weer", "{auto} is weer thuis" of "De kabel zit weer in {auto}".
+- **Een herstart:** daarna begint `last_changed` opnieuw, dus de auto zegt tien minuten niets. Dat telt niet als "weer
+  thuis": dat komt alleen als de auto het zelf zegt (`_auto_zegt` geeft ook of hij het nu zegt).
+- **Daarna:** "neemt geen stroom af" telt pas vanaf het moment dat de auto weer thuis is (`_weg_eind`), niet over de
+  tijd dat hij weg was.
+- **Een auto zonder locatie of kabelsensor:** alles zoals altijd.
+
+Waarom de batterij: de toezegging van de paal (13 A gevraagd, nog niet getrokken) maakte de ruimte voor de batterij
+krap, en dan neemt de coach hem over. Na twee ronden zonder afname valt die toezegging al weg, maar het overnemen was
+dan gebeurd. Bij een auto die weg is telt hij vanaf de eerste ronde niet.
+
+Proef 248 in test_coach.py:
+- ter vergelijking thuis en kabel erin (de kritieke melding zoals altijd);
+- niet thuis, en alleen de kabel;
+- de tien minuten;
+- een gastauto die laadt;
+- elk uur wekken;
+- de toezegging;
+- een herstart halverwege;
+- een auto zonder die velden;
+- de locatie uit het register;
+- een Alfen.
+
+In het virtuele huis `alfen-auto-weg` en `alfen-auto-weg-gast`.

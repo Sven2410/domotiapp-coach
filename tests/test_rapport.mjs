@@ -1236,6 +1236,9 @@ proef("een nieuwe auto begint met het merk, en een Tesla krijgt de wekknop en de
   // De actieradius (v0.106.0) bij elk merk, bij een Tesla met de naam van zijn sensor.
   assert.ok(ford.includes('data-car-range="0:0"') && tesla.includes('data-car-range="0:0"'), "het veld voor de actieradius");
   assert.ok(tesla.includes('"Battery range"'), "bij een Tesla met de naam van de sensor");
+  // De locatie en de kabel van de auto (v0.208.0), bij elk merk.
+  assert.ok(ford.includes('data-car-location="0:0"') && tesla.includes('data-car-location="0:0"'), "het veld voor de locatie");
+  assert.ok(ford.includes('data-car-plug="0:0"') && tesla.includes('data-car-plug="0:0"'), "en voor de kabel in de auto");
 });
 
 proef("de vakantiestand staat in het formulier en op de kaart", async () => {

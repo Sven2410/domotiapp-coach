@@ -728,6 +728,12 @@ export const APPARATEN = {
   "Proefladen bij inpluggen": "Test charge when plugged in",
   "Wacht de coach op een goedkoper uur, dan laadt hij eerst even om te zien of de auto stroom aanneemt. Lukt dat niet, dan probeert hij het opnieuw en meldt hij het als het niet lukt. Kost een paar cent.": "If the coach waits for a cheaper hour, it first charges briefly to see whether the car takes power. If not, it tries again and tells you if it still fails. Costs a few cents.",
   "Zoek de laadstatus…": "Search for the charging status…",
+  "Locatie (optioneel)": "Location (optional)",
+  "Zegt de auto waar hij is, dan gelooft de coach een paal niet die een auto meldt terwijl de auto niet thuis is. Leeg: de locatie van hetzelfde apparaat als het accupercentage.": "If the car says where it is, the coach does not believe a charger that reports a car while the car is not at home. Empty: the location of the same device as the battery percentage.",
+  "Kabel in de auto (optioneel)": "Cable in the car (optional)",
+  "Zegt de auto zelf of er een kabel in zit, wijs die aan. Dan gelooft de coach een paal niet die een auto meldt terwijl er geen kabel in de auto zit.": "If the car itself says whether a cable is plugged in, point to it. Then the coach does not believe a charger that reports a car while no cable is in the car.",
+  "Zoek de locatie van de auto…": "Search for the car's location…",
+  "Zoek de kabelsensor van de auto…": "Search for the car's cable sensor…",
   // v0.169.0: de fase bij elk apparaat.
   "Voor de zekeringbewaking, en op de kaart Belastingen in je huis. Weet je het niet, dan telt de zwaarste fase.": "For fuse monitoring, and on the Loads in your home card. If you do not know, the heaviest phase counts.",
   "Buitentemperatuur": "Outdoor temperature",

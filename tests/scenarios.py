@@ -1845,6 +1845,20 @@ alfen_paal_weg = alfen_dyn.kopie(
     uitleg="alfen-dynamisch-zonnig, en de Alfen neemt van 18:56 tot 19:08 geen opdrachten aan, in de pauze",
     gebeurtenissen=[("18:56", "paal_onbereikbaar", 12)],
 )
+# De auto rijdt weg en de paal blijft "auto aangesloten" melden (v0.208.0). Een Alfen in een klantwoning op
+# 07-11-2026: de Tesla reed om 15:38 weg, de paal bleef op B1, en om 02:20 kwam de kritieke melding dat hij
+# geen stroom afnam. De Tesla zegt zelf waar hij is en of er een kabel in zit.
+alfen_auto_weg = alfen_dyn.kopie(
+    naam="alfen-auto-weg",
+    uitleg="alfen-dynamisch-zonnig; de auto rijdt om 15:38 weg op 27% en de Alfen blijft een auto melden",
+    auto=replace(alfen_dyn.auto, meldt_plek=True),
+    gebeurtenissen=[("15:38", "auto_weg", 27)],
+)
+alfen_auto_weg_gast = alfen_auto_weg.kopie(
+    naam="alfen-auto-weg-gast",
+    uitleg="alfen-auto-weg, en om 21:50 gaat de kabel eruit en om 22:00 hangt er een gastauto op 40% aan",
+    gebeurtenissen=[("15:38", "auto_weg", 27), ("21:50", "kabel_uit", None), ("22:00", "gast_in", 40)],
+)
 # Een paal en een batterij op dezelfde kast (v0.164.0). In een klantwoning plande de batterij op 26-10-2026
 # 2,5 kW van het net in de uren dat de paal er 13 A per fase op zette, op een kast van 3x16 A. De regelaar
 # hield de zekering heel, maar het uurplan rekende met goedkope kWh die niet kwamen.
@@ -1873,6 +1887,7 @@ groep_paal_batterij_zonder_meter = groep_paal_batterij.kopie(
 )
 
 ALLE = [
+    alfen_auto_weg, alfen_auto_weg_gast,
     groep_paal_batterij, groep_paal_batterij_los, groep_paal_batterij_zonder_meter,
     alfen_zonnig, alfen_dyn, alfen_paal_weg, klant_paal_weg, alfen_doel_80, alfen_laadgrens,
     alfen_drie_zon, alfen_fasen_zon, alfen_fasen_wisselend, alfen_fasen_helder, alfen_drie_dyn, alfen_fasen_dyn,

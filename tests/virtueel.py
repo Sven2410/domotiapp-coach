@@ -276,6 +276,9 @@ class Auto:
     # Of de auto zijn laadstatus aan Home Assistant meldt (`status_entity`),
     # en of het proefladen bij het inpluggen in zijn profiel aanstaat.
     meldt_status: bool = False
+    # Of de auto zijn locatie en zijn eigen kabel aan Home Assistant meldt (v0.208.0, `location_entity` en
+    # `plug_entity`). Een Tesla doet dat.
+    meldt_plek: bool = False
     # Uit in het virtuele huis: de scenario's van voor v0.153.0 meten de planregels, en
     # die proef zou elk "niets bijkopen na het inpluggen" een minuut breken. De
     # `ford-storing-*`- en `*-proef`-scenario's zetten hem aan, zoals in het echt.
@@ -298,12 +301,18 @@ class Auto:
     herstel_op: dt.datetime | None = None
     inplug_storingen: int = 0
     vorig_aanbod: float = 0.0
+    # De auto is weggereden terwijl de paal een auto blijft melden (v0.208.0): hij neemt niets.
+    afwezig: bool = False
     laag_sinds: dt.datetime | None = None
     vast_tot: dt.datetime | None = None
     vast_amps: float = 0.0
 
     def stap(self, aanbod_amps: float, gestart: bool, stap_s: int = 60,
              nu: dt.datetime | None = None, fasen: int = 3) -> None:
+        if self.afwezig:
+            self.trekt_amps = 0.0
+            self.wakker = False
+            return
         if self.storing:
             self.trekt_amps = 0.0
             if self.herstel_op is not None and nu is not None and nu >= self.herstel_op:
@@ -1488,6 +1497,8 @@ E = {
     "l1": "sensor.v_l1", "l2": "sensor.v_l2", "l3": "sensor.v_l3",
     "soc": "sensor.v_auto_soc",
     "auto_status": "sensor.v_auto_laadstatus",
+    "auto_plek": "device_tracker.v_auto",
+    "auto_kabel": "binary_sensor.v_auto_kabel",
     "equalizer": "sensor.v_equalizer",
     "reden": "sensor.v_paal_reden",
     "prijs": "sensor.v_prijs",
@@ -1781,6 +1792,8 @@ def instellingen(s: Scenario) -> dict:
                 "target_percent": auto.doel,
                 "soc_entity": E["soc"] if auto.meldt_soc else "",
                 "status_entity": E["auto_status"] if auto.meldt_status else "",
+                "location_entity": E["auto_plek"] if auto.meldt_plek else "",
+                "plug_entity": E["auto_kabel"] if auto.meldt_plek else "",
                 "proefladen": auto.proefladen,
             }],
         }],
@@ -1874,6 +1887,9 @@ class Wereld:
         self.paal = dataclasses.replace(s.paal, ontvangen=[])
         self.prijzen = dataclasses.replace(s.prijzen)
         self.nu = dt.datetime.fromisoformat(s.begin)
+        # De locatie en de kabel van de gekozen auto (v0.208.0): sinds wanneer ze zo staan.
+        self.plek_weg = False
+        self.plek_sinds: dt.datetime | None = None
         # Vanaf welke dag `Zon.wolken_per_dag` telt.
         self.zon.eerste_dag = self.nu.date()
         # Wanneer het programma op de vaatwasser gekozen werd, en de eindtijd
@@ -2134,6 +2150,11 @@ class Wereld:
         # De laadstatus in de woorden van de Ford-integratie.
         z(E["auto_status"], "NOT_READY" if not self.paal.kabel else "FAULT" if self.auto.storing
           else "IN_PROGRESS" if self.auto.trekt_amps > 0 else "PAUSED")
+        if self.auto.meldt_plek:
+            # De gekozen auto, niet wat er aan de paal hangt: met een gastauto blijft hij weg.
+            sinds = (self.plek_sinds or nu).replace(tzinfo=dt.timezone.utc)
+            z(E["auto_plek"], "not_home" if self.plek_weg else "home", last_updated=sinds)
+            z(E["auto_kabel"], "on" if self.paal.kabel and not self.plek_weg else "off", last_updated=sinds)
         if self.vaatwasser is not None and self.vaatwasser.miele:
             vw = self.vaatwasser
             draait = vw.status == "run"
@@ -2302,6 +2323,26 @@ class Wereld:
     # --- gebeurtenissen ---
 
     def gebeurtenis(self, actie: str, arg, coach, inst: dict) -> str:
+        if actie in ("kabel_uit", "kabel_in") and not self.plek_weg:
+            self.plek_sinds = self.nu
+        if actie == "auto_weg":
+            # De auto rijdt weg, en de paal blijft "auto aangesloten" melden (een Alfen op 07-11-2026).
+            self.auto.afwezig = True
+            self.plek_weg = True
+            self.plek_sinds = self.nu
+            if arg is not None:
+                self.auto.soc = float(arg)
+                self.auto.klaar = False
+            return "de auto rijdt weg, de paal blijft een auto melden"
+        if actie == "gast_in":
+            # Een andere auto aan dezelfde paal (na een kabel_uit); de gekozen auto blijft weg.
+            self.paal.kabel = True
+            self.auto.afwezig = False
+            self.auto.wakker = False
+            if arg is not None:
+                self.auto.soc = float(arg)
+                self.auto.klaar = False
+            return f"een gastauto aan de paal op {self.auto.soc:.0f}%"
         if actie == "kabel_uit":
             self.auto.storing = False
             self.auto.herstel_op = None
