@@ -1441,12 +1441,12 @@ class DacViewDevices extends DacEditorElement {
           <div class="row">
             <label>${t("Locatie (optioneel)")}</label>
             <dac-entity-picker data-car-location="${index}:${slot}"></dac-entity-picker>
-            <span class="sub">${t("Zegt de auto waar hij is, dan gelooft de coach een paal niet die een auto meldt terwijl de auto niet thuis is. Leeg: de locatie van hetzelfde apparaat als het accupercentage.")}</span>
+            <span class="sub">${t("Zegt de auto waar hij is, dan gelooft de coach een paal niet die een auto meldt terwijl de auto ver van huis is: meer dan 250 m van het midden van Thuis, of de straal van de zone als die groter is. Leeg: de locatie van hetzelfde apparaat als het accupercentage.")}</span>
           </div>
           <div class="row">
             <label>${t("Kabel in de auto (optioneel)")}</label>
             <dac-entity-picker data-car-plug="${index}:${slot}"></dac-entity-picker>
-            <span class="sub">${t("Zegt de auto zelf of er een kabel in zit, wijs die aan. Dan gelooft de coach een paal niet die een auto meldt terwijl er geen kabel in de auto zit.")}</span>
+            <span class="sub">${t("Zegt de auto zelf of er een kabel in zit, wijs die aan: een binaire sensor, of een sensor met tekst zoals Connected en Disconnected. Dan gelooft de coach een paal niet die een auto meldt terwijl er geen kabel in de auto zit. Leeg: een kabelsensor van hetzelfde apparaat als het accupercentage, als dat er een heeft.")}</span>
           </div>
           <label class="check" for="proef-${index}-${slot}">
             <input type="checkbox" id="proef-${index}-${slot}" data-car-proef="${index}:${slot}"

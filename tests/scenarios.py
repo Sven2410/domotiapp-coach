@@ -1881,6 +1881,14 @@ alfen_auto_weg_gast = alfen_auto_weg.kopie(
     uitleg="alfen-auto-weg, en om 21:50 gaat de kabel eruit en om 22:00 hangt er een gastauto op 40% aan",
     gebeurtenissen=[("15:38", "auto_weg", 27), ("21:50", "kabel_uit", None), ("22:00", "gast_in", 40)],
 )
+# Weg is ver weg (v0.213.0). In een klantwoning op 09-11-2026 zei de tracker van de auto `not_home` op 17 m van het
+# midden van Thuis, bij een zone van 13 m, terwijl hij aan de paal hing. Hier de hele dag zo, en om 15:38 rijdt hij
+# 5 km weg terwijl de Alfen een auto blijft melden.
+alfen_auto_oprit = alfen_auto_weg.kopie(
+    naam="alfen-auto-oprit",
+    uitleg="alfen-auto-weg, met een tracker die op de oprit (17 m, zone 13 m) al not_home zegt",
+    auto=replace(alfen_dyn.auto, meldt_plek=True, oprit_m=17.0),
+)
 # De automaat van de paal gaat uit (v0.209.0). Een Easee in een klantwoning op 08-11-2026: de integratie bleef
 # geladen met de laatste waarden, alleen de sensor online ging uit, en de coach bleef "Laadt" zeggen en elke
 # minuut een start sturen die nergens aankwam.
@@ -1955,7 +1963,7 @@ groep_paal_batterij_zonder_meter = groep_paal_batterij.kopie(
 
 ALLE = [
     vast_vergeten, vast_op_tijd_erin,
-    alfen_auto_weg, alfen_auto_weg_gast, paal_offline, paal_offline_nacht, klaar_equalizer,
+    alfen_auto_weg, alfen_auto_weg_gast, alfen_auto_oprit, paal_offline, paal_offline_nacht, klaar_equalizer,
     paal_offline_herladen, paal_offline_herladen_nacht, alfen_offline_herladen,
     groep_paal_batterij, groep_paal_batterij_los, groep_paal_batterij_zonder_meter,
     alfen_zonnig, alfen_dyn, alfen_paal_weg, klant_paal_weg, alfen_doel_80, alfen_laadgrens,

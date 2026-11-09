@@ -1756,7 +1756,8 @@ Nu mag de auto de paal tegenspreken (`_auto_zegt`):
   - **Locatie** (`location_entity`): leeg is de `device_tracker` op hetzelfde apparaat als het accupercentage, uit
     het register (`_auto_locatie`). Zo werkt het bij een Tesla zonder dat iemand iets invult.
   - **Kabel in de auto** (`plug_entity`): een binary_sensor. De kabelsensor van een Tesla heeft device_class
-    connectivity, niet plug, dus de coach raadt niet en gebruikt alleen wat aangewezen is.
+    connectivity, niet plug, dus de coach raadt niet en gebruikt alleen wat aangewezen is. Sinds v0.213.0 ook een
+    sensor met tekst, en vanzelf een kabelsensor die zich als zodanig laat kennen; zie hieronder.
 - **Wanneer:** zegt de auto `AUTO_WEG_NA` (tien minuten) dat hij niet thuis is (alles behalve `home`, ook een zone),
   of dat er geen kabel in zit, terwijl de paal een auto meldt en niet laadt. Onbekend of onbeschikbaar telt niet. De
   tien minuten komen uit `last_changed`. Daarbij nog twee voorwaarden:
@@ -1804,6 +1805,44 @@ Proef 248 in test_coach.py:
 - een Alfen.
 
 In het virtuele huis `alfen-auto-weg` en `alfen-auto-weg-gast`.
+
+## Weg is ver weg, en een kabelsensor met tekst (v0.213.0)
+
+In een klantwoning op 09-11-2026 ging de auto over op een andere integratie. Het autoprofiel wees naar de nieuwe
+accustand, en daarmee nam de coach vanzelf de nieuwe `device_tracker` op hetzelfde apparaat. Die zei `not_home`
+terwijl de auto aan de paal hing: de zone Thuis had een straal van 13 m, en de auto stond 17 m van het midden. Na
+tien minuten had de coach "is niet thuis" gemeld, de paal niet opnieuw gestart bij "klaar" en niet vol (eis 7), de
+kritieke "neemt geen stroom af" overgeslagen en de batterij geen ruimte voor de auto gelaten. De bewoner zette de zone
+op 42 m. De straal van een zone is een instelling van de bewoner, en een oprit valt makkelijk buiten een kleine zone.
+
+En de kabelsensor van die auto is een `sensor` met `CONNECTED` en `DISCONNECTED`. Het veld Kabel in de auto las
+alleen `off` van een binary_sensor.
+
+Nu:
+- **Weg is ver weg** (`_weg_sinds`, `_ver_van_huis`). Heeft de locatie `latitude` en `longitude`, en `zone.home`
+  ook, dan telt alleen de afstand tot het midden van Thuis (haversine, `_afstand_m`). Weg is meer dan
+  `AUTO_WEG_AFSTAND` (250 m), of de straal van de zone als die groter is, plus `gps_accuracy`. Een zone van de buren
+  op 100 m is dus thuis, een zone Werk op 3 km weg.
+- **Zonder coördinaten** blijft het zoals v0.208.0: alles behalve `home` is weg, ook een andere zone. Een opgegeven
+  Locatie volgt dezelfde regel als de gevonden tracker.
+- **De tien minuten vanaf het wegrijden.** Een tracker die op de oprit al `not_home` zei, houdt die toestand als de
+  auto wegrijdt, dus `last_changed` is dan van de avond ervoor. De coach onthoudt wanneer hij de auto voor het laatst
+  dichtbij zag (`_dichtbij`) en telt vanaf het latere van de twee. Niet in de opslag: na een herstart telt het vanaf de
+  herstart, zoals `last_changed`, en "al gemeld" staat al in het geheugen (`auto-weg:<paal>`).
+- **De kabel als tekst** (`KABEL_UIT`). Als "geen kabel" tellen `off`, `disconnected`, `unplugged`, `false` en
+  `not_connected`, zonder hoofdletters. Alleen die; elk ander woord zegt niets. Onbekend en onbeschikbaar tellen niet.
+  Het veld laat al elke entiteit kiezen.
+- **Vanzelf een kabelsensor** (`_auto_kabel`), zoals de tracker: is het veld leeg, dan neemt de coach van het apparaat
+  van de accustand een binary_sensor met device_class plug (zoals Home Assistant die bedoelt: aan is ingeplugd), of een
+  sensor met `plug` in zijn `translation_key` of zijn naam. Geen binary_sensor op naam: een kabelslot heet ook plug en
+  zegt `off` als het open is. Een Tesla blijft zonder: die kabelsensor heeft device_class connectivity. De werkplaats
+  koos dit op 09-11-2026: van zo'n sensor telt alleen de vaste lijst, dus een sensor die iets anders zegt doet niets.
+
+Proef 255 in test_coach.py: de oprit, 5 km, een zone Werk op 3 km en een zone op 100 m, een tracker zonder
+coördinaten, de grens met de straal en de gps, wegrijden van de oprit, de kabel als tekst, een kabelsensor die vanzelf
+gevonden wordt (en een slot dat het niet is), en een herstart halverwege. In het virtuele huis `alfen-auto-oprit`: een
+tracker die de hele dag `not_home` zegt op 17 m, dezelfde kilowatturen als `alfen-auto-weg`, en om 15:48 dezelfde ene
+melding als hij 5 km verderop staat.
 
 ## De paal is offline: één keer herladen, en het zeggen (v0.209.0)
 

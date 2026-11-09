@@ -17195,6 +17195,188 @@ controle("het geleerde gaat mee weg met de paal", weg254["car_usage"] == [], f"{
 bron254 = inspect.getsource(coachmod.ChargerCoach._round)
 controle("de ronde vraagt per paal om de herinnering", "await self._async_herinnering(moment, settings, device)" in bron254, "")
 
+print("=== 255. weg is ver weg, en een kabelsensor met tekst (v0.213.0) ===")
+# Een klantwoning op 09-11-2026: de tracker van de auto zei `not_home` op 17 m van het midden van Thuis, bij een zone
+# van 13 m, terwijl de auto aan de paal hing. Na tien minuten zou de coach "is niet thuis" melden, de paal niet
+# opnieuw starten bij "klaar" en niet vol, en de batterij geen ruimte voor de auto laten. En de kabelsensor van die
+# auto is een sensor met CONNECTED en DISCONNECTED, die het veld Kabel in de auto niet las.
+MIDDEN255 = (52.0, 5.0)
+
+
+def plek255(meter, staat="not_home", nauwkeurig=0):
+    # Zoveel meter ten noorden van het midden van Thuis.
+    return {"state": staat, "attributes": {"latitude": MIDDEN255[0] + meter / 111195.0, "longitude": MIDDEN255[1],
+                                           "gps_accuracy": nauwkeurig, "source_type": "gps"}}
+
+
+def bouw255(locatie, kabel=None, straal=13, paal=PAAL248):
+    inst, hass, coach, berichten = bouw248(locatie=locatie, kabel=kabel, paal=paal)
+    hass.states.zet("zone.home", {"state": "0", "attributes": {"latitude": MIDDEN255[0], "longitude": MIDDEN255[1],
+                                                              "radius": straal}})
+    return inst, hass, coach, berichten
+
+
+VAN255, TOT255 = dt.datetime(2026, 11, 8, 4, 30), dt.datetime(2026, 11, 8, 5, 0)
+
+
+def weg255(berichten):
+    return [b for b in berichten if "niet thuis" in b[0] or "kabel zit niet" in b[0]]
+
+
+# 1. De oprit: 17 m bij een zone van 13 m, `not_home`, kabel erin. Dat is thuis, dus alles zoals altijd.
+i255o, h255o, c255o, b255o = bouw255(plek255(17), kabel="on")
+o255 = nacht248(i255o, c255o, VAN255, TOT255)
+print(f"  oprit: {b255o}")
+controle("op de oprit buiten een kleine zone: geen 'niet thuis'", not weg255(b255o) and not c255o._weg, f"{b255o}")
+controle("en dus de kritieke 'geen stroom af' zoals altijd", [b for b in b255o if "geen stroom af" in b[0] and b[1]],
+         f"{b255o}")
+controle("het besluit zegt niets over weg", all("niet thuis" not in r[1]["reason"] for r in o255), "")
+# Zonder de afstand (geen zone met coördinaten) blijft het zoals v0.208.0: `not_home` is weg.
+i255z, h255z, c255z, b255z = bouw248(locatie=plek255(17), kabel="on")
+nacht248(i255z, c255z, VAN255, TOT255)
+controle("zonder coördinaten van Thuis: `not_home` blijft weg", len(weg255(b255z)) == 1, f"{b255z}")
+
+# 2. Vijf kilometer verderop: weg, met de gewone melding.
+i255v, h255v, c255v, b255v = bouw255(plek255(5000))
+nacht248(i255v, c255v, VAN255, TOT255)
+controle("5 km verderop: één gewone melding dat hij niet thuis is",
+         len(b255v) == 1 and "Tesla is niet thuis" in b255v[0][0] and not b255v[0][1], f"{b255v}")
+
+# 3. Een zone Werk op 3 km: weg. Een zone van de buren op 100 m: thuis.
+i255w, h255w, c255w, b255w = bouw255(plek255(3000, staat="Werk"))
+nacht248(i255w, c255w, VAN255, TOT255)
+controle("een zone Werk op 3 km: weg", len(weg255(b255w)) == 1, f"{b255w}")
+i255b, h255b, c255b, b255b = bouw255(plek255(100, staat="Buren"))
+nacht248(i255b, c255b, VAN255, TOT255)
+controle("een zone op 100 m: thuis", not weg255(b255b), f"{b255b}")
+
+# 4. Een tracker zonder coördinaten op `not_home`: weg, ook met Thuis op de kaart.
+i255g, h255g, c255g, b255g = bouw255("not_home")
+nacht248(i255g, c255g, VAN255, TOT255)
+controle("een tracker zonder coördinaten op not_home: weg", len(weg255(b255g)) == 1, f"{b255g}")
+
+# 5. De grens: de grootste van 250 m en de straal, plus de nauwkeurigheid van de gps.
+def ver255(meter, straal=13, nauwkeurig=0):
+    _i, _h, coach, _b = bouw255(plek255(meter, nauwkeurig=nauwkeurig), straal=straal)
+    return coach._ver_van_huis(_h.states.get("device_tracker.tesla"))
+
+
+controle("240 m: thuis, 260 m: weg", ver255(240) is False and ver255(260) is True, f"{ver255(240)} {ver255(260)}")
+controle("een zone van 500 m: 400 m is thuis, 600 m weg", ver255(400, 500) is False and ver255(600, 500) is True, "")
+controle("een gps die 300 m onzeker is: 400 m is nog thuis", ver255(400, nauwkeurig=300) is False, "")
+controle("de afstand zelf klopt: 17 m", abs(coachmod._afstand_m(*MIDDEN255, MIDDEN255[0] + 17 / 111195.0, MIDDEN255[1]) - 17) < 0.5,
+         "")
+
+# 6. Van de oprit wegrijden terwijl de tracker al `not_home` zei: de tien minuten vanaf het wegrijden, niet vanaf
+#    `last_changed` van de avond ervoor.
+i255r, h255r, c255r, b255r = bouw255(plek255(17))
+nacht248(i255r, c255r, VAN255, dt.datetime(2026, 11, 8, 4, 40))
+h255r.states.zet("device_tracker.tesla", plek255(5000), last_updated=stempel248(15, 48))
+r255 = nacht248(i255r, c255r, dt.datetime(2026, 11, 8, 4, 41), TOT255)
+eerst255 = next((r[0] for r in r255 if "niet thuis" in r[1]["reason"]), None)
+controle("weggereden om 04:41, de oprit om 04:40 voor het laatst gezien: weg vanaf 04:50", eerst255 == dt.datetime(2026, 11, 8, 4, 50),
+         f"{eerst255}")
+
+# 7. De kabel als tekst: een sensor die DISCONNECTED zegt, tien minuten terwijl de paal een auto meldt.
+AUTO255k = {**AUTO248, "location_entity": "", "plug_entity": "sensor.auto_kabel"}
+PAAL255k = {**LAADPAAL, "cars": [AUTO255k]}
+
+
+def kabel255(waarde):
+    inst, hass, coach, berichten = bouw248(locatie=None, kabel=None, paal=PAAL255k)
+    hass.states.zet("sensor.auto_kabel", waarde, last_updated=stempel248(15, 38))
+    nacht248(inst, coach, VAN255, TOT255, PAAL255k)
+    return berichten
+
+
+b255d, b255c, b255f = kabel255("DISCONNECTED"), kabel255("CONNECTED"), kabel255("FAULT")
+controle("DISCONNECTED: 'de kabel zit niet in', geen kritiek",
+         len(b255d) == 1 and "de kabel zit niet in Tesla" in b255d[0][0] and not b255d[0][1], f"{b255d}")
+controle("CONNECTED: niets daarover", not weg255(b255c), f"{b255c}")
+controle("een woord buiten de lijst zegt niets", not weg255(b255f), f"{b255f}")
+controle("de vaste lijst, zonder hoofdletters",
+         all(kabel255(w) and len(weg255(kabel255(w))) == 1 for w in ("Unplugged", "not_connected", "false", "off")), "")
+
+# 8. Vanzelf: de kabelsensor op het apparaat van de accustand, zoals de tracker.
+register255 = types.ModuleType("homeassistant.helpers.entity_registry")
+
+
+class _Rij255:
+    def __init__(self, entity_id, device_id, translation_key=None, device_class=None, original_device_class=None):
+        self.entity_id, self.device_id, self.translation_key = entity_id, device_id, translation_key
+        self.device_class, self.original_device_class = device_class, original_device_class
+
+
+def zoek255(rijen, soc="sensor.tesla_soc"):
+    register255.async_get = lambda hass: types.SimpleNamespace(
+        async_get=lambda eid: next((r for r in rijen if r.entity_id == eid), None))
+    register255.async_entries_for_device = lambda reg, device_id: [r for r in rijen if r.device_id == device_id]
+    sys.modules["homeassistant.helpers.entity_registry"] = register255
+    try:
+        _i, _h, coach, _b = bouw248(paal={**LAADPAAL, "cars": [AUTO248z]})
+        return coach._auto_kabel({**AUTO248z, "soc_entity": soc})
+    finally:
+        del sys.modules["homeassistant.helpers.entity_registry"]
+
+
+SOC255 = _Rij255("sensor.tesla_soc", "auto")
+controle("een sensor met plug in de naam (zoals elvehplug)",
+         zoek255([SOC255, _Rij255("sensor.auto_odometer", "auto"), _Rij255("sensor.auto_elvehplug", "auto")])
+         == "sensor.auto_elvehplug", "")
+controle("een sensor met plug in de translation_key",
+         zoek255([SOC255, _Rij255("sensor.auto_kabel", "auto", translation_key="plug_status")]) == "sensor.auto_kabel", "")
+controle("een binary_sensor met device_class plug",
+         zoek255([SOC255, _Rij255("binary_sensor.auto_lader", "auto", original_device_class="plug")])
+         == "binary_sensor.auto_lader", "")
+controle("geen binary_sensor met plug in de naam maar een ander soort (een slot)",
+         zoek255([SOC255, _Rij255("binary_sensor.auto_plug_lock", "auto", original_device_class="lock")]) is None, "")
+controle("niets van een ander apparaat",
+         zoek255([SOC255, _Rij255("sensor.paal_plug", "paal")]) is None, "")
+controle("het veld in het profiel gaat voor",
+         coachmod.ChargerCoach._auto_kabel(c255o, AUTO248) == "binary_sensor.tesla_kabel", "")
+# En gevonden werkt hij net als aangewezen.
+rijen255 = [SOC255, _Rij255("sensor.auto_elvehplug", "auto")]
+register255.async_get = lambda hass: types.SimpleNamespace(
+    async_get=lambda eid: next((r for r in rijen255 if r.entity_id == eid), None))
+register255.async_entries_for_device = lambda reg, device_id: [r for r in rijen255 if r.device_id == device_id]
+sys.modules["homeassistant.helpers.entity_registry"] = register255
+try:
+    i255a, h255a, c255a, b255a = bouw248(locatie=None, kabel=None, paal={**LAADPAAL, "cars": [AUTO248z]})
+    h255a.states.zet("sensor.auto_elvehplug", "DISCONNECTED", last_updated=stempel248(15, 38))
+    nacht248(i255a, c255a, VAN255, TOT255, {**LAADPAAL, "cars": [AUTO248z]})
+    controle("een gevonden kabelsensor op DISCONNECTED: dezelfde melding", len(weg255(b255a)) == 1, f"{b255a}")
+finally:
+    del sys.modules["homeassistant.helpers.entity_registry"]
+
+# 9. Een herstart halverwege. 5 km weg: na de herstart geen tweede melding en geen "weer thuis". Op de oprit: na de
+#    herstart nog steeds niets.
+i255h, h255h, c255h, b255h = bouw255(plek255(5000))
+nacht248(i255h, c255h, dt.datetime(2026, 11, 8, 2, 0), dt.datetime(2026, 11, 8, 2, 12))
+for plek, naam in ((plek255(5000), "weg"), (plek255(17), "oprit")):
+    if naam == "oprit":
+        i255h, h255h, c255h, b255h = bouw255(plek255(17), kabel="on")
+        nacht248(i255h, c255h, dt.datetime(2026, 11, 8, 2, 0), dt.datetime(2026, 11, 8, 2, 12))
+    voor255 = list(b255h)
+    c255h2 = herstart213(h255h)
+    na255 = []
+
+    async def tell255(bericht, kritiek=False, telefoon=True, soort=None, _na=na255):
+        _na.append((bericht, kritiek, telefoon))
+    c255h2._async_tell = tell255
+    asyncio.run(c255h2._async_geheugen_laden())
+    terug255 = dt.datetime(2026, 11, 8, 4, 0)
+    h255h.states.zet("device_tracker.tesla", plek, last_updated=terug255.replace(tzinfo=dt.timezone.utc))
+    if naam == "oprit":
+        h255h.states.zet("binary_sensor.tesla_kabel", "on", last_updated=terug255.replace(tzinfo=dt.timezone.utc))
+    n255 = nacht248(i255h, c255h2, terug255, terug255 + dt.timedelta(minutes=30))
+    if naam == "weg":
+        controle("5 km: voor de herstart één melding, erna geen tweede en geen 'weer thuis'",
+                 len(voor255) == 1 and not [b for b in na255 if "thuis" in b[0] or "kabel" in b[0]], f"{voor255} {na255}")
+        controle("en na tien minuten zegt het besluit het weer", "niet thuis" in n255[-1][1]["reason"], "")
+    else:
+        controle("de oprit: voor en na de herstart geen 'niet thuis'", not weg255(voor255) and not weg255(na255),
+                 f"{voor255} {na255}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

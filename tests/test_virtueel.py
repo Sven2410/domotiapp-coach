@@ -2891,6 +2891,19 @@ if (weg_a := v("alfen-auto-weg")) and (gast_a := v("alfen-auto-weg-gast")):
              and not meldingen(gast_a, "laadt weer") and not meldingen(gast_a, "geen stroom af"),
              f"{[(t.strftime('%H:%M'), m[:40]) for t, m in gast_a.meldingen]}")
 
+# Weg is ver weg (v0.213.0): een tracker die op de oprit al `not_home` zegt, telt als thuis.
+if (oprit_a := v("alfen-auto-oprit")) and (weg_a := v("alfen-auto-weg")):
+    print(f"  oprit: {oprit_a.geladen_kwh:.1f} kWh, meldingen {[(t.strftime('%H:%M'), m[:50]) for t, m in oprit_a.meldingen]}")
+    voor_weg = [r for r in oprit_a.regels if r.tijd < oprit_a.regels[0].tijd.replace(hour=15, minute=38)]
+    controle("alfen-auto-oprit: op de oprit zegt het besluit nooit 'niet thuis'",
+             voor_weg and not any("is niet thuis" in r.reden for r in voor_weg), "")
+    controle("alfen-auto-oprit: hij laadt net zoveel als met een tracker die thuis zegt",
+             abs(oprit_a.geladen_kwh - weg_a.geladen_kwh) < 0.05, f"{oprit_a.geladen_kwh:.2f} tegen {weg_a.geladen_kwh:.2f}")
+    controle("alfen-auto-oprit: 5 km weg geeft dezelfde ene melding als bij alfen-auto-weg",
+             [t.strftime("%H:%M") for t, m in oprit_a.meldingen if "is niet thuis" in m]
+             == [t.strftime("%H:%M") for t, m in weg_a.meldingen if "is niet thuis" in m],
+             f"{[(t.strftime('%H:%M'), m[:40]) for t, m in oprit_a.meldingen]}")
+
 # De paal is offline (v0.209.0). Een Easee in een klantwoning op 08-11-2026: de automaat ging uit, de integratie
 # bleef geladen, en de coach bleef "Laadt" zeggen en elke minuut een start sturen die nergens aankwam.
 if (off_v := v("paal-offline")) and (nacht_v := v("paal-offline-nacht")):

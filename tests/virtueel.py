@@ -279,6 +279,9 @@ class Auto:
     # Of de auto zijn locatie en zijn eigen kabel aan Home Assistant meldt (v0.208.0, `location_entity` en
     # `plug_entity`). Een Tesla doet dat.
     meldt_plek: bool = False
+    # Met coördinaten (v0.213.0): de auto staat zoveel meter van het midden van Thuis, en de zone Thuis is maar
+    # 13 m, dus de tracker zegt ook thuis `not_home`. Weg is 5 km verderop. Een Ford in een klantwoning op 09-11-2026.
+    oprit_m: float | None = None
     # Uit in het virtuele huis: de scenario's van voor v0.153.0 meten de planregels, en
     # die proef zou elk "niets bijkopen na het inpluggen" een minuut breken. De
     # `ford-storing-*`- en `*-proef`-scenario's zetten hem aan, zoals in het echt.
@@ -2191,7 +2194,13 @@ class Wereld:
         if self.auto.meldt_plek:
             # De gekozen auto, niet wat er aan de paal hangt: met een gastauto blijft hij weg.
             sinds = (self.plek_sinds or nu).replace(tzinfo=dt.timezone.utc)
-            z(E["auto_plek"], "not_home" if self.plek_weg else "home", last_updated=sinds)
+            if self.auto.oprit_m is not None:
+                meter = 5000.0 if self.plek_weg else self.auto.oprit_m
+                z("zone.home", {"state": "0", "attributes": {"latitude": 52.0, "longitude": 5.0, "radius": 13}})
+                z(E["auto_plek"], {"state": "not_home", "attributes": {
+                    "latitude": 52.0 + meter / 111195.0, "longitude": 5.0, "gps_accuracy": 0}}, last_updated=sinds)
+            else:
+                z(E["auto_plek"], "not_home" if self.plek_weg else "home", last_updated=sinds)
             z(E["auto_kabel"], "on" if self.paal.kabel and not self.plek_weg else "off", last_updated=sinds)
         if self.vaatwasser is not None and self.vaatwasser.miele:
             vw = self.vaatwasser

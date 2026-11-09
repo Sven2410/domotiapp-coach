@@ -802,6 +802,18 @@ STIL_AANBOD = timedelta(minutes=20)
 # gaat of een locatie die bij het wegrijden nog bijwerkt.
 AUTO_WEG_NA = timedelta(minutes=10)
 
+# Weg is ver weg (v0.213.0). Heeft de locatie van de auto coördinaten, en Thuis ook, dan telt de auto pas als weg
+# op meer dan dit van het midden van Thuis, of de straal van de zone als die groter is, plus de nauwkeurigheid van
+# de gps. In een klantwoning op 09-11-2026 zei de tracker van de auto `not_home` op 17 m van het midden, bij een
+# zone van 13 m, terwijl de auto aan de paal hing. De straal is een instelling van de bewoner, en een oprit valt
+# makkelijk buiten een kleine zone. 250 m is ruim een straat; de Tesla van 07-11 stond kilometers ver.
+AUTO_WEG_AFSTAND = 250.0
+
+# Wat een kabelsensor van de auto zegt als er geen kabel in zit (v0.213.0): `off` van een binary_sensor, en de
+# woorden van een sensor met tekst, zoals CONNECTED en DISCONNECTED van een Ford. Alleen deze, zonder hoofdletters;
+# de rest telt niet.
+KABEL_UIT = ("off", "disconnected", "unplugged", "false", "not_connected")
+
 # Een paal die offline is terwijl zijn integratie gewoon geladen blijft (v0.209.0, `_async_paal_online`).
 # In een klantwoning op 08-11-2026 ging de automaat van de paal om 23:08 uit; de integratie bleef op
 # loaded met de laatste waarden, alleen de sensor online ging uit. De coach bleef "Laadt" zeggen en
@@ -1354,6 +1366,15 @@ def zonkromme_uit(domein: str, wh_hours: dict[str, Any]) -> dict[datetime, float
         uur = lokaal.replace(minute=0, second=0, microsecond=0)
         uit[uur] = uit.get(uur, 0.0) + float(wh) / 1000.0
     return uit
+
+
+def _afstand_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """De afstand over de aarde in meter, tussen twee punten in graden (haversine)."""
+    from math import asin, cos, radians, sin, sqrt
+
+    dlat, dlon = radians(lat2 - lat1), radians(lon2 - lon1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
+    return 2 * 6371000.0 * asin(min(1.0, sqrt(a)))
 
 
 def _hoofdletter(tekst: str) -> str:
@@ -2121,6 +2142,10 @@ class ChargerCoach:
         # Zei de auto al dat hij weg was vóór dat moment, dan hing er sindsdien een andere auto aan.
         self._paal_laadde: dict[str, datetime] = {}
         self._locatie_van: dict[str, str | None] = {}
+        self._kabel_van: dict[str, str | None] = {}
+        # Wanneer de coach een locatie met coördinaten voor het laatst dichtbij zag (v0.213.0): een tracker die op de
+        # oprit al `not_home` zei, houdt die toestand als hij wegrijdt, dus `last_changed` zegt dan niet wanneer.
+        self._dichtbij: dict[str, datetime] = {}
         # Een paal die offline is (v0.209.0): sinds wanneer, wanneer de coach hem herlaadde, of het gemeld
         # is en of hij 's nachts wilde laden. In het geheugen als `paal-offline:<paal>`.
         self._offline: dict[str, dict[str, Any]] = {}
@@ -2618,6 +2643,23 @@ class ChargerCoach:
         _LOGGER.info("%s: %s gewekt om zijn accustand te horen", device_id, profile.get("name") or "de auto")
         return True
 
+    def _van_apparaat(self, soc: str, past) -> str | None:
+        """De eerste entiteit op hetzelfde apparaat als de accustand waarvoor `past(rij)` waar is, uit het register."""
+        try:
+            from homeassistant.helpers import entity_registry as er
+
+            register = er.async_get(self.hass)
+            rij = register.async_get(soc)
+            if rij is None or not rij.device_id:
+                return None
+            return next(
+                (r.entity_id for r in er.async_entries_for_device(register, rij.device_id)
+                 if r.entity_id != soc and past(r)),
+                None,
+            )
+        except Exception:  # noqa: BLE001 - zonder register niets gevonden, en dan alles zoals altijd
+            return None
+
     def _auto_locatie(self, profile: dict[str, Any]) -> str | None:
         """Waar de auto zegt dat hij is: het veld in zijn profiel, of de `device_tracker` op hetzelfde apparaat
         als zijn accustand (v0.208.0). Zo werkt het bij een Tesla of een Ford zonder dat iemand iets invult."""
@@ -2628,22 +2670,73 @@ class ChargerCoach:
         if not soc:
             return None
         if soc not in self._locatie_van:
-            gevonden = None
-            try:
-                from homeassistant.helpers import entity_registry as er
-
-                register = er.async_get(self.hass)
-                rij = register.async_get(soc)
-                if rij is not None and rij.device_id:
-                    gevonden = next(
-                        (r.entity_id for r in er.async_entries_for_device(register, rij.device_id)
-                         if r.entity_id.startswith("device_tracker.")),
-                        None,
-                    )
-            except Exception:  # noqa: BLE001 - zonder register geen locatie, en dan alles zoals altijd
-                gevonden = None
-            self._locatie_van[soc] = gevonden
+            self._locatie_van[soc] = self._van_apparaat(soc, lambda r: r.entity_id.startswith("device_tracker."))
         return self._locatie_van[soc]
+
+    def _auto_kabel(self, profile: dict[str, Any]) -> str | None:
+        """Of er een kabel in de auto zit: het veld in zijn profiel, of een kabelsensor op hetzelfde apparaat als
+        zijn accustand (v0.213.0). Een binary_sensor met device_class plug, zoals Home Assistant die bedoelt (aan
+        is ingeplugd), of een sensor met `plug` in zijn `translation_key` of zijn naam, zoals die van een Ford.
+        Van zo'n sensor telt alleen `KABEL_UIT` als "geen kabel"; elk ander woord zegt niets."""
+        eigen = str(profile.get("plug_entity") or "").strip()
+        if eigen:
+            return eigen
+        soc = str(profile.get("soc_entity") or "").strip()
+        if not soc:
+            return None
+        if soc not in self._kabel_van:
+            def past(r: Any) -> bool:
+                domein, _, naam = r.entity_id.partition(".")
+                if domein == "binary_sensor":
+                    return "plug" in (getattr(r, "device_class", None), getattr(r, "original_device_class", None))
+                return domein == "sensor" and (
+                    "plug" in str(getattr(r, "translation_key", None) or "").lower() or "plug" in naam.lower()
+                )
+            self._kabel_van[soc] = self._van_apparaat(soc, past)
+        return self._kabel_van[soc]
+
+    def _weg_sinds(self, soort: str, entiteit: str | None, now: datetime) -> datetime | None:
+        """Sinds wanneer de auto zegt dat hij weg is ("weg") of dat er geen kabel in zit ("kabel"), of None.
+
+        Onbekend of onbeschikbaar zegt niets. Heeft de locatie coördinaten, en Thuis ook, dan telt alleen de
+        afstand (v0.213.0): meer dan `AUTO_WEG_AFSTAND`, de straal van Thuis als die groter is, plus de
+        nauwkeurigheid van de gps. Zonder coördinaten is alles behalve `home` weg, ook een andere zone (v0.208.0).
+        """
+        state = self.hass.states.get(entiteit) if entiteit else None
+        if state is None or state.state in ("unknown", "unavailable", ""):
+            return None
+        staat = str(state.state).strip().lower()
+        if soort == "kabel":
+            return self._stekker_weg_sinds(entiteit, now) if staat in KABEL_UIT else None
+        ver = self._ver_van_huis(state)
+        if ver is None:
+            return self._stekker_weg_sinds(entiteit, now) if staat != "home" else None
+        if not ver:
+            self._dichtbij[entiteit] = now
+            return None
+        # Een tracker die op de oprit al `not_home` zei, houdt die toestand bij het wegrijden: dan is het de laatste
+        # keer dat de coach hem dichtbij zag.
+        return max(self._stekker_weg_sinds(entiteit, now), self._dichtbij.get(entiteit, datetime.min))
+
+    def _ver_van_huis(self, state: Any) -> bool | None:
+        """Of een locatie met coördinaten verder dan de grens van Thuis is, of None zonder coördinaten (v0.213.0)."""
+        thuis = self.hass.states.get("zone.home")
+        try:
+            attrs = state.attributes or {}
+            plek = (float(attrs["latitude"]), float(attrs["longitude"]))
+            zone = thuis.attributes or {}
+            midden = (float(zone["latitude"]), float(zone["longitude"]))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            return None
+        try:
+            straal = float(zone.get("radius") or 0)
+        except (TypeError, ValueError):
+            straal = 0.0
+        try:
+            nauwkeurig = max(0.0, float(attrs.get("gps_accuracy") or 0))
+        except (TypeError, ValueError):
+            nauwkeurig = 0.0
+        return _afstand_m(*plek, *midden) > max(AUTO_WEG_AFSTAND, straal) + nauwkeurig
 
     def _auto_zegt(
         self, profile: dict[str, Any] | None, now: datetime, na: datetime | None = None
@@ -2651,8 +2744,8 @@ class ChargerCoach:
         """Of de auto zelf zegt dat hij niet aan de paal kan hangen (v0.208.0).
 
         Geeft de soort ("weg" of "kabel") als hij dat al `AUTO_WEG_NA` zegt, en wat hij nu zegt.
-        "weg": zijn locatie is iets anders dan thuis (`not_home` of een zone). "kabel": zijn eigen
-        kabelsensor staat uit. Onbekend of onbeschikbaar telt niet, en een auto zonder die sensoren
+        "weg": zijn locatie is ver van thuis, of zonder coördinaten iets anders dan thuis (`_weg_sinds`). "kabel":
+        zijn eigen kabelsensor zegt dat er geen kabel in zit. Onbekend of onbeschikbaar telt niet, en een auto zonder die sensoren
         zegt niets: dan gaat alles zoals altijd. Het tweede is er voor een herstart: dan begint
         `last_changed` opnieuw, en mag wat al gemeld was niet als "weer thuis" tellen.
         """
@@ -2661,14 +2754,10 @@ class ChargerCoach:
         zegt: str | None = None
         # `na`: wanneer de paal voor het laatst laadde. Zegt de auto het al van daarvoor, dan laadde er
         # sindsdien een andere auto (een gast die vol is), en dan zegt het niets over de paal.
-        for soort, entiteit, weg in (
-            ("weg", self._auto_locatie(profile), lambda staat: staat != "home"),
-            ("kabel", str(profile.get("plug_entity") or "").strip() or None, lambda staat: staat == "off"),
-        ):
-            state = self.hass.states.get(entiteit) if entiteit else None
-            if state is None or state.state in ("unknown", "unavailable", "") or not weg(state.state):
+        for soort, entiteit in (("weg", self._auto_locatie(profile)), ("kabel", self._auto_kabel(profile))):
+            sinds = self._weg_sinds(soort, entiteit, now)
+            if sinds is None:
                 continue
-            sinds = self._stekker_weg_sinds(entiteit, now)
             if na is not None and sinds <= na:
                 continue
             zegt = zegt or soort
