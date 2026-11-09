@@ -3102,6 +3102,17 @@ class ChargerCoach:
             for entity_id in (device.get("entity"), (device.get("entities") or {}).get("current"))
             if entity_id
         }
+        # De accustand van een auto die niet aan de paal hangt (v0.211.0): zonder auto doet de coach er
+        # niets mee, en de bewoner kan niets aan een integratie die zichzelf herstelt. Ook niet als hij
+        # `unavailable` is. Hoort de auto bij twee palen, dan pas als geen van beide een auto meldt.
+        aan_paal = {
+            car.get("soc_entity")
+            for device in settings.get("devices") or []
+            if not self._paal_zonder_auto(device.get("entities") or {})
+            for car in device.get("cars") or []
+            if car.get("soc_entity")
+        }
+        auto_weg = auto_sensoren - aan_paal
         stil_nu: list[tuple[str, str, datetime, timedelta]] = []
         terug: list[str] = []
         nu_wel: list[str] = []
@@ -3109,10 +3120,13 @@ class ChargerCoach:
             state = self.hass.states.get(entity_id)
             stil = state is None or state.state in ("unknown", "unavailable", "")
             if stil and (entity_id in zonnen and self._zon_slaapt()
-                         or entity_id in zonder_auto and state is not None and state.state == "unknown"):
+                         or entity_id in zonder_auto and state is not None and state.state == "unknown"
+                         or entity_id in auto_weg):
                 # Een omvormer die slaapt is geen storing. De klok begint pas
                 # als de zon hoog genoeg staat om hem wakker te maken. Een paal
-                # zonder auto die zijn vermogen niet meldt ook niet.
+                # zonder auto die zijn vermogen niet meldt ook niet, en de
+                # accustand van een auto die er niet aan hangt ook niet. Wat al
+                # gemeld was blijft gemeld: geen "doet het weer" bij het loskoppelen.
                 self._sensor_stil.pop(entity_id, None)
                 continue
             sinds = self._sensor_stil.get(entity_id)

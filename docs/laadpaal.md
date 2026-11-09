@@ -1411,6 +1411,24 @@ Drie uitzonderingen blijven kritiek:
 Leest de hele bundel alleen mee, dan staat het in het log als info en niet als waarschuwing. Wie het log
 bewaakt krijgt er anders alsnog een alarm op. Proef 230, met een herstart halverwege.
 
+**Sinds v0.211.0 telt ook de accustand van een auto die niet aan de paal hangt niet bij de sensorwacht.** In een
+klantwoning kwam de integratie van de auto op 09-11-2026 na een herstart om 04:45 niet op: de fabrikant weigerde
+het inloggen, met "429 Too Many Requests", na vier herstarts de dag ervoor. Om 05:46 kwam de kritieke melding
+"De accustand van ... meldt al 60 minuten niets", terwijl de paal sinds de middag ervoor op `disconnected` stond.
+Zonder auto doet de coach niets met de accustand, en een integratie die zichzelf opnieuw probeert is niets wat
+de bewoner hoeft op te lossen.
+- **Zegt de paal zelf dat er geen auto aan hangt** (`_paal_zonder_auto`, zoals hierboven), dan is de accustand van
+  zijn auto's geen stilte, ook niet bij `unavailable`. De klok van `SENSOR_STIL_AUTO` begint pas bij het inpluggen.
+- **Staat dezelfde auto bij twee palen**, dan pas als geen van beide een auto meldt.
+- **Een paal die niets zegt over een auto** (geen status en geen kabelmelding) is geen "geen auto": dan blijft het
+  zoals het was.
+- **Was de melding al gestuurd en gaat de kabel eruit**, dan blijft hij gemeld: geen "doet het weer" over een auto
+  die er niet is. Komt de accustand terug, dan staat dat in de geschiedenis, zoals elke "doet het weer".
+
+Proef 253, met een herstart halverwege, voor een Easee en een Alfen; en het scenario
+`klantwoning-accustand-weg-zonder-auto`: de accustand weg van 17:30 tot 20:15, de kabel erin om 19:01, één
+melding om 20:01.
+
 ## Een accustand die vastzit (v0.176.0)
 
 In een klantwoning stond de accustand van een bus op 28-10-2026 de hele dag op 25%. Er gingen in twee beurten

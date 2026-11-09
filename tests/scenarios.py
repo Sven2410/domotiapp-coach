@@ -506,6 +506,16 @@ klant_soc_weg = klantwoning.kopie(
     # is (`SENSOR_STIL_AUTO`, de eigenaar op 22-09-2026).
     gebeurtenissen=[("13:30", "sensor_weg", ("soc", 75))],
 )
+# v0.211.0: in een klantwoning kwam de integratie van de auto op 09-11-2026 na een herstart niet op, terwijl er
+# geen auto aan de paal hing. Om 05:46 kwam toch de kritieke melding over de accustand.
+klant_soc_weg_zonder_auto = klantwoning.kopie(
+    naam="klantwoning-accustand-weg-zonder-auto",
+    # Zonder herstart: het virtuele huis laadt bij een herstart het geheugen van de coach niet, en dan is de
+    # accustand een sensor die nog nooit iets meldde. Proef 253 in test_coach.py doet de herstart.
+    uitleg="de accustand van de Ford is vrijdag van 17:30 tot 20:15 weg; de kabel gaat om 19:01 erin",
+    begin="2026-09-04 16:55", duur_uren=38,
+    gebeurtenissen=[("17:30", "sensor_weg", ("soc", 165))],
+)
 klant_status_weg = klantwoning.kopie(
     naam="klantwoning-status-weg",
     uitleg="de status van de Easee is zaterdag van 11:00 tot 11:20 niet beschikbaar, tijdens het laden op zon",
@@ -528,7 +538,7 @@ klant_prijzen_weg_13 = klantwoning.kopie(
 )
 KLANTWONING = [klantwoning, klant_bewolkt, klant_geen_zon, klant_dure_zondag, klant_wekken,
                klant_koken, klant_p1_weg, klant_prijzen_laat, klant_geen_soc,
-               klant_herstart, klant_soc_weg, klant_status_weg, klant_zon_weg, klant_equalizer_weg,
+               klant_herstart, klant_soc_weg, klant_soc_weg_zonder_auto, klant_status_weg, klant_zon_weg, klant_equalizer_weg,
                klant_prijzen_weg_13]
 
 # --- wat de nacht van 05 op 06-09-2026 in de klantwoning leerde -----------------

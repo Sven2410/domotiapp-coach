@@ -16551,6 +16551,9 @@ try:
     # 5. 's Nachts: geen melding, en om 07:00 wel als hij wilde laden.
     i249n, h249n, c249n, b249n, l249n, f249n = bouw249(online="off", sinds=dt.datetime(2026, 11, 8, 23, 8),
                                                        waarden=huis(teruglevering=0.0, afname=1800.0))
+    # Snelladen zet meteen een ronde klaar, en die draait in de proef op de echte klok. Na de storing van
+    # deze proef liep die ronde de herlaadbeurt voor en kwam de melding niet (op 09-11-2026, alleen in de proef).
+    c249n.async_refresh = lambda: None
     c249n.async_boost("dev-laadpaal", True)
     rn249 = rondes249(c249n, i249n, dt.datetime(2026, 11, 8, 23, 8), dt.datetime(2026, 11, 9, 6, 58), stap=5, herlaad=f249n)
     controle("'s nachts geen melding, wel herladen", b249n == [] and l249n == ["e-easee"], f"{b249n} {l249n}")
@@ -16915,6 +16918,104 @@ controle("Alfen: modus 3 wisselt, en dan is hij terug", a252[-1][1] != "offline"
 # 7. De herlaadregel noemt de integratie bij zijn domein, niet bij zijn titel (bij een Easee een e-mailadres).
 bron252 = inspect.getsource(coachmod.ChargerCoach._async_online_herladen)
 controle("de herlaadregel noemt het domein, niet de titel", "entry.title" not in bron252 and "naam = entry.domain" in bron252, "")
+
+print("=== 253. de accustand van een auto die niet aan de paal hangt: geen kritieke melding (v0.211.0) ===")
+# In een klantwoning op 09-11-2026 kwam de integratie van de auto na een herstart om 04:45 niet op: de
+# fabrikant weigerde het inloggen (te veel verzoeken). Om 05:46 kwam de kritieke melding dat de accustand
+# al 60 minuten niets meldde, terwijl de paal sinds de middag ervoor op `disconnected` stond. Zonder auto
+# doet de coach niets met de accustand, en de integratie herstelt zichzelf.
+T253 = dt.datetime(2026, 11, 9, 4, 45)
+AUTO253 = dict(LAADPAAL["cars"][0], soc_entity="sensor.auto_soc")
+
+
+def bouw253(paal, waarden):
+    inst = instellingen(devices=[dict(paal, cars=[AUTO253])])
+    hass, _, coach = bouw({**waarden, "sensor.auto_soc": "45"}, inst)
+    asyncio.run(coach._async_geheugen_laden())
+    return hass, inst, coach
+
+
+def wacht253(hass, coach, inst, minuten):
+    for m in minuten:
+        hass.services.verstuurd.clear()
+        asyncio.run(coach._async_sensorwacht(inst, T253 + dt.timedelta(minutes=m)))
+        asyncio.run(hass.afmaken())
+        tel253.extend(d[2]["message"] for d in hass.services.verstuurd if d[0] == "notify")
+
+
+def accu253(hass, vanaf=0):
+    return [g for g in lijst224(hass, vanaf) if "ccustand" in g[1]]
+
+
+# 1. Easee op `disconnected`, de accustand eerst gewoon en dan een uur en meer `unavailable`, met een
+# herstart halverwege: geen melding, ook niet in de geschiedenis.
+tel253 = []
+h253, i253, c253 = bouw253(LAADPAAL, huis(status="disconnected"))
+wacht253(h253, c253, i253, [0])
+h253.states.zet("sensor.auto_soc", "unavailable")
+wacht253(h253, c253, i253, [1, 30, 50])
+c253._meldingen_onthouden()
+c253 = herstart213(h253)
+asyncio.run(c253._async_geheugen_laden())
+wacht253(h253, c253, i253, [51, 61, 62, 90, 120])
+controle("geen auto aan de paal, de accustand twee uur weg met een herstart erin: geen melding",
+         accu253(h253) == [] and tel253 == [], f"{accu253(h253)} {tel253}")
+
+# 2. De auto hangt eraan en de accustand blijft weg: na `SENSOR_STIL_AUTO` de kritieke melding, gerekend
+# vanaf het inpluggen.
+h253.states.zet("sensor.laadpaal_status", "awaiting_start")
+wacht253(h253, c253, i253, [121, 150, 180])
+voor253 = accu253(h253)
+wacht253(h253, c253, i253, [181, 182, 200])
+na253 = accu253(h253)
+print(f"  ingeplugd: {na253} telefoon {tel253}")
+controle("met de auto eraan: na een uur stil één kritieke melding, niet eerder",
+         voor253 == [] and len(na253) == 1 and na253[0][0] == "kritiek" and len(tel253) == 1, f"{voor253} {na253} {tel253}")
+
+# 3. Gaat de kabel eruit terwijl hij gemeld is: geen "doet het weer". Komt hij terug zonder auto: alleen in
+# de geschiedenis, zoals elke "doet het weer".
+h253.states.zet("sensor.laadpaal_status", "disconnected")
+wacht253(h253, c253, i253, [201, 230])
+controle("de kabel eruit na de melding: niets", accu253(h253) == na253 and len(tel253) == 1, f"{accu253(h253)}")
+h253.states.zet("sensor.auto_soc", "47")
+wacht253(h253, c253, i253, [231])
+terug253 = accu253(h253)[1:]
+controle("terug zonder auto: alleen in de geschiedenis",
+         len(terug253) == 1 and "doet het weer" in terug253[0][1] and len(tel253) == 1, f"{terug253} {tel253}")
+
+# 4. Een Alfen met de kabelmelding uit: hetzelfde; met de kabelmelding aan: de melding.
+tel253 = []
+h253b, i253b, c253b = bouw253(ALFEN, huis90(aangesloten="off"))
+wacht253(h253b, c253b, i253b, [0])
+h253b.states.zet("sensor.auto_soc", "unavailable")
+wacht253(h253b, c253b, i253b, [1, 61, 62, 90])
+alfen253 = accu253(h253b)
+h253b.states.zet("sensor.alfen_aangesloten", "on")
+wacht253(h253b, c253b, i253b, [91, 151, 152])
+controle("Alfen: zonder kabel niets, met kabel na een uur de melding",
+         alfen253 == [] and [g[0] for g in accu253(h253b)] == ["kritiek"], f"{alfen253} {accu253(h253b)}")
+
+# 5. Een paal die niets zegt over een auto is geen "geen auto": dan blijft de melding.
+tel253 = []
+h253c, i253c, c253c = bouw253(dict(LAADPAAL, entities={k: v for k, v in LAADPAAL["entities"].items() if k != "status"}),
+                              huis(status="disconnected"))
+wacht253(h253c, c253c, i253c, [0])
+h253c.states.zet("sensor.auto_soc", "unavailable")
+wacht253(h253c, c253c, i253c, [1, 61, 62])
+controle("een paal zonder status: de melding zoals voorheen", [g[0] for g in accu253(h253c)] == ["kritiek"],
+         f"{accu253(h253c)}")
+
+# 6. Dezelfde auto aan twee palen, de ene zonder auto en de andere met: de melding, want hij kan aan de tweede hangen.
+tel253 = []
+TWEEDE253 = dict(ALFEN, id="dev-alfen2", name="Tweede paal", cars=[AUTO253])
+inst253d = instellingen(devices=[dict(LAADPAAL, cars=[AUTO253]), TWEEDE253])
+h253d, _, c253d = bouw({**huis90(aangesloten="on"), "sensor.laadpaal_status": "disconnected", "sensor.auto_soc": "45"},
+                       inst253d)
+asyncio.run(c253d._async_geheugen_laden())
+wacht253(h253d, c253d, inst253d, [0])
+h253d.states.zet("sensor.auto_soc", "unavailable")
+wacht253(h253d, c253d, inst253d, [1, 61, 62])
+controle("twee palen, één met een auto: de melding", [g[0] for g in accu253(h253d)] == ["kritiek"], f"{accu253(h253d)}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
