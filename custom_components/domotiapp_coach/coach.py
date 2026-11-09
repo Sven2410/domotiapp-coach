@@ -806,6 +806,15 @@ PAAL_OFFLINE_NA = timedelta(minutes=2)
 PAAL_OFFLINE_HERLADEN = timedelta(minutes=5)
 PAAL_OFFLINE_MELDEN = timedelta(minutes=10)
 PAAL_OFFLINE_RUST = (time(22, 0), time(7, 0))
+# Online alleen is nog niet terug (v0.210.0, `_paal_doet_iets`). In dezelfde klantwoning zei de integratie na elke
+# herstart en elke herlaadbeurt 17:59 lang online, met de oude stand uit de cloud, terwijl de automaat nog uit
+# stond. De coach geloofde dat, laadde op 16 A, en begon na 18 minuten aan een nieuwe storing met een nieuwe
+# herlaadbeurt: een rondje van 23 minuten, zonder melding. Terug is de paal pas als hij zelf iets laat zien dat
+# er in de storing nog niet stond (een status, een stroom, een limiet die hij aannam), of na 30 minuten online.
+PAAL_ECHT_TERUG = timedelta(minutes=30)
+# Wat de paal zelf zegt, voor een Easee en een Alfen. De accustand of de plek van de auto hoort er niet bij: die
+# veranderen ook als de paal geen stroom heeft.
+PAAL_TEKENEN = ("status", "current", "dynamic_limit", "charging", "connected", "mode3")
 
 # Klaar blijft klaar (v0.209.0, `_klaar_blijft`). In een klantwoning was een auto op 07-11-2026 om 04:38 klaar;
 # op 08-11 om 13:39 zette de Equalizer de paal even op 0 A, en een Easee die `completed` is springt dan naar
@@ -2825,6 +2834,9 @@ class ChargerCoach:
         aan de kant van Home Assistant hangt, niet als de paal geen stroom of geen netwerk heeft. Onbekend
         of onbeschikbaar (zoals tijdens dat herladen) laat de stand zoals hij was. Alles staat in het
         geheugen, dus een herstart begint niet opnieuw te tellen en herlaadt niet nog eens.
+
+        Terug is hij pas als hij ook zelf iets nieuws zegt (`_paal_doet_iets`), of `PAAL_ECHT_TERUG` online
+        blijft (v0.210.0): na herladen of een herstart zegt een integratie ook online met de oude stand.
         """
         device_id = device.get("id", "")
         rec = self._offline.get(device_id)
@@ -2836,15 +2848,25 @@ class ChargerCoach:
         if not staten:
             return rec["sinds"] if rec else None
         if any(s.state == "on" for s in staten):
-            if rec is not None:
-                self._offline.pop(device_id, None)
-                self._offline_onthouden(device_id)
-                _LOGGER.info("%s is weer online", device_id)
-                if rec.get("herladen") or rec.get("gemeld"):
-                    await self._async_tell(
-                        t("{naam} is weer online.", naam=_hoofdletter(device.get("name") or t("de laadpaal"))),
-                        telefoon=False,
-                    )
+            if rec is None:
+                return None
+            # Online alleen is nog niet terug (v0.210.0): na een herstart of een herlaadbeurt zegt een integratie
+            # dat ook met de oude stand uit de cloud. Tot de paal zelf iets doet blijft het dezelfde storing.
+            rec.setdefault("aan", now)
+            doet = self._paal_doet_iets(device, rec)
+            if not doet and _tussen(rec["aan"], now) < PAAL_ECHT_TERUG:
+                return rec["sinds"]
+            self._offline.pop(device_id, None)
+            self._offline_onthouden(device_id)
+            _LOGGER.info(
+                "%s is weer online (%s)", device_id,
+                "de paal laat weer iets zien" if doet else f"al {int(PAAL_ECHT_TERUG.total_seconds() // 60)} minuten online",
+            )
+            if rec.get("herladen") or rec.get("gemeld"):
+                await self._async_tell(
+                    t("{naam} is weer online.", naam=_hoofdletter(device.get("name") or t("de laadpaal"))),
+                    telefoon=False,
+                )
             return None
         if rec is None:
             sinds = max(dt_util.as_local(s.last_changed).replace(tzinfo=None) for s in staten)
@@ -2856,12 +2878,57 @@ class ChargerCoach:
                 "%s is sinds %s offline; de coach stuurt hem niet tot hij terug is",
                 device_id, sinds.isoformat(timespec="minutes"),
             )
+        # Offline: wat de paal nu zegt hoort bij de storing, en de proef van online begint de volgende keer opnieuw.
+        rec.pop("aan", None)
+        rec.pop("geschreven", None)
+        if self._tekens_bij(device, rec):
+            self._offline_onthouden(device_id)
         if rec.get("herladen") is None and _tussen(rec["sinds"], now) >= PAAL_OFFLINE_HERLADEN:
             rec["herladen"] = now
             self._offline_onthouden(device_id)
             rec["herlaadde"] = await self._async_online_herladen(device_id, rec["sinds"], paren[0][0], now)
             self._offline_onthouden(device_id)
         return rec["sinds"]
+
+    def _paal_tekens(self, device: dict[str, Any]) -> dict[str, str]:
+        """Wat de paal nu zelf zegt (`PAAL_TEKENEN`), per entiteit, zonder onbekend of onbeschikbaar."""
+        entities = device.get("entities") or {}
+        tekens: dict[str, str] = {}
+        for sleutel in PAAL_TEKENEN:
+            entity_id = entities.get(sleutel)
+            staat = self.hass.states.get(entity_id) if isinstance(entity_id, str) and entity_id else None
+            if staat is not None and staat.state not in ("unknown", "unavailable", ""):
+                tekens[entity_id] = str(staat.state)
+        return tekens
+
+    def _tekens_bij(self, device: dict[str, Any], rec: dict[str, Any]) -> bool:
+        """Wat de paal in de storing zei bij de rest zetten (v0.210.0). Geeft terug of er iets bij kwam."""
+        gezien: dict[str, list[str]] = rec.setdefault("tekens", {})
+        bij = False
+        for entity_id, waarde in self._paal_tekens(device).items():
+            rij = gezien.setdefault(entity_id, [])
+            if waarde not in rij:
+                rij[:] = [*rij[-19:], waarde]
+                bij = True
+        return bij
+
+    def _paal_doet_iets(self, device: dict[str, Any], rec: dict[str, Any]) -> bool:
+        """Of de paal iets zegt dat er in de storing nog niet stond (v0.210.0).
+
+        Een status, een stroom of een limiet die anders is dan alles wat de integratie tijdens de storing gaf.
+        De oude stand die een integratie na herladen uit de cloud haalt, telt dus niet. Een entiteit die in de
+        storing nooit iets zei, telt de eerste keer ook niet: dan is er niets om mee te vergelijken.
+        """
+        gezien: dict[str, list[str]] = rec.setdefault("tekens", {})
+        nieuw = False
+        for entity_id, waarde in self._paal_tekens(device).items():
+            rij = gezien.get(entity_id)
+            if rij is None:
+                gezien[entity_id] = [waarde]
+                self._offline_onthouden(device.get("id", ""))
+            elif waarde not in rij:
+                nieuw = True
+        return nieuw
 
     async def _async_online_herladen(self, device_id: str, sinds: datetime, entity_id: str, now: datetime) -> bool:
         """De integratie van de sensor online één keer herladen, zoals `_async_integraties` (v0.209.0).
@@ -2881,7 +2948,8 @@ class ChargerCoach:
         # Een integratie die niet geladen is, herlaadt `_async_integraties` al.
         if str(getattr(entry.state, "value", entry.state)) != "loaded":
             return False
-        naam = entry.title or entry.domain
+        # Het domein en niet de titel: die is bij een Easee het e-mailadres van het account (v0.210.0).
+        naam = entry.domain
         _LOGGER.warning(
             "%s is al %d minuten offline; de coach herlaadt de integratie %s",
             device_id, int(_tussen(sinds, now).total_seconds() // 60), naam,
@@ -2932,6 +3000,7 @@ class ChargerCoach:
             "gemeld": bool(rec.get("gemeld")),
             "wilde": bool(rec.get("wilde")),
             "herlaadde": bool(rec.get("herlaadde")),
+            "tekens": {e: list(r) for e, r in (rec.get("tekens") or {}).items()},
         }
         self._onthoud(f"paal-offline:{device_id}", data, meteen=True)
 
@@ -10524,7 +10593,12 @@ class ChargerCoach:
         offline = await self._async_paal_online(now, device)
         grid, car, charger, window = self._read(now, settings, device, reserved)
         self._fasen_bijhouden(settings, device, now)
-        los = self._tweede_sturing(device, charger, now)
+        # Offline telt een limiet die niet aankomt niet als een tweede sturing (v0.210.0): de paal neemt dan niets aan.
+        if offline is None:
+            los = self._tweede_sturing(device, charger, now)
+        else:
+            los = False
+            self._vreemd_teltijd.pop(device_id, None)
         if offline is None and self._app_hervat(device, charger, now):
             await self._async_app_hervat(device)
             charger = replace(charger, boost=True, paused_by_user=False, modus=self._modus_van(device))
@@ -10623,6 +10697,7 @@ class ChargerCoach:
 
         # Offline: wat hij zou doen bepaalt alleen of er een melding komt (`_async_offline_melden`).
         wil = decision.charge and charger.connected
+        gewild = decision
         if offline is not None:
             omzetten = None
             decision = Decision(
@@ -10893,6 +10968,17 @@ class ChargerCoach:
         # hij het laatst stuurde, zodat hij zodra de paal terug is meteen weer schrijft.
         if offline is not None:
             self._last.pop(device_id, None)
+            # Zegt de integratie weer online, dan één keer schrijven wat de coach wil (v0.210.0): een paal die echt
+            # terug is, neemt die limiet aan en laat zo zien dat hij er is (`_paal_doet_iets`). Eén keer per keer
+            # online, dus geen "toch gestart" elke minuut naar een paal die er niet is.
+            rec = self._offline.get(device_id)
+            if rec is not None and rec.get("aan") is not None and wil and not rec.get("geschreven"):
+                rec["geschreven"] = True
+                try:
+                    await self._apply(device, charger, gewild, now)
+                except Exception as fout:  # noqa: BLE001 - een paal die er niet is, mag niet weigeren
+                    _LOGGER.debug("%s: de proef bij online kwam niet aan: %s", device_id, fout)
+                self._last.pop(device_id, None)
             await self._async_offline_melden(now, device, wil)
             return 0.0
 
@@ -16847,6 +16933,10 @@ class ChargerCoach:
                         "sinds": sinds, "herladen": _uit_geheugen(data.get("herladen")),
                         "gemeld": bool(data.get("gemeld")), "wilde": bool(data.get("wilde")),
                         "herlaadde": bool(data.get("herlaadde")),
+                        "tekens": {
+                            str(e): [str(w) for w in r] for e, r in (data.get("tekens") or {}).items()
+                            if isinstance(r, list)
+                        },
                     }
             elif sleutel == "water":
                 self._water_loopt_sinds = _uit_geheugen(data.get("sinds"))

@@ -2902,6 +2902,42 @@ if (off_v := v("paal-offline")) and (nacht_v := v("paal-offline-nacht")):
     controle("paal-offline-nacht: en geen kritieke 'neemt al ... geen stroom af' over de auto",
              not meldingen(nacht_v, "minuten geen stroom af"), f"{meldingen(nacht_v, 'minuten geen stroom af')}")
 
+# Online na herladen is nog niet terug (v0.210.0). In een klantwoning op 09-11-2026 zei de Easee-integratie na elke
+# herstart en elke herlaadbeurt 18 minuten online met de oude stand; de coach laadde dan weer, herlaadde opnieuw, en
+# de melding kwam nooit.
+for naam_h, terug_h, melding_h in (
+    ("paal-offline-herladen", (0, 15, 0), ("Mon 11:15", "Laadpaal is sinds 11:00 offline en komt niet terug na herladen.")),
+    ("alfen-offline-herladen", (0, 15, 0), ("Mon 11:15", "Laadpaal is sinds 11:00 offline en komt niet terug na herladen.")),
+    ("paal-offline-herladen-nacht", (1, 8, 0),
+     ("Tue 07:00", "Laadpaal is sinds maandag om 21:50 offline en komt niet terug na herladen.")),
+):
+    if not (h_v := v(naam_h)):
+        continue
+    begin_h = h_v.regels[0].tijd
+    uit_h = min(r.tijd for r in h_v.regels if r.regel == "offline")
+    terug_t = (begin_h + dt.timedelta(days=terug_h[0])).replace(hour=terug_h[1], minute=terug_h[2])
+    stil_h = [r for r in h_v.regels if uit_h <= r.tijd < terug_t]
+    opdr_h = sorted({o[0].strftime("%a %H:%M") for o in h_v.paal_offline_opdrachten if o[0] >= uit_h})
+    print(f"  {naam_h}: herladen {[t.strftime('%a %H:%M') for t in h_v.paal_herladen]}, opdrachten offline {opdr_h}, "
+          f"meldingen {[(t.strftime('%a %H:%M'), m[:60]) for t, m in h_v.meldingen]}")
+    controle(f"{naam_h}: offline tot de automaat weer aan gaat, ook terwijl de integratie online zegt",
+             stil_h and all(r.regel == "offline" for r in stil_h), f"{sorted({r.regel for r in stil_h})}")
+    controle(f"{naam_h}: één herlaadbeurt", len(h_v.paal_herladen) == 1, f"{h_v.paal_herladen}")
+    controle(f"{naam_h}: hooguit één keer schrijven per keer dat de integratie online zegt",
+             len(opdr_h) <= (2 if "nacht" in naam_h else 1), f"{opdr_h}")
+    controle(f"{naam_h}: één melding, met 'komt niet terug na herladen'",
+             [(t.strftime("%a %H:%M"), m[:len(melding_h[1])]) for t, m in h_v.meldingen if "offline" in m] == [melding_h],
+             f"{h_v.meldingen}")
+    controle(f"{naam_h}: één keer 'weer online', pas als hij echt terug is, en alleen in de geschiedenis",
+             sum("weer online" in str(g.get("message")) for g in h_v.geschiedenis) == 1
+             and not meldingen(h_v, "weer online")
+             and any(r.tijd >= terug_t and r.tijd <= terug_t + dt.timedelta(minutes=1) and r.regel != "offline"
+                     for r in h_v.regels), f"{[(r.tijd, r.regel) for r in h_v.regels if r.tijd >= terug_t][:3]}")
+    # Na de storing mag "was om 06:00 nog niet vol" wel: de paal had de hele nacht geen stroom.
+    controle(f"{naam_h}: geen kritieke melding in de storing",
+             not [t for t, m in h_v.meldingen if t < terug_t and "offline" not in m],
+             f"{[(t, m) for t, m in h_v.meldingen if t < terug_t]}")
+
 # Klaar blijft klaar (v0.209.0). In een klantwoning sprong een Easee na een dip van de Equalizer van completed naar
 # awaiting_start, en plande de coach de beurt opnieuw.
 if (eq_v := v("klaar-equalizer-dip")):

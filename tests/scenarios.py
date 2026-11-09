@@ -1873,6 +1873,26 @@ paal_offline_nacht = vast_bewolkt.kopie(
     duur_uren=28.0,
     gebeurtenissen=[("21:50", "automaat", False), ("+1 08:00", "automaat", True)],
 )
+# Online na herladen is nog niet terug (v0.210.0). In een klantwoning op 09-11-2026 zei de Easee-integratie na elke
+# herstart en elke herlaadbeurt 17:59 lang online, met de oude stand, terwijl de automaat van de paal uit stond.
+paal_offline_herladen = paal_offline.kopie(
+    naam="paal-offline-herladen",
+    uitleg="paal-offline, en na herladen zegt de integratie nog 18 minuten online met de oude stand",
+    paal_cache_min=18,
+)
+paal_offline_herladen_nacht = paal_offline_nacht.kopie(
+    naam="paal-offline-herladen-nacht",
+    uitleg="paal-offline-nacht, met 18 minuten online na herladen, en om 04:31 een herstart van Home Assistant",
+    paal_cache_min=18,
+    gebeurtenissen=[("21:50", "automaat", False), ("+1 04:31", "herstart", None), ("+1 08:00", "automaat", True)],
+)
+alfen_offline_herladen = alfen_zonnig.kopie(
+    naam="alfen-offline-herladen",
+    uitleg="alfen-vast-zonnig; om 11:00 gaat de automaat uit, de integratie zegt na herladen nog 18 minuten "
+           "online, om 15:00 weer aan",
+    paal_cache_min=18,
+    gebeurtenissen=[("11:00", "automaat", False), ("15:00", "automaat", True)],
+)
 # Klaar blijft klaar (v0.209.0). In een klantwoning was een auto op 07-11-2026 om 04:38 klaar op een geschatte
 # 72%; op 08-11 om 13:39 zette de Equalizer de paal op 0 A, de Easee sprong naar awaiting_start, en de coach
 # plande opnieuw, wekte om 20:00 en meldde om 20:20 als kritiek dat de auto geen stroom afnam.
@@ -1913,6 +1933,7 @@ groep_paal_batterij_zonder_meter = groep_paal_batterij.kopie(
 
 ALLE = [
     alfen_auto_weg, alfen_auto_weg_gast, paal_offline, paal_offline_nacht, klaar_equalizer,
+    paal_offline_herladen, paal_offline_herladen_nacht, alfen_offline_herladen,
     groep_paal_batterij, groep_paal_batterij_los, groep_paal_batterij_zonder_meter,
     alfen_zonnig, alfen_dyn, alfen_paal_weg, klant_paal_weg, alfen_doel_80, alfen_laadgrens,
     alfen_drie_zon, alfen_fasen_zon, alfen_fasen_wisselend, alfen_fasen_helder, alfen_drie_dyn, alfen_fasen_dyn,
