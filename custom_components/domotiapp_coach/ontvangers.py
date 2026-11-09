@@ -14,6 +14,11 @@ het paneel, plus de zekeringmelding van monitor.py:
   melding    de verslagen: vol, kabel eruit, een sensor die het weer doet
   besluit    elk besluit van de coach; standaard uit, want dat zijn er veel
   belasting  de aansluiting wordt te zwaar belast
+  herinnering  de auto hangt niet aan de paal en heeft te weinig (v0.212.0)
+
+Een soort die er bij een persoon nog niet staat, telt zoals bij een nieuwe
+persoon (`STANDAARD_SOORTEN`). Zo krijgt wie er al stond de herinnering ook,
+standaard aan, ook als hij alle andere soorten uit heeft.
 
 Sinds v0.114.0 beheert de bewoner de personen zelf. De eigenaar op 12-10-2026,
 op de vraag of de bewoner personen toevoegt en weghaalt en iedereen ziet: "Ja
@@ -30,7 +35,7 @@ import copy
 import secrets
 from typing import Any
 
-SOORTEN: tuple[str, ...] = ("kritiek", "melding", "besluit", "belasting")
+SOORTEN: tuple[str, ...] = ("kritiek", "melding", "besluit", "belasting", "herinnering")
 
 # Wat een nieuwe persoon krijgt. Besluiten staan uit: dat is wat de coach elke
 # paar minuten doet, en niemand wil daar 's nachts een telefoon van horen.
@@ -39,6 +44,7 @@ STANDAARD_SOORTEN: dict[str, bool] = {
     "melding": True,
     "besluit": False,
     "belasting": True,
+    "herinnering": True,
 }
 
 
@@ -88,7 +94,7 @@ def ontvangers(settings: dict[str, Any], soort: str) -> list[str]:
         return []
     uit: list[str] = []
     for persoon in personen(settings):
-        if (persoon.get("kinds") or {}).get(soort) and persoon["target"] not in uit:
+        if (persoon.get("kinds") or {}).get(soort, STANDAARD_SOORTEN[soort]) and persoon["target"] not in uit:
             uit.append(persoon["target"])
     return uit
 

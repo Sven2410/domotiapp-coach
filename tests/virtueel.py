@@ -1272,6 +1272,8 @@ class Scenario:
     # automaat van de paal uit staat (v0.210.0). Een Easee in een klantwoning op 09-11-2026: 17:59. Met 0 is er
     # geen integratie om te herladen.
     paal_cache_min: int = 0
+    # De herinnering om de auto aan te sluiten bij de paal (v0.212.0), zoals `reminder` in de instellingen, of None.
+    herinnering: dict | None = None
     # Wat "oven" aanzet, in watt; valt over de fasen zoals `Huis.verdeling`.
     # 5,5 kW met 80% op één fase is een warmtepomp zoals in de klantwoning.
     oven_w: float = 3000.0
@@ -1772,6 +1774,7 @@ def instellingen(s: Scenario) -> dict:
             "id": "paal",
             "type": "laadpaal",
             "name": "Laadpaal",
+            "reminder": s.herinnering or {},
             "brand": s.paal.merk,
             **({"circuit": "garage"} if s.groep_amps is not None else {}),
             "controllable": s.paal_stuurbaar,

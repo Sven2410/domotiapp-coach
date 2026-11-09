@@ -858,7 +858,8 @@ export class DacScheduleSheet extends DacElement {
       vk.innerHTML = voorkeurHtml(device, { zon });
       this.vkVoor_ = vorm;
     }
-    vulVoorkeuren(vk, device, this.shadowRoot?.activeElement ?? null, this.settings_?.contract ?? null);
+    vulVoorkeuren(vk, device, this.shadowRoot?.activeElement ?? null, this.settings_?.contract ?? null,
+      this.settings_?.car_usage ?? null);
   }
 
   async saveVoorkeur_(patch) {
@@ -880,7 +881,7 @@ export class DacScheduleSheet extends DacElement {
       status.textContent = t("Dit is niet opgeslagen. Probeer het nog een keer.");
       status.classList.add("bad");
       // Terug naar wat er wel is opgeslagen.
-      vulVoorkeuren(this.$("#vk"), this.device_, null, this.settings_?.contract ?? null);
+      vulVoorkeuren(this.$("#vk"), this.device_, null, this.settings_?.contract ?? null, this.settings_?.car_usage ?? null);
     }
   }
 

@@ -2816,7 +2816,8 @@ controle("een bewoner ziet alleen zijn eigen persoon",
 controle("en de rest van de instellingen blijft", eigen["devices"] == inst55["devices"], "")
 nieuw55 = ontv.zet_eigen_soorten(inst55, "u-partner", {"melding": True, "besluit": True, "name": "hack"})
 controle("hij zet zijn eigen soorten, en niets anders",
-         nieuw55[1]["kinds"] == {"kritiek": True, "melding": True, "besluit": True, "belasting": False}
+         nieuw55[1]["kinds"] == {"kritiek": True, "melding": True, "besluit": True, "belasting": False,
+                                 "herinnering": True}
          and nieuw55[1]["name"] == "Partner" and nieuw55[0]["kinds"]["melding"] is True, f"{nieuw55}")
 controle("zonder gekoppelde persoon valt er niets te zetten",
          ontv.zet_eigen_soorten(inst55, "u-onbekend", {"melding": True}) is None, "")
@@ -2831,7 +2832,8 @@ controle("de oude ontvanger wordt een persoon met een leesbare naam",
          len(mensen55) == 1 and mensen55[0]["target"] == "mobile_app_iphone_van_de_keuken"
          and mensen55[0]["name"] == "Iphone van de keuken" and mensen55[0]["id"].startswith("p-"), f"{mensen55}")
 controle("met alles aan behalve de besluiten",
-         mensen55[0]["kinds"] == {"kritiek": True, "melding": True, "besluit": False, "belasting": True}, "")
+         mensen55[0]["kinds"] == {"kritiek": True, "melding": True, "besluit": False, "belasting": True,
+                                  "herinnering": True}, "")
 controle("en de drempel gaat mee, zonder de ontvangers",
          mig["notifications"]["load_alert"] == {"enabled": True, "threshold_percent": 85.0,
                                                  "min_interval_minutes": 30, "min_duration_seconds": 60}, "")
@@ -17016,6 +17018,182 @@ wacht253(h253d, c253d, inst253d, [0])
 h253d.states.zet("sensor.auto_soc", "unavailable")
 wacht253(h253d, c253d, inst253d, [1, 61, 62])
 controle("twee palen, één met een auto: de melding", [g[0] for g in accu253(h253d)] == ["kritiek"], f"{accu253(h253d)}")
+
+print("=== 254. een herinnering als de auto niet aan de paal hangt (v0.212.0) ===")
+# In een klantwoning werd de bus op 08-11-2026 vergeten aan te sluiten. Klaar-tijd 07:00 elke dag. Maandag 09-11.
+AUTO254 = dict(LAADPAAL["cars"][0], soc_entity="sensor.auto_soc", capacity_kwh=65.0, phases="three", max_amps=16)
+VAST254 = {"mode": "vast", "time": "21:00", "below_percent": 50, "reserve_percent": 10}
+SLIM254 = dict(VAST254, mode="slim")
+M254 = lambda u, m=0, d=9: dt.datetime(2026, 11, d, u, m)  # noqa: E731
+
+
+def bouw254(herinnering, soc="18", waarden=None, paal=LAADPAAL, schema=True, gebruik=None, auto=AUTO254):
+    apparaat = dict(paal, cars=[auto], reminder=herinnering)
+    inst = instellingen(devices=[apparaat], active_cars=[{"device": apparaat["id"], "car": "car-1"}])
+    inst["strategy"]["schedules"][0].update(device=apparaat["id"], enabled=schema)
+    inst["strategy"]["schedules"][0]["window"]["done_by"] = "07:00"
+    # Een tweede persoon met alle soorten uit, zoals bij de klant: de herinnering is een eigen soort, standaard aan.
+    inst["notifications"]["people"].append({"id": "p-2", "name": "Tweede", "target": "mobile_app_tweede", "user_id": "",
+                                            "kinds": {"kritiek": False, "melding": False, "besluit": False, "belasting": False}})
+    if gebruik is not None:
+        inst["car_usage"] = [{"device": apparaat["id"], "car": "car-1", "days": gebruik}]
+    hass, _store, coach = bouw({**(waarden or huis(status="disconnected")), "sensor.auto_soc": soc}, inst)
+    asyncio.run(coach._async_geheugen_laden())
+    return hass, inst, coach
+
+
+def gang254(hass, coach, inst, van, tot, stap=1):
+    """Elke ronde de paal en de herinnering; terug: (tijd, telefoon, tekst) van elke herinnering."""
+    paal = inst["devices"][0]
+    uit = []
+    nu = van
+    while nu <= tot:
+        hass.services.verstuurd.clear()
+        asyncio.run(hass.afmaken())
+        asyncio.run(coach._one(nu, inst, paal, "steer"))
+        hass.services.verstuurd.clear()
+        asyncio.run(coach._async_herinnering(nu, inst, paal))
+        asyncio.run(hass.afmaken())
+        uit += [(nu.strftime("%H:%M"), d[1], d[2]["message"]) for d in hass.services.verstuurd if d[0] == "notify"]
+        nu += dt.timedelta(minutes=stap)
+    return uit
+
+
+def teksten254(uit):
+    return sorted({(tijd, tekst) for tijd, _doel, tekst in uit})
+
+
+# 1. Vast, 18%, de kabel eruit: om 21:00 één herinnering, ook naar wie verder niets wil, en een herstart
+#    om 21:05 geeft geen tweede.
+h254, i254, c254 = bouw254(VAST254)
+een254 = gang254(h254, c254, i254, M254(20, 50), M254(21, 4))
+c254._meldingen_onthouden()
+c254 = herstart213(h254)
+asyncio.run(c254._async_geheugen_laden())
+een254 += gang254(h254, c254, i254, M254(21, 5), M254(21, 30))
+print(f"  vast: {een254}")
+controle("vast, 18%, niet aangesloten: om 21:00 één herinnering, ook na een herstart om 21:05",
+         teksten254(een254) == [("21:00", "Ford staat op 18% en hangt niet aan de paal.")], f"{een254}")
+controle("naar beide telefoons, ook naar wie alle andere soorten uit heeft",
+         sorted(d for _t, d, _m in een254) == ["mobile_app_iphone", "mobile_app_tweede"], f"{een254}")
+controle("in de geschiedenis als herinnering", ("herinnering", "Ford staat op 18% en hangt niet aan de paal.") in lijst224(h254),
+         f"{lijst224(h254)}")
+
+# 2. Aangesloten om 20:30: niets. Geen klaar-tijd morgen: niets. Op 60%: niets.
+h254b, i254b, c254b = bouw254(VAST254, waarden=huis(status="awaiting_start"))
+controle("om 20:30 aangesloten: geen herinnering", gang254(h254b, c254b, i254b, M254(20, 30), M254(21, 30)) == [], "")
+h254c, i254c, c254c = bouw254(VAST254, schema=False)
+controle("geen klaar-tijd: geen herinnering", gang254(h254c, c254c, i254c, M254(20, 55), M254(21, 30)) == [], "")
+h254d, i254d, c254d = bouw254(VAST254, soc="60")
+controle("op 60% met een drempel van 50%: geen herinnering", gang254(h254d, c254d, i254d, M254(20, 55), M254(21, 30)) == [], "")
+h254e, i254e, c254e = bouw254(dict(VAST254, mode="uit"))
+controle("uit: geen herinnering", gang254(h254e, c254e, i254e, M254(20, 55), M254(21, 30)) == [], "")
+# Een paal die offline is: wat hij zegt is oud, dus niets (v0.209.0).
+h254q, i254q, c254q = bouw254(VAST254)
+c254q._offline["dev-laadpaal"] = {"sinds": M254(18, 0)}
+controle("een paal die offline is: geen herinnering", gang254(h254q, c254q, i254q, M254(20, 59), M254(21, 1)) == [], "")
+# Drie uur na het moment niet meer, zoals na een herstart om 01:00.
+h254r, i254r, c254r = bouw254(VAST254)
+laat254 = gang254(h254r, c254r, i254r, M254(0, 1, 10), M254(0, 2, 10))
+controle("om 00:01 is 21:00 drie uur voorbij: niets", laat254 == [], f"{laat254}")
+controle("om 23:59 nog wel", len(teksten254(gang254(h254r, c254r, i254r, M254(23, 59), M254(23, 59)))) == 1, "")
+# Gaat de kabel er na de herinnering in en weer uit: niet nog eens voor dezelfde klaar-tijd.
+h254.states.zet("sensor.laadpaal_status", "awaiting_start")
+gang254(h254, c254, i254, M254(21, 31), M254(21, 40))
+h254.states.zet("sensor.laadpaal_status", "disconnected")
+controle("de kabel erin en weer eruit: niet nog eens", gang254(h254, c254, i254, M254(21, 41), M254(22, 0)) == [], "")
+
+# 3. Slim: wat de auto op die weekdag meestal verbruikt, plus 10%. Morgen is dinsdag: 20, 25 en 30 is 28.
+gebruik254 = {"2026-10-20": 20.0, "2026-10-27": 25.0, "2026-11-03": 30.0, "2026-11-02": 10.0, "2026-11-04": 10.0,
+              "2026-11-05": 10.0, "2026-11-06": 10.0, "2026-11-07": 10.0}
+h254f, i254f, c254f = bouw254(SLIM254, soc="30", gebruik=gebruik254)
+slim254 = gang254(h254f, c254f, i254f, M254(20, 55), M254(21, 5))
+controle("slim, 30% en dinsdag meestal 28% plus 10%: de herinnering met het verbruik",
+         teksten254(slim254) == [("21:00", "Ford staat op 30%. Morgen rijd je meestal 28%. Vergeet hem niet aan te sluiten.")],
+         f"{slim254}")
+h254g, i254g, c254g = bouw254(SLIM254, soc="40", gebruik=gebruik254)
+controle("slim, 40%: genoeg voor morgen, geen herinnering", gang254(h254g, c254g, i254g, M254(20, 55), M254(21, 5)) == [], "")
+h254h, i254h, c254h = bouw254(SLIM254, soc="30", gebruik={"2026-11-03": 30.0})
+controle("slim die nog leert: de vaste drempel en de vaste tekst",
+         teksten254(gang254(h254h, c254h, i254h, M254(20, 55), M254(21, 5)))
+         == [("21:00", "Ford staat op 30% en hangt niet aan de paal.")], "")
+
+# 4. De accustand valt weg: de laatst bekende met het tijdstip; niets bekend: alleen vast, zonder stand.
+h254i, i254i, c254i = bouw254(VAST254)
+gang254(h254i, c254i, i254i, M254(20, 9), M254(20, 9))
+h254i.states.zet("sensor.auto_soc", "unavailable")
+weg254 = gang254(h254i, c254i, i254i, M254(20, 10), M254(21, 5))
+controle("de accustand weg: de laatst bekende met de tijd",
+         teksten254(weg254) == [("21:00", "Ford hangt niet aan de paal. Laatst bekend: 18% om 20:09.")], f"{weg254}")
+h254j, i254j, c254j = bouw254(VAST254, soc="unavailable")
+controle("niets bekend, vast: zonder stand",
+         teksten254(gang254(h254j, c254j, i254j, M254(20, 55), M254(21, 5))) == [("21:00", "Ford hangt niet aan de paal.")], "")
+h254k, i254k, c254k = bouw254(SLIM254, soc="unavailable", gebruik=gebruik254)
+controle("niets bekend, slim: niets", gang254(h254k, c254k, i254k, M254(20, 55), M254(21, 5)) == [], "")
+
+# 5. Te weinig tijd: op één fase, 5% van 65 kWh. Dan een half uur voor het laatste moment, niet om 21:00.
+EEN254 = dict(AUTO254, phases="one")
+h254l, i254l, c254l = bouw254(VAST254, soc="5", auto=EEN254)
+gang254(h254l, c254l, i254l, M254(5, 0), M254(5, 0))
+nodig254 = coachmod.hours_needed(coachmod.Car(capacity_kwh=65.0, phases=1, max_amps=16, soc_percent=5.0), 14)
+om254 = coachmod.herinnering_moment(M254(7, 0, 10), dt.time(21, 0), nodig254)
+vroeg254 = gang254(h254l, c254l, i254l, om254.replace(second=0) - dt.timedelta(minutes=3), om254.replace(second=0) + dt.timedelta(minutes=3))
+print(f"  {nodig254:.1f} uur nodig, herinnering om {om254:%H:%M:%S}: {teksten254(vroeg254)}")
+controle("te weinig tijd: de herinnering komt eerder, een half uur voor het laatste moment",
+         om254 < M254(21, 0) and len(teksten254(vroeg254)) == 1
+         and teksten254(vroeg254)[0][0] == (om254 + dt.timedelta(seconds=59)).strftime("%H:%M"), f"{vroeg254}")
+
+# 6. Een Alfen: de kabelmelding uit is niet aangesloten.
+h254m, i254m, c254m = bouw254(VAST254, paal=ALFEN, waarden=huis90(aangesloten="off"))
+controle("Alfen zonder kabel: de herinnering", len(teksten254(gang254(h254m, c254m, i254m, M254(20, 59), M254(21, 1)))) == 1, "")
+h254n, i254n, c254n = bouw254(VAST254, paal=ALFEN, waarden=huis90(aangesloten="on"))
+controle("Alfen met kabel: niets", gang254(h254n, c254n, i254n, M254(20, 59), M254(21, 1)) == [], "")
+# Een paal die niets over een auto zegt: niets.
+h254o, i254o, c254o = bouw254(VAST254, paal=dict(LAADPAAL, entities={k: v for k, v in LAADPAAL["entities"].items()
+                                                                     if k != "status"}))
+controle("een paal zonder status: niets", gang254(h254o, c254o, i254o, M254(20, 59), M254(21, 1)) == [], "")
+
+# 7. Het leren: twee dagen en een begin, overdag 2% per uur eraf, 's avonds geladen, met een herstart midden op dag twee.
+h254p, i254p, c254p = bouw254(dict(VAST254, mode="uit"), soc="80")
+
+
+def dag254(coach, dag, van=0, tot=23):
+    paal = i254p["devices"][0]
+    for uur in range(van, tot + 1):
+        soc = 80 - 2 * max(0, min(uur, 17) - 7) if uur < 22 else 80
+        # Ruis van een procent om 12:00: telt niet.
+        h254p.states.zet("sensor.auto_soc", str(soc + (1 if uur == 12 else 0)))
+        asyncio.run(coach._async_herinnering(dt.datetime(2026, 11, dag, uur, 0), i254p, paal))
+
+
+dag254(c254p, 2)
+dag254(c254p, 3, 0, 11)
+c254p = herstart213(h254p)
+asyncio.run(c254p._async_geheugen_laden())
+dag254(c254p, 3, 12, 23)
+dag254(c254p, 4, 0, 0)
+geleerd254 = coachmod.ChargerCoach._verbruik_dagen(i254p, "dev-laadpaal", "car-1")
+print(f"  geleerd: {geleerd254}")
+controle("twee dagen geleerd, 20% per dag, ook met een herstart midden op de dag",
+         geleerd254 == {"2026-11-02": 20.0, "2026-11-03": 20.0}, f"{geleerd254}")
+controle("en het staat in de opslag", any(r.get("days") == geleerd254 for r in h254p.data["domotiapp_coach"]["store"].instellingen.get("car_usage", [])),
+         f"{h254p.data['domotiapp_coach']['store'].instellingen.get('car_usage')}")
+
+# 8. De instelling: Instellen stuurt één veld en de rest blijft; het apparaatschema laat hem niet vallen (anders was
+#    hij weg zodra de installateur een apparaat opslaat); en het geleerde gaat mee weg met de paal.
+opslag254 = sys.modules["domotiapp_coach.storage"]
+samen254 = opslag254.voorkeuren_bijwerken([dict(LAADPAAL, reminder=dict(VAST254, time="20:00"))], "dev-laadpaal",
+                                          {"reminder": {"mode": "slim"}})
+controle("een veld van de herinnering wijzigen laat de rest staan",
+         samen254[0]["reminder"] == dict(VAST254, mode="slim", time="20:00"), f"{samen254[0]['reminder']}")
+ws254 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach" / "websocket.py").read_text(encoding="utf-8")
+controle("het apparaatschema kent de herinnering", 'vol.Optional("reminder", default=dict): _HERINNERING' in ws254, "")
+weg254 = opslag254._forget_removed_devices({"devices": [], "car_usage": [{"device": "dev-laadpaal", "car": "car-1", "days": {}}]})
+controle("het geleerde gaat mee weg met de paal", weg254["car_usage"] == [], f"{weg254.get('car_usage')}")
+
+# 9. De herinnering zit in de ronde.
+bron254 = inspect.getsource(coachmod.ChargerCoach._round)
+controle("de ronde vraagt per paal om de herinnering", "await self._async_herinnering(moment, settings, device)" in bron254, "")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

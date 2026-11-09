@@ -3929,6 +3929,76 @@ for huis90, verwacht in ((13.0, 13), (19.0, 7), (21.0, 0)):
     if verwacht:
         controle(f"  en de drukste fase blijft onder 26 A", huis90 + d90.amps <= 26.0 + 1e-9, f"{huis90 + d90.amps}")
 
+print("=== 81. de herinnering om de auto aan te sluiten: verbruik, drempel en moment (v0.212.0) ===")
+D81 = dt.datetime
+# 1. Het verbruik van een dag: elke daling telt, laden niet, ruis van een procent ook niet.
+rec81 = None
+for uur, soc in ((D81(2026, 11, 2, 0, 0), 80), (D81(2026, 11, 2, 8, 0), 70), (D81(2026, 11, 2, 8, 30), 71),
+                 (D81(2026, 11, 2, 9, 0), 70), (D81(2026, 11, 2, 12, 0), 60), (D81(2026, 11, 2, 13, 0), 75),
+                 (D81(2026, 11, 2, 18, 0), 65), (D81(2026, 11, 2, 23, 59), 64)):
+    rec81 = planner.autoverbruik_bij(rec81, soc, uur)
+controle("80 naar 70, ruis, 60, laden naar 75, 65, 64: 31% verbruikt", abs(rec81["verbruik"] - 31.0) < 1e-9,
+         f"{rec81['verbruik']}")
+rec81 = planner.autoverbruik_bij(rec81, 64, D81(2026, 11, 3, 0, 1))
+controle("een nieuwe dag zet die van gisteren in de dagen", rec81["dagen"] == {"2026-11-02": 31.0} and rec81["verbruik"] == 0.0,
+         f"{rec81}")
+# Een daling over middernacht telt op de nieuwe dag.
+rec81 = planner.autoverbruik_bij(rec81, 60, D81(2026, 11, 3, 0, 30))
+controle("en een daling na middernacht op de nieuwe dag", rec81["verbruik"] == 4.0, f"{rec81['verbruik']}")
+# Een dag met maar tien uur accustand telt niet.
+kort81 = planner.autoverbruik_bij(None, 50, D81(2026, 11, 4, 10, 0))
+kort81 = planner.autoverbruik_bij(kort81, 40, D81(2026, 11, 4, 20, 0))
+kort81 = planner.autoverbruik_bij(kort81, 40, D81(2026, 11, 5, 0, 0))
+controle("een dag van tien uur telt niet", kort81["dagen"] == {}, f"{kort81['dagen']}")
+# Wat ouder is dan acht weken valt eraf.
+oud81 = planner.autoverbruik_bij({**rec81, "dagen": {"2026-09-01": 20.0, "2026-10-01": 15.0}}, 60, D81(2026, 11, 3, 1, 0))
+controle("ouder dan acht weken valt eraf", oud81["dagen"] == {"2026-10-01": 15.0}, f"{oud81['dagen']}")
+
+# 2. Een drukke dag per weekdag: het 80e percentiel, met minder dan zeven dagen nog niets.
+zes81 = {f"2026-10-{d:02d}": 20.0 for d in range(19, 25)}
+controle("zes dagen: nog niets geleerd", planner.verbruik_op(zes81, 0) is None, "")
+dagen81 = {"2026-10-12": 10.0, "2026-10-19": 20.0, "2026-10-26": 30.0,   # drie maandagen
+           "2026-10-13": 5.0, "2026-10-14": 5.0, "2026-10-15": 5.0, "2026-10-16": 40.0}
+controle("maandag: 80e percentiel van 10, 20 en 30 is 26", planner.verbruik_op(dagen81, 0) == 26.0,
+         f"{planner.verbruik_op(dagen81, 0)}")
+controle("dinsdag met één meting: alle zeven dagen samen, 28", planner.verbruik_op(dagen81, 1) == 28.0,
+         f"{planner.verbruik_op(dagen81, 1)}")
+vast81 = planner.herinnering_instelling({"reminder": {"mode": "vast"}})
+slim81 = planner.herinnering_instelling({"reminder": {"mode": "slim", "reserve_percent": 10}})
+controle("vast: de drempel van de bewoner, standaard 50%", planner.herinnering_drempel(vast81, dagen81, 0) == (50.0, None),
+         f"{planner.herinnering_drempel(vast81, dagen81, 0)}")
+controle("slim: het verbruik plus de reserve", planner.herinnering_drempel(slim81, dagen81, 0) == (36.0, 26.0),
+         f"{planner.herinnering_drempel(slim81, dagen81, 0)}")
+controle("slim die nog leert: de vaste drempel", planner.herinnering_drempel(slim81, zes81, 0) == (50.0, None), "")
+controle("zonder instelling uit, 21:00, 50% en 10%",
+         planner.herinnering_instelling({}) == {"mode": "uit", "time": "21:00", "below_percent": 50, "reserve_percent": 10}, "")
+
+# 3. Het moment: de laatste keer de gekozen tijd vóór de klaar-tijd, of een half uur vóór het laatste startmoment.
+T81 = dt.time(21, 0)
+controle("klaar om 07:00: de avond ervoor om 21:00",
+         planner.herinnering_moment(D81(2026, 11, 3, 7, 0), T81, 3.0) == D81(2026, 11, 2, 21, 0), "")
+controle("klaar om 22:00: dezelfde dag om 21:00",
+         planner.herinnering_moment(D81(2026, 11, 3, 22, 0), T81, None) == D81(2026, 11, 3, 21, 0), "")
+controle("17 uur nodig: om 12:30, een half uur voor 13:00 (07:00 min 17 uur en het uur reserve)",
+         planner.herinnering_moment(D81(2026, 11, 3, 7, 0), T81, 17.0) == D81(2026, 11, 2, 12, 30),
+         f"{planner.herinnering_moment(D81(2026, 11, 3, 7, 0), T81, 17.0)}")
+try:
+    planner.zet_zone(AMSTERDAM)
+    # Elf echte uur voor 07:00 op de dag van 25 uur is 21:00 de avond ervoor, niet 20:00.
+    herfst81 = planner.herinnering_moment(D81(2026, 10, 25, 7, 0), T81, 10.0)
+    controle("zomertijd eraf (25-10-2026): elf echte uur voor 07:00, een half uur eerder: 20:30",
+             herfst81 == D81(2026, 10, 24, 20, 30), f"{herfst81}")
+    # En op de dag van 23 uur is dat 19:00.
+    lente81 = planner.herinnering_moment(D81(2027, 3, 28, 7, 0), T81, 10.0)
+    controle("zomertijd erin (28-03-2027): 18:30", lente81 == D81(2027, 3, 27, 18, 30), f"{lente81}")
+    lang81 = planner.autoverbruik_bij(None, 80, D81(2026, 10, 25, 0, 0))
+    lang81 = planner.autoverbruik_bij(lang81, 70, D81(2026, 10, 25, 17, 30))
+    lang81 = planner.autoverbruik_bij(lang81, 70, D81(2026, 10, 26, 0, 0))
+    controle("de dag van 25 uur: 17:30 op de klok is 18,5 echte uur, en de dag telt",
+             lang81["dagen"] == {"2026-10-25": 10.0}, f"{lang81['dagen']}")
+finally:
+    planner.zet_zone(None)
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

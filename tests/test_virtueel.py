@@ -1619,6 +1619,18 @@ if (vl := v("klantwoning-accustand-weg-zonder-auto")):
     controle("accustand-weg-zonder-auto: en de auto is op tijd klaar",
              vl.klaar_op is not None and vl.klaar_op <= vl.klaar_tijd, f"klaar {vl.klaar_op}")
 
+# De herinnering om de auto aan te sluiten (v0.212.0): om 21:00 één, en niets als hij er al aan hangt.
+if (vl := v("vast-vergeten-aan-te-sluiten")):
+    her = [(t, m) for t, m in vl.meldingen if "hangt niet aan de paal" in m]
+    controle("vergeten-aan-te-sluiten: om 21:00 één herinnering met de accustand",
+             len(her) == 1 and her[0][0].strftime("%H:%M") == "21:00" and her[0][1] == "Bus staat op 30% en hangt niet aan de paal.",
+             f"{her}")
+    controle("vergeten-aan-te-sluiten: en daarna gewoon op tijd vol",
+             vl.klaar_op is not None and vl.klaar_op <= vl.klaar_tijd, f"klaar {vl.klaar_op}")
+if (vl := v("vast-op-tijd-aangesloten")):
+    controle("op-tijd-aangesloten: geen herinnering", not meldingen(vl, "hangt niet aan de paal"),
+             f"{meldingen(vl, 'hangt niet aan de paal')}")
+
 # Een paal die even geen opdrachten aanneemt (v0.163.3): zes minuten zegt niets, twaalf wel, één keer.
 if (vl := v("vast-zonnig-paal-weg")):
     controle("vast-zonnig-paal-weg: de paal weigerde echt opdrachten", vl.paal_geweigerd > 0, f"{vl.paal_geweigerd}")

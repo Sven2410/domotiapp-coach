@@ -413,4 +413,5 @@ export const INSTELLINGEN = {
   "Volgt de apparaten die erop hangen: {fase}.": "Follows the devices on it: {fase}.",
   "Op een andere fase dan {fase}: {apparaten}. Kies de juiste fase bij het apparaat of hier.": "On a different phase than {fase}: {apparaten}. Choose the right phase with the device or here.",
   "De apparaten op deze groep zeggen elk iets anders: {apparaten}. Kies de juiste fase bij het apparaat of hier.": "The devices on this circuit each say something different: {apparaten}. Choose the right phase with the device or here.",
+  "Als de auto niet aan de laadpaal hangt en te weinig heeft voor de volgende klaar-tijd. Wanneer, stel je in bij de laadpaal.": "When the car is not plugged into the charger and has too little for the next ready-by time. You set when at the charger.",
 };

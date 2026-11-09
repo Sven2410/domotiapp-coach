@@ -6166,3 +6166,132 @@ def plan_airco(
         aan=None, modus=None, stand="uit", rule="wacht",
         reason=t("Het is {kamer}, en je wilt {doel}. Hij gaat {werk} {wanneer}.", kamer=kamer, doel=doel, werk=werk, wanneer=wanneer),
     )
+
+
+# --- De herinnering om de auto aan te sluiten (v0.212.0) ---------------------------------------------
+#
+# In een klantwoning werd de bus op 08-11-2026 vergeten aan te sluiten. De eigenaar op 09-11-2026: "altijd
+# om x uur een notificatie sturen als auto onder x% is", en een slimme: "zelflerend obv rij- of laadgedrag".
+# Twee standen per paal: vast (een tijd en een drempel) en slim (de drempel is wat de auto op die weekdag
+# meestal verbruikt, plus een reserve). Standaard uit.
+
+HERINNERING_STANDEN = ("uit", "vast", "slim")
+HERINNERING_STANDAARD: dict[str, Any] = {"mode": "uit", "time": "21:00", "below_percent": 50, "reserve_percent": 10}
+# Over hoeveel dagen het verbruik onthouden wordt: acht weken, dus acht van elke weekdag.
+HERINNERING_DAGEN = 56
+# Onder zoveel gemeten dagen geldt ook in de slimme stand de vaste drempel.
+HERINNERING_LEREN = 7
+# Een weekdag met minder metingen dan dit neemt alle dagen samen.
+HERINNERING_PER_WEEKDAG = 2
+# Een dag telt als de accustand er zo lang van te lezen was. Een dag waarop de integratie van de auto
+# halverwege wegviel, zegt niets over wat hij reed.
+HERINNERING_HELE_DAG = timedelta(hours=18)
+# Een stijging van zoveel procent of meer is laden, aan de paal of ergens anders. Wat minder stijgt is ruis
+# van de auto (49, 50, 49) en telt niet als laden en niet nog eens als verbruik.
+HERINNERING_LADEN = 2.0
+# Een drukke dag: het 80e percentiel van wat de auto op die weekdag verbruikte.
+HERINNERING_PERCENTIEL = 0.8
+# Haalt de coach de klaar-tijd niet meer vanaf de gewone tijd, dan een half uur vóór het laatste moment.
+HERINNERING_VOOR = timedelta(minutes=30)
+# Na zoveel tijd na het moment geen herinnering meer, zoals na een herstart midden in de nacht.
+HERINNERING_TE_LAAT = timedelta(hours=3)
+
+
+def herinnering_instelling(device: dict[str, Any] | None) -> dict[str, Any]:
+    """De herinnering van een paal, met de standaard voor wat er niet staat."""
+    eigen = (device or {}).get("reminder")
+    uit = dict(HERINNERING_STANDAARD)
+    if isinstance(eigen, dict):
+        if eigen.get("mode") in HERINNERING_STANDEN:
+            uit["mode"] = eigen["mode"]
+        if isinstance(eigen.get("time"), str) and eigen["time"]:
+            uit["time"] = eigen["time"]
+        for sleutel, laag, hoog in (("below_percent", 1, 100), ("reserve_percent", 0, 100)):
+            try:
+                uit[sleutel] = max(laag, min(hoog, float(eigen[sleutel])))
+            except (KeyError, TypeError, ValueError):
+                pass
+    return uit
+
+
+def autoverbruik_bij(rec: dict[str, Any] | None, soc: float, nu: datetime) -> dict[str, Any]:
+    """Het verbruik van de auto van vandaag bijwerken met de accustand van nu.
+
+    Elke daling telt, elke stijging van `HERINNERING_LADEN` of meer is laden en telt niet. Zo slaat hij het
+    laden over, ook als de auto ergens anders laadt. Een nieuwe dag zet die van gisteren in `dagen`, als de
+    accustand er lang genoeg van te lezen was (`HERINNERING_HELE_DAG`). Wat ouder is dan
+    `HERINNERING_DAGEN` valt eraf. `rec` blijft zoals hij was; het resultaat is een nieuwe.
+    """
+    oud = rec or {}
+    dagen = {str(d): float(v) for d, v in (oud.get("dagen") or {}).items()}
+    dag = nu.date().isoformat()
+    ref = oud.get("ref")
+    if oud.get("dag") != dag:
+        eerste, laatst = oud.get("eerste"), oud.get("laatst")
+        if oud.get("dag") and eerste is not None and laatst is not None and echte_duur(eerste, laatst) >= HERINNERING_HELE_DAG:
+            dagen[str(oud["dag"])] = round(float(oud.get("verbruik") or 0.0), 1)
+        nieuw: dict[str, Any] = {"dag": dag, "eerste": nu, "verbruik": 0.0}
+    else:
+        nieuw = {"dag": dag, "eerste": oud.get("eerste") or nu, "verbruik": float(oud.get("verbruik") or 0.0)}
+    if ref is None:
+        ref = soc
+    elif soc < ref:
+        nieuw["verbruik"] += ref - soc
+        ref = soc
+    elif soc - ref >= HERINNERING_LADEN:
+        ref = soc
+    grens = (nu.date() - timedelta(days=HERINNERING_DAGEN)).isoformat()
+    nieuw.update({
+        "laatst": nu, "ref": float(ref), "soc": float(soc),
+        "dagen": {d: v for d, v in sorted(dagen.items()) if d >= grens},
+    })
+    return nieuw
+
+
+def _percentiel(waarden: list[float], deel: float) -> float:
+    """Het percentiel met lineaire interpolatie, zoals een rekenblad het doet."""
+    rij = sorted(waarden)
+    plek = (len(rij) - 1) * deel
+    onder = math.floor(plek)
+    boven = min(onder + 1, len(rij) - 1)
+    return rij[onder] + (rij[boven] - rij[onder]) * (plek - onder)
+
+
+def verbruik_op(dagen: dict[str, float], weekdag: int) -> float | None:
+    """Wat de auto op deze weekdag op een drukke dag verbruikt, of None zolang er te weinig gemeten is.
+
+    Het 80e percentiel van die weekdag over de laatste acht weken. Heeft die weekdag minder dan
+    `HERINNERING_PER_WEEKDAG` metingen, dan van alle dagen samen.
+    """
+    if len(dagen) < HERINNERING_LEREN:
+        return None
+    waarden = [v for d, v in dagen.items() if date.fromisoformat(d).weekday() == weekdag]
+    if len(waarden) < HERINNERING_PER_WEEKDAG:
+        waarden = list(dagen.values())
+    return round(_percentiel(waarden, HERINNERING_PERCENTIEL), 1)
+
+
+def herinnering_drempel(
+    instelling: dict[str, Any], dagen: dict[str, float], weekdag: int
+) -> tuple[float, float | None]:
+    """De accustand waaronder de herinnering gaat, en het verbruik waar die op rust (of None: vast)."""
+    if instelling.get("mode") == "slim":
+        verbruik = verbruik_op(dagen, weekdag)
+        if verbruik is not None:
+            return min(100.0, verbruik + float(instelling.get("reserve_percent") or 0)), verbruik
+    return float(instelling.get("below_percent") or 0), None
+
+
+def herinnering_moment(deadline: datetime, tijd: time, nodig_uren: float | None) -> datetime:
+    """Wanneer de herinnering gaat voor deze klaar-tijd.
+
+    Op de gekozen tijd, de laatste keer vóór de klaar-tijd. Haalt de coach de klaar-tijd vanaf dan niet
+    meer, met zijn uur reserve (eis 2, `_latest_start`), dan een half uur vóór het laatste moment.
+    """
+    om = datetime.combine(deadline.date(), tijd, tzinfo=deadline.tzinfo)
+    if om >= deadline:
+        om = datetime.combine(deadline.date() - timedelta(days=1), tijd, tzinfo=deadline.tzinfo)
+    laatste = _latest_start(deadline, nodig_uren)
+    if laatste is not None:
+        om = min(om, echt_verder(laatste, -HERINNERING_VOOR))
+    return om
