@@ -1609,6 +1609,16 @@ for naam, sensor, wat, van, tot in (
              (basis := v("klantwoning")) is not None and abs(vl.kosten - basis.kosten) < 0.10,
              f"{vl.kosten:.2f}")
 
+# De accustand van een auto die niet aan de paal hangt (v0.211.0): de klok begint pas bij het inpluggen. Weg
+# van 17:30 tot 20:15, de kabel erin om 19:01: één melding, rond 20:01, over een uur.
+if (vl := v("klantwoning-accustand-weg-zonder-auto")):
+    stil = [(t, m) for t, m in vl.meldingen if "ccustand" in m and "niets" in m]
+    controle("accustand-weg-zonder-auto: geen melding zolang de auto niet aan de paal hangt, één een uur na het inpluggen",
+             len(stil) == 1 and "60 minuten" in stil[0][1]
+             and dt.time(20, 0) <= stil[0][0].time() <= dt.time(20, 5), f"{stil}")
+    controle("accustand-weg-zonder-auto: en de auto is op tijd klaar",
+             vl.klaar_op is not None and vl.klaar_op <= vl.klaar_tijd, f"klaar {vl.klaar_op}")
+
 # Een paal die even geen opdrachten aanneemt (v0.163.3): zes minuten zegt niets, twaalf wel, één keer.
 if (vl := v("vast-zonnig-paal-weg")):
     controle("vast-zonnig-paal-weg: de paal weigerde echt opdrachten", vl.paal_geweigerd > 0, f"{vl.paal_geweigerd}")
