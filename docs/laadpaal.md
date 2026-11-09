@@ -1818,7 +1818,8 @@ Nu (`_async_paal_online`, `_async_offline_melden`):
   melding om 07:00. Een gewone melding, geen kritieke.
 - **Terug:** de sensor online staat in de lijst die de coach volgt (`_watch`), dus zodra hij aangaat komt er een
   ronde, en de coach vergat wat hij het laatst stuurde (`_last`), dus hij schrijft meteen. "Laadpaal is weer online."
-  gaat alleen in de geschiedenis, en alleen als er herladen of gemeld was.
+  gaat alleen in de geschiedenis, en alleen als er herladen of gemeld was. Sinds v0.210.0 is online alleen niet
+  genoeg; zie hieronder.
 - **Herstart:** sinds wanneer, of er herladen is, of het gemeld is en of hij 's nachts wilde laden staat in
   `paal-offline:<paal>` in het geheugen. Na een herstart herlaadt hij dus niet nog eens en meldt hij niet twee keer.
 
@@ -1835,6 +1836,51 @@ Proef 249 in test_coach.py:
 - een Alfen.
 
 In het virtuele huis `paal-offline` (overdag) en `paal-offline-nacht` (de melding om 07:00).
+
+## Online na herladen is nog niet terug (v0.210.0)
+
+v0.209.0 draaide in dezelfde klantwoning op 09-11-2026 vanaf 04:31, met de automaat van de paal nog uit. Na elke
+herstart en elke herlaadbeurt zei de Easee-integratie 17:59 lang online, met de oude stand uit de cloud: dezelfde
+status en spanning als vóór de storing, en `latestPulse` op het moment van laden. De coach geloofde dat. Hij zette
+"weer online" in de geschiedenis en laadde op 16 A met de regel deadline. Na 18 minuten begon er een nieuwe storing
+met een nieuwe herlaadbeurt: een rondje van 23 minuten. De melding kwam nooit, want die wacht tien minuten na het
+herladen, en de storing was drie seconden na het herladen al voorbij.
+
+Nu (`_paal_doet_iets`, `PAAL_ECHT_TERUG`):
+- **Terug is pas terug** als de sensor online aan staat én de paal zelf iets zegt dat er in de storing nog niet stond:
+  een status, een stroom of een limiet (`PAAL_TEKENEN`: status, current, dynamic_limit, en bij een Alfen charging,
+  connected, mode3). Alles wat de integratie tijdens de storing gaf, telt niet: dat is de oude stand. De accustand
+  en de plek van de auto horen er niet bij, want die veranderen ook als de paal geen stroom heeft.
+- **Of na `PAAL_ECHT_TERUG`** (30 minuten) online. Dat is ruim boven de 18 minuten die de cloud na herladen of een
+  herstart online zegt.
+- **Tot dan blijft het dezelfde storing:**
+  - de kaart blijft "Offline sinds 04:49";
+  - geen tweede herlaadbeurt en geen "weer online";
+  - wat er gemeld is en dat hij 's nachts wilde laden blijft staan, dus de melding komt zoals bedoeld.
+- **Eén keer schrijven per keer online.** Zegt de integratie online en wil de coach laden, dan schrijft hij één keer
+  wat hij wil. Een paal die echt terug is, neemt die limiet aan, en dat is een nieuw teken. Geen "toch gestart" elke
+  minuut.
+- **Iets anders stuurt de paal** (v0.198.0) telt niet zolang de paal offline is. Een limiet die niet aankomt leek
+  anders op een tweede sturing, en na de storing kwam er dan een kritieke melding.
+- **Herstart:** wat de paal in de storing zei staat bij de storing in `paal-offline:<paal>`. Online bij het opstarten
+  beëindigt de storing dus ook niet.
+- **De herlaadregel in het log** noemt de integratie bij zijn domein. De titel is bij een Easee het e-mailadres van
+  het account, en dat hoort niet in een log dat iemand doorstuurt.
+
+De keerzijde: een paal die na een korte storing terugkomt zonder auto die moet laden, en die verder niets laat zien,
+staat 30 minuten te lang op Offline. De coach wilde dan toch niets van hem.
+
+Proef 252 in test_coach.py:
+- overdag: herladen, 18 minuten online met de oude stand, één keer geschreven, de melding om 10:15;
+- een herstart midden in de storing;
+- 30 minuten online;
+- een nieuwe status;
+- de nacht, met de melding om 07:00;
+- een Alfen;
+- het domein in de herlaadregel.
+
+In het virtuele huis `paal-offline-herladen`, `paal-offline-herladen-nacht` (met een herstart om 04:31) en
+`alfen-offline-herladen`, met een integratie die na herladen 18 minuten online zegt (`paal_cache_min`).
 
 ## Klaar blijft klaar na een dip van de Equalizer (v0.209.0)
 

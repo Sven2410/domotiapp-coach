@@ -1268,6 +1268,10 @@ class Scenario:
     # ("12:00", "snelladen", True), ("09:30", "soc_opgeven", 40), ("11:00", "p1_weg", 3),
     # ("20:00", "oven", 30)
     gebeurtenissen: list[tuple] = field(default_factory=list)
+    # Een integratie die na herladen of een herstart zoveel minuten online zegt met de oude stand, terwijl de
+    # automaat van de paal uit staat (v0.210.0). Een Easee in een klantwoning op 09-11-2026: 17:59. Met 0 is er
+    # geen integratie om te herladen.
+    paal_cache_min: int = 0
     # Wat "oven" aanzet, in watt; valt over de fasen zoals `Huis.verdeling`.
     # 5,5 kW met 80% op één fase is een warmtepomp zoals in de klantwoning.
     oven_w: float = 3000.0
@@ -1363,6 +1367,8 @@ class Verloop:
     # Opdrachten die de coach stuurde terwijl de automaat van de paal uit stond (v0.209.0). Hoort na de
     # eerste twee minuten nul te zijn.
     paal_offline_opdrachten: list = field(default_factory=list)
+    # Wanneer de coach de integratie van de paal herlaadde (v0.210.0, `paal_cache_min`).
+    paal_herladen: list = field(default_factory=list)
     # Hoe vaak een Alfen op zijn veilige stroom terugviel omdat de coach
     # zijn limiet niet op tijd opnieuw schreef. Hoort nul te zijn.
     paal_terugvallen: int = 0
@@ -1931,6 +1937,9 @@ class Wereld:
         # Tot wanneer een opdracht aan de paal niet aankomt (`paal_onbereikbaar`, v0.163.3).
         self.paal_weg_tot: dt.datetime | None = None
         self.online_sinds: dt.datetime | None = None
+        # Tot wanneer de integratie na herladen of een herstart online zegt (v0.210.0, `paal_cache_min`).
+        self.cache_online_tot: dt.datetime | None = None
+        self.online_was = True
         self.reden = ""
         self.oven_w = s.oven_w
         if s.kabel_erin is None:
@@ -2163,7 +2172,11 @@ class Wereld:
         for naam, a in zip(("l1", "l2", "l3"), self.fase_amps()):
             z(E[naam], weg if p1_weg else w(f"{a:.{cijfers}f}", "A"))
 
-        z(E["online"], "off" if self.paal.uit else "on",
+        online = not self.paal.uit or (self.cache_online_tot is not None and nu < self.cache_online_tot)
+        if online != self.online_was:
+            self.online_sinds = nu
+            self.online_was = online
+        z(E["online"], "on" if online else "off",
           last_updated=(self.online_sinds or nu).replace(tzinfo=dt.timezone.utc))
         if not self.paal.uit:
             self.publiceer_paal(hass, z, w)
@@ -2458,6 +2471,8 @@ class Wereld:
             # De automaat van de paal gaat uit (False) of weer aan (True), v0.209.0.
             self.paal.uit = not bool(arg)
             self.online_sinds = self.nu
+            self.online_was = not self.paal.uit
+            self.cache_online_tot = None
             return "de automaat van de paal gaat " + ("aan" if arg else "uit")
         if actie == "equalizer_nul":
             # Een klare auto: de Equalizer zet de paal even op 0 A, en de Easee springt naar awaiting_start.
@@ -2749,8 +2764,24 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
     register = types.ModuleType("homeassistant.helpers.entity_registry")
     register.async_get = lambda _hass: types.SimpleNamespace(
         async_get=lambda entity_id: types.SimpleNamespace(device_id="v-growatt-omvormer")
-        if entity_id in (E["bat_soc"], E["gw_laden"], E["gw_ontladen"], E["gw_in"], E["gw_uit"]) else None)
+        if entity_id in (E["bat_soc"], E["gw_laden"], E["gw_ontladen"], E["gw_in"], E["gw_uit"])
+        else types.SimpleNamespace(device_id="virtueel", config_entry_id="v-paal-integratie", platform=s.paal.merk)
+        if entity_id == E["online"] and s.paal_cache_min else None)
     sys.modules["homeassistant.helpers.entity_registry"] = register
+    if s.paal_cache_min:
+        # De integratie van de paal (v0.210.0). Met de automaat uit zegt hij na herladen nog `paal_cache_min`
+        # minuten online, met de oude stand, zoals een Easee. De titel is een e-mailadres, zoals bij een Easee.
+        paal_integratie = types.SimpleNamespace(
+            domain=s.paal.merk, title="iemand@voorbeeld.nl", state="loaded", disabled_by=None,
+            entry_id="v-paal-integratie")
+
+        async def herlaad_paal(entry_id):
+            verloop.paal_herladen.append(wereld.nu)
+            if wereld.paal.uit:
+                wereld.cache_online_tot = wereld.nu + dt.timedelta(minutes=s.paal_cache_min)
+        hass.config_entries = types.SimpleNamespace(
+            async_get_entry=lambda eid: paal_integratie if eid == "v-paal-integratie" else None,
+            async_reload=herlaad_paal, flow=types.SimpleNamespace(async_progress=lambda: []))
 
     # De klok van Home Assistant is de klok van de wereld.
     dtutil.now = lambda: wereld.nu
@@ -2807,6 +2838,9 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
                     coach = nieuwe_coach()
                     laatste_ronde = None
                     tekst = "Home Assistant herstart: de coach begint met een leeg geheugen"
+                    if s.paal_cache_min and wereld.paal.uit:
+                        # Na een herstart zegt de integratie van de paal ook even online (v0.210.0).
+                        wereld.cache_online_tot = nu + dt.timedelta(minutes=s.paal_cache_min)
                 else:
                     tekst = wereld.gebeurtenis(actie, arg, coach, inst)
                 if toon:
