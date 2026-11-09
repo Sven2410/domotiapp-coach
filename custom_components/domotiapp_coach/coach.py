@@ -271,6 +271,13 @@ TEMP_TERUG = 1.0
 VRIEZER_DEUR = timedelta(minutes=3)
 VRIEZER_GRENS_C = -15.0
 VRIEZER_WARM = timedelta(minutes=30)
+# Een storing die de vriezer of koelkast zelf meldt (v0.214.0). Tot dan meteen, de keuze van 15-10-2026. Maar een
+# Miele-koelkast in een klantwoning zette op 06-11-2026 zijn Probleem aan 62 seconden nadat de deur openging, en uit
+# 2 seconden nadat hij dichtging; de coach meldde een storing. De eigenaar koos op 09-11-2026: geen storing zolang de
+# deur open is of tot `VRIEZER_DEUR_NA` daarna, want de deur heeft zijn eigen melding; anders na `VRIEZER_STORING`,
+# zodat een seconde aan en uit niet meldt.
+VRIEZER_STORING = timedelta(minutes=2)
+VRIEZER_DEUR_NA = timedelta(minutes=1)
 # Hoe lang na een temperatuur die niets zei een 0,0 als plaatshouder telt (v0.141.1).
 KOEL_NUL = timedelta(minutes=2)
 # De koelkast (v0.131.0): dezelfde drie meldingen, met dezelfde 3 minuten voor de
@@ -1909,6 +1916,8 @@ class ChargerCoach:
         # Wanneer de temperatuur van een vriezer of koelkast voor het laatst niets zei,
         # voor de 0,0 waarmee Miele terugkomt (`KOEL_NUL`, v0.141.1).
         self._koel_weg: dict[str, datetime] = {}
+        # Wanneer de coach de deur van een vriezer of koelkast voor het laatst open zag (v0.214.0, `VRIEZER_DEUR_NA`).
+        self._koel_deur_open: dict[str, datetime] = {}
         self._vriezer_gemeld: set[tuple[str, str]] = set()
         # De smart plugs die altijd aan moeten staan (v0.120.0): sinds wanneer
         # hij uit is, welke al gemeld zijn, welke de coach zelf weer aanzette, en
@@ -4274,7 +4283,8 @@ class ChargerCoach:
         De eigenaar op 15-10-2026 over de vriezer: "Uitlezen en melden", niet
         sturen, met drie meldingen: de deur die te lang openstaat (na
         `VRIEZER_DEUR`), de temperatuur die oploopt (een half uur warmer dan
-        `VRIEZER_GRENS_C`), en een storing die de vriezer zelf meldt. Elk één
+        `VRIEZER_GRENS_C`), en een storing die de vriezer zelf meldt (sinds v0.214.0 na
+        `VRIEZER_STORING`, en niet bij een open deur). Elk één
         keer, kritiek, want dat moet de bewoner oplossen; weer goed staat
         alleen in de geschiedenis. Een sensor die niets zegt verandert hier
         niets; dat meldt `_async_sensorwacht`.
@@ -4294,6 +4304,10 @@ class ChargerCoach:
             van = eigen or standaard
 
             deur = _text(self.hass, entities.get("door")).strip().lower()
+            if deur in ("on", "open"):
+                self._koel_deur_open[sleutel] = now
+            open_gezien = self._koel_deur_open.get(sleutel)
+            deur_net = open_gezien is not None and _tussen(open_gezien, now) <= VRIEZER_DEUR_NA
             if deur in ("on", "open", "off", "closed"):
                 await self._vriezer_stand(
                     (sleutel, "deur"), deur in ("on", "open"), now, VRIEZER_DEUR, actief,
@@ -4326,15 +4340,22 @@ class ChargerCoach:
                     # Tussen de grens en een graad eronder blijft het zoals het was.
                     actief.add((sleutel, "warm"))
             storing = _text(self.hass, entities.get("problem")).strip().lower()
-            if storing in ("on", "off"):
+            if storing == "on" and deur_net:
+                # De deur, geen storing (v0.214.0): de klok begint pas als de deur een minuut dicht is. Een storing
+                # die al gemeld is blijft gemeld, want hij blijft in `actief`.
+                actief.add((sleutel, "storing"))
+                self._vriezer_sinds.pop((sleutel, "storing"), None)
+            elif storing in ("on", "off"):
                 await self._vriezer_stand(
-                    (sleutel, "storing"), storing == "on", now, timedelta(0), actief,
+                    (sleutel, "storing"), storing == "on", now, VRIEZER_STORING, actief,
                     t("{naam} meldt een storing.", naam=naam),
                     t("{naam} meldt geen storing meer.", naam=naam),
                 )
         # Een vriezer die er niet meer is, of een sensor die verdween: vergeten.
         for weg in set(self._vriezer_sinds) - actief:
             self._vriezer_sinds.pop(weg, None)
+        for weg in set(self._koel_deur_open) - {k[0] for k in actief}:
+            self._koel_deur_open.pop(weg, None)
         self._vriezer_gemeld &= actief
 
     async def _vriezer_stand(

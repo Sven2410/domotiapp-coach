@@ -9445,8 +9445,9 @@ controle("een graad eronder: terug, alleen in de geschiedenis",
          wacht161(42) == [] and ("dev-vriezer", "warm") not in coach161._vriezer_gemeld, "")
 
 hass161.states.zet("binary_sensor.vriezer_probleem", "on")
-storing161 = wacht161(50)
-controle("een storing meteen", storing161 == ["De vriezer meldt een storing."], f"{storing161}")
+controle("een storing: nog niet meteen (v0.214.0)", wacht161(50) == [] and wacht161(51) == [], "")
+storing161 = wacht161(52)
+controle("na twee minuten", storing161 == ["De vriezer meldt een storing."], f"{storing161}")
 hass161.states.zet("binary_sensor.vriezer_probleem", "off")
 controle("weg: alleen in de geschiedenis", wacht161(51) == [], "")
 
@@ -10036,7 +10037,7 @@ hass172.states.zet("sensor.koelkast_temp", {"state": "8.5", "attributes": {"unit
 controle("een graad en meer eronder: terug, alleen in de geschiedenis",
          wacht172(142) == [] and ("dev-koelkast", "warm") not in coach172._vriezer_gemeld, "")
 hass172.states.zet("binary_sensor.koelkast_probleem", "on")
-controle("een storing meteen", wacht172(150) == ["De koelkast meldt een storing."], "")
+controle("een storing na twee minuten (v0.214.0)", wacht172(150) == [] and wacht172(152) == ["De koelkast meldt een storing."], "")
 controle("de vriezer ernaast houdt zijn eigen grens", ("dev-vriezer", "warm") not in coach172._vriezer_gemeld
          and coachmod.KOELWAREN["vriezer"][1] == -15.0 and coachmod.KOELWAREN["koelkast"][1] == 10.0, "")
 controle("de sensorwacht kijkt ook naar de temperatuur van een koelkast", coachmod._temp_nodig(inst172, KOEL172), "")
@@ -17376,6 +17377,125 @@ for plek, naam in ((plek255(5000), "weg"), (plek255(17), "oprit")):
     else:
         controle("de oprit: voor en na de herstart geen 'niet thuis'", not weg255(voor255) and not weg255(na255),
                  f"{voor255} {na255}")
+
+print("=== 256. een koelkast die Probleem zegt omdat de deur open staat: geen storing (v0.214.0) ===")
+# Een klantwoning op 06-11-2026: de deur van een Miele-koelkast ging om 20:21:52 open, Probleem ging om 20:22:54 aan,
+# om 20:23:12 kwam de kritieke melding "meldt een storing", om 20:23:21 ging de deur dicht en om 20:23:23 Probleem uit.
+KOEL256 = {"id": "dev-koelkast", "type": "koelkast", "name": "", "brand": "miele", "controllable": False, "entity": "",
+           "entities": {"temperature": "sensor.koel_temp", "door": "binary_sensor.koel_deur",
+                        "problem": "binary_sensor.koel_probleem"}}
+KOEL256z = {**KOEL256, "entities": {k: v for k, v in KOEL256["entities"].items() if k != "door"}}
+T256 = dt.datetime(2026, 11, 6, 20, 0)
+
+
+def bouw256(apparaat=KOEL256):
+    inst = instellingen(devices=[LAADPAAL, apparaat])
+    hass, _s, coach = bouw({**huis(), "sensor.koel_temp": {"state": "5.0", "attributes": {"unit_of_measurement": "°C"}},
+                            "binary_sensor.koel_deur": "off", "binary_sensor.koel_probleem": "off"}, inst)
+
+    def stap(seconden, deur=None, probleem=None):
+        if deur is not None:
+            hass.states.zet("binary_sensor.koel_deur", deur)
+        if probleem is not None:
+            hass.states.zet("binary_sensor.koel_probleem", probleem)
+        hass.services.verstuurd.clear()
+        asyncio.run(coach._async_vriezerwacht(inst, T256 + dt.timedelta(seconds=seconden)))
+        return [d[2]["message"] for d in hass.services.verstuurd if d[0] == "notify"]
+    return hass, coach, stap
+
+
+def gang256(stap, stappen):
+    uit = []
+    for sec, deur, probleem in stappen:
+        uit += stap(sec, deur, probleem)
+    return uit
+
+
+# 1. Zoals bij de klant, per minuut gekeken: deur open, Probleem na 60 s, deur dicht na 90 s, Probleem 2 s later uit.
+_h, c256a, stap256a = bouw256()
+a256 = gang256(stap256a, [(0, "on", None), (60, None, "on"), (90, "off", None), (120, None, None), (180, None, "off"),
+                          (240, None, None), (600, None, None)])
+controle("de deur anderhalve minuut open met Probleem: niets", a256 == [], f"{a256}")
+# Ook als Probleem nog even blijft hangen nadat de deur dicht ging: tot een minuut erna is het de deur.
+_h, c256b, stap256b = bouw256()
+b256 = gang256(stap256b, [(0, "on", None), (60, None, "on"), (90, "off", None), (150, None, None), (160, None, "off")])
+controle("Probleem tot een minuut na het sluiten: niets", b256 == [], f"{b256}")
+# Die minuut telt vanaf de laatste keer dat de coach de deur open zag; daarna nog twee minuten.
+_h, c256i, stap256i = bouw256()
+i256 = [(sec, stap256i(sec, deur, probleem)) for sec, deur, probleem in
+        ((0, "on", None), (60, None, "on"), (90, "off", None), (120, None, None), (180, None, None), (240, None, None),
+         (290, None, None), (300, None, None))]
+controle("de klok begint een minuut nadat hij de deur voor het laatst open zag: melding om 300, niet eerder",
+         [s for s, m in i256 if m] == [300], f"{i256}")
+# Een Probleem dat al aan stond voor de deur openging: de klok begint na de deur opnieuw.
+_h, c256j, stap256j = bouw256()
+j256 = [(sec, stap256j(sec, deur, probleem)) for sec, deur, probleem in
+        ((0, None, "on"), (60, "on", None), (90, "off", None), (120, None, None), (180, None, None), (240, None, None),
+         (300, None, None))]
+controle("Probleem van voor de deur: de klok begint daarna opnieuw, melding om 300", [s for s, m in j256 if m] == [300],
+         f"{j256}")
+
+# 2. Probleem drie minuten met de deur dicht: één melding, na twee minuten.
+_h, c256c, stap256c = bouw256()
+c256 = [(sec, stap256c(sec, None, "on" if sec == 0 else None)) for sec in range(0, 241, 60)]
+eerst256 = next((sec for sec, m in c256 if m), None)
+controle("Probleem met de deur dicht: één melding na twee minuten", eerst256 == 120
+         and sum(len(m) for _, m in c256) == 1 and c256[2][1] == ["De koelkast meldt een storing."], f"{c256}")
+
+# 3. Probleem twintig seconden met de deur dicht: niets.
+_h, c256d, stap256d = bouw256()
+d256 = gang256(stap256d, [(0, None, "on"), (20, None, "off"), (60, None, None), (180, None, None)])
+controle("Probleem twintig seconden: niets", d256 == [], f"{d256}")
+
+# 4. De deur vier minuten open: alleen de deurmelding, ook met Probleem erbij.
+_h, c256e, stap256e = bouw256()
+e256 = gang256(stap256e, [(sec, "on" if sec == 0 else ("off" if sec == 240 else None), "on" if sec == 60 else
+                           ("off" if sec == 242 else None)) for sec in (0, 60, 120, 180, 200, 240, 242, 300, 420)])
+controle("de deur vier minuten open: alleen de deurmelding", e256 == ["De deur van de koelkast staat al 3 minuten open."],
+         f"{e256}")
+
+# 5. Een echte storing blijft er, ook als iemand daarna de deur opendoet: geen "geen storing meer" tussendoor.
+_h, c256f, stap256f = bouw256()
+f256 = gang256(stap256f, [(0, None, "on"), (60, None, None), (120, None, None), (180, "on", None), (240, "off", None),
+                          (300, None, None)])
+controle("een echte storing blijft gemeld als de deur opengaat", f256 == ["De koelkast meldt een storing."]
+         and ("dev-koelkast", "storing") in c256f._vriezer_gemeld, f"{f256}")
+
+# 6. Zonder deursensor: alleen de twee minuten.
+_h, c256g, stap256g = bouw256(KOEL256z)
+g256 = [(sec, stap256g(sec, None, "on" if sec == 0 else None)) for sec in (0, 60, 120)]
+controle("zonder deursensor: na twee minuten", [s for s, m in g256 if m] == [120], f"{g256}")
+
+# 7. Een vriezer net zo.
+_h, c256v, stap256v = bouw256({**KOEL256, "id": "dev-vriezer", "type": "vriezer"})
+v256 = gang256(stap256v, [(0, "on", None), (60, None, "on"), (90, "off", None), (120, None, None), (180, None, "off")])
+controle("een vriezer net zo", v256 == [], f"{v256}")
+
+# 8. Een herstart halverwege: de klok begint opnieuw, wat gemeld was blijft gemeld.
+h256h, c256h, stap256h = bouw256()
+gang256(stap256h, [(0, None, "on"), (60, None, None)])
+c256h2 = herstart213(h256h)
+asyncio.run(c256h2._async_geheugen_laden())
+inst256h = instellingen(devices=[LAADPAAL, KOEL256])
+
+
+def stap256h2(sec):
+    h256h.services.verstuurd.clear()
+    asyncio.run(c256h2._async_vriezerwacht(inst256h, T256 + dt.timedelta(seconds=sec)))
+    return [d[2]["message"] for d in h256h.services.verstuurd if d[0] == "notify"]
+
+
+h256 = [(sec, stap256h2(sec)) for sec in (90, 150, 210)]
+controle("na een herstart: twee minuten vanaf de herstart", [s for s, m in h256 if m] == [210], f"{h256}")
+c256h2._meldingen_onthouden()  # dat doet de ronde
+c256h3 = herstart213(h256h)
+asyncio.run(c256h3._async_geheugen_laden())
+h256.clear()
+for sec in (300, 360, 480):
+    h256h.services.verstuurd.clear()
+    asyncio.run(c256h3._async_vriezerwacht(inst256h, T256 + dt.timedelta(seconds=sec)))
+    h256 += [d[2]["message"] for d in h256h.services.verstuurd if d[0] == "notify"]
+controle("en wat gemeld was, niet nog een keer", h256 == [], f"{h256}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

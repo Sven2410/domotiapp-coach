@@ -17,7 +17,7 @@ Miele-vriezer aan de integratie `miele` van Home Assistant.
 |---|---|---|
 | de deur staat open | na 3 minuten | `VRIEZER_DEUR` |
 | de vriezer is te warm | een half uur warmer dan -15 °C | `VRIEZER_GRENS_C`, `VRIEZER_WARM` |
-| de vriezer meldt een storing | meteen | |
+| de vriezer meldt een storing | meteen; sinds v0.214.0 na 2 minuten, en niet bij een open deur | `VRIEZER_STORING` |
 
 Elke melding komt één keer, kritiek, want het is iets wat de bewoner zelf moet oplossen (zie
 de afspraak over meldingen in CLAUDE.md); wie hem krijgt staat per persoon onder Meldingen.
@@ -56,7 +56,7 @@ de vriezer zou een koelkast op 5 °C na een half uur elke keer melden.
 |---|---|---|
 | de deur staat open | na 3 minuten, net als de vriezer | `VRIEZER_DEUR` |
 | de koelkast is te warm | een half uur warmer dan 10 °C | `KOELKAST_GRENS_C`, `VRIEZER_WARM` |
-| de koelkast meldt een storing | meteen | |
+| de koelkast meldt een storing | meteen; sinds v0.214.0 na 2 minuten, en niet bij een open deur | `VRIEZER_STORING` |
 
 Het is dezelfde wacht (`_async_vriezerwacht`), met per soort de naam en de grens in
 `KOELWAREN`; `KOELWAREN` in devices.js zegt hetzelfde in het paneel (de hints en de zin onder
@@ -78,3 +78,26 @@ bij het terugkomen meldden vriezer en koelkast ruim twintig seconden 0,0 voor de
 warm" wacht een half uur, maar de wacht begon wel te lopen. Nu telt een 0,0 binnen twee minuten
 nadat de temperatuur niets zei (`KOEL_NUL`) niet als meting. Blijft hij 0,0, dan wel. Proef 186
 in test_coach.py.
+
+## Een storing is geen open deur (v0.214.0)
+
+In een klantwoning op 06-11-2026 kwam om 20:23:12 de kritieke melding "De koelkast meldt een storing." De koelkast had
+geen storing. De deur stond open van 20:21:52 tot 20:23:21. Miele zette zijn binary_sensor Probleem 62 seconden na het
+openen aan (20:22:54), en 2 seconden na het sluiten weer uit (20:23:23). De temperatuur bleef 5,0 °C. Voor de deur
+wachtte de coach 3 minuten, voor een storing niet, dus werd een open deur van anderhalve minuut toch een kritieke
+melding. Sinds 20-10 stond Probleem daar nooit eerder aan.
+
+De eigenaar koos op 09-11-2026 (in plaats van "meteen" van 15-10):
+- **Probleem terwijl de deur open is, of tot `VRIEZER_DEUR_NA` (1 minuut) nadat de coach hem voor het laatst open
+  zag:** dat is de deur, geen storing. De klok van de storing begint pas daarna. De deur heeft zijn eigen melding na
+  3 minuten.
+- **Probleem met de deur dicht:** een melding na `VRIEZER_STORING` (2 minuten), zodat een seconde aan en uit niet
+  meldt.
+- **Een storing die al gemeld is** blijft gemeld als iemand de deur opendoet: geen "meldt geen storing meer" tussendoor.
+- Zonder deursensor alleen de 2 minuten. Voor vriezer en koelkast, elk merk met een deur en een probleemsensor.
+- **Een herstart:** wanneer de deur open was staat niet in de opslag (`_koel_deur_open`); de klok van de storing begint
+  opnieuw, zoals die van de deur, en wat gemeld is blijft gemeld (`vriezer` in `meldingen` in het geheugen).
+
+Proef 256 in test_coach.py: de deur van de klant met Probleem erbij, Probleem tot een minuut na het sluiten, drie
+minuten met de deur dicht, twintig seconden, de deur vier minuten open, een echte storing en dan de deur, zonder
+deursensor, een vriezer, en een herstart halverwege. Proef 161 en 172 wachten nu twee minuten.
