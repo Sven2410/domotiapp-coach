@@ -765,7 +765,7 @@ proef("iedereen ziet alle personen (v0.114.0, was: een bewoner alleen zichzelf)"
   assert.deepEqual(zichtbaar(mensen, null).length, 3, "zonder gebruiker (het voorbeeld) alles");
   assert.equal(naamVanTelefoon("mobile_app_iphone_van_de_keuken"), "Iphone van de keuken");
   assert.equal(naamVanTelefoon(""), "");
-  assert.deepEqual(STANDAARD_SOORTEN, { kritiek: true, melding: true, besluit: false, belasting: true },
+  assert.deepEqual(STANDAARD_SOORTEN, { kritiek: true, melding: true, besluit: false, belasting: true, herinnering: true },
     "een nieuwe persoon krijgt alles behalve de besluiten, net als op de server");
 });
 const Meldingen = geregistreerd.get("dac-view-notifications");
@@ -1204,6 +1204,60 @@ proef("het autoprofiel heeft een doel, standaard 100, en een lege invoer is geen
   assert.equal(voorkeurWijziging(veld), null, "leeg is niets om op te slaan");
   veld.value = "5";
   assert.deepEqual(voorkeurWijziging(veld), { cars: [{ id: "auto", target_percent: 10 }] }, "en onder de 10 wordt 10");
+});
+
+// De herinnering om de auto aan te sluiten (v0.212.0): uit, vast of slim, in Instellen bij de paal, en een
+// eigen soort in Meldingen die standaard aan staat, ook bij wie er al stond.
+proef("de herinnering bij de paal: de velden, wat er zichtbaar is, en wat er naar de server gaat", async () => {
+  const { HERINNERING_STANDAARD, HERINNERING_LEREN } = await import(
+    "../custom_components/domotiapp_coach/frontend/src/voorkeur-velden.js"
+  );
+  assert.deepEqual(HERINNERING_STANDAARD, { mode: "uit", time: "21:00", below_percent: 50, reserve_percent: 10 },
+    "dezelfde standaard als HERINNERING_STANDAARD in planner.py");
+  assert.equal(HERINNERING_LEREN, 7, "en dezelfde zeven dagen als HERINNERING_LEREN");
+  const paal = { id: "paal", type: "laadpaal", brand: "easee", name: "Laadpaal", controllable: true, entities: {},
+                 cars: [{ id: "auto", name: "Bus", capacity_kwh: 65, phases: "three", max_amps: 16 }] };
+  const html = voorkeurHtml(paal);
+  assert.ok(html.includes('data-vk-herinnering="mode"') && html.includes('data-vk-herinnering="time"'), "de velden staan er");
+  assert.ok(!voorkeurHtml({ ...paal, cars: [] }).includes("data-vk-herinnering"), "niet bij een paal zonder auto");
+  const velden = nepVelden(html);
+  const rij = (s) => velden.rijen.find((r) => r.sleutel === s);
+  vulVoorkeuren(velden, paal);
+  assert.equal(velden.veld("data-vk-herinnering", "mode").value, "uit", "zonder instelling uit");
+  assert.equal(velden.veld("data-vk-herinnering", "time").value, "21:00");
+  assert.ok(rij("herinnering_time").hidden && rij("herinnering_below").hidden && rij("herinnering_reserve").hidden,
+    "uit: verder niets");
+  vulVoorkeuren(velden, { ...paal, reminder: { mode: "vast", below_percent: 40 } });
+  assert.equal(velden.veld("data-vk-herinnering", "below_percent").value, 40);
+  assert.ok(!rij("herinnering_time").hidden && !rij("herinnering_below").hidden && rij("herinnering_reserve").hidden,
+    "vast: de tijd en de drempel");
+  const gebruik = [{ device: "paal", car: "auto", days: { "2026-11-01": 20, "2026-11-02": 22, "2026-11-03": 18 } }];
+  vulVoorkeuren(velden, { ...paal, reminder: { mode: "slim" } }, null, null, gebruik);
+  assert.ok(!rij("herinnering_reserve").hidden, "slim: ook de reserve");
+  assert.equal(rij("herinnering_leren").textContent,
+    "Nog aan het leren: 3 van 7 dagen gemeten. Tot dan geldt de accustand hierboven.");
+  const week = { ...gebruik[0], days: Object.fromEntries([...Array(9)].map((_, i) => [`2026-11-0${i + 1}`, 20])) };
+  vulVoorkeuren(velden, { ...paal, reminder: { mode: "slim" } }, null, null, [week]);
+  assert.equal(rij("herinnering_leren").textContent, "Geleerd uit 9 dagen.");
+  const modus = velden.veld("data-vk-herinnering", "mode");
+  modus.value = "slim";
+  assert.deepEqual(voorkeurWijziging(modus), { reminder: { mode: "slim" } }, "alleen wat veranderde");
+  const tijd = velden.veld("data-vk-herinnering", "time");
+  tijd.value = "20:30";
+  assert.deepEqual(voorkeurWijziging(tijd), { reminder: { time: "20:30" } });
+  tijd.value = "";
+  assert.equal(voorkeurWijziging(tijd), null, "een lege tijd is niets om op te slaan");
+  const onder = velden.veld("data-vk-herinnering", "below_percent");
+  onder.value = "150";
+  assert.deepEqual(voorkeurWijziging(onder), { reminder: { below_percent: 100 } });
+  const { SOORTEN_INFO, krijgtSoort } = await import(
+    "../custom_components/domotiapp_coach/frontend/src/views/notifications.js"
+  );
+  assert.ok(SOORTEN_INFO.some((s) => s.id === "herinnering"), "Herinneringen staat bij elke persoon");
+  assert.equal(krijgtSoort({ kinds: { kritiek: false, melding: false } }, "herinnering"), true,
+    "wie er al stond krijgt hem, ook met alles uit");
+  assert.equal(krijgtSoort({ kinds: { herinnering: false } }, "herinnering"), false, "tenzij hij hem uitzette");
+  assert.equal(krijgtSoort({ kinds: {} }, "besluit"), false, "besluiten blijven standaard uit");
 });
 
 proef("een nieuwe auto begint met het merk, en een Tesla krijgt de wekknop en de keuze", async () => {

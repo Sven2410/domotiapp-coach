@@ -1945,3 +1945,48 @@ Tesla staat op 27%. Zo wordt 07:00 niet gehaald. Kijk of de paal stroom en inter
 teruggelezen limiet, of als hij klopt, gaat de melding over de auto, zoals altijd.
 
 Proef 251 in test_coach.py.
+
+## Een herinnering als de auto niet aan de paal hangt (v0.212.0)
+
+In een klantwoning werd de bus op 08-11-2026 vergeten aan te sluiten. Om 20:09 stond hij op 18%, de klaar-tijd was
+07:00, en pas op 07-11 om 03:17 was hij de vorige keer ingeplugd, op 11,5%. De eigenaar op 09-11-2026: "altijd om x uur
+een notificatie sturen als auto onder x% is", en een slimme, "zelflerend obv rij- of laadgedrag". Hij koos het
+voorstel van de werkbon: vast en slim allebei, met een keuze per paal, standaard 21:00 en 50%, en een eigen soort
+"herinnering" in Meldingen, standaard aan.
+
+**Instellen, bij de paal** (`reminder` op het apparaat, `herinnering_instelling` in planner.py): Uit (standaard),
+Vast of Slim, met een tijd (21:00), een drempel (50%) en bij Slim een reserve (10%). Alleen bij een paal met een auto.
+
+**Wanneer** (`_async_herinnering` in coach.py), elke ronde, per paal die de coach stuurt:
+- De paal zegt zelf dat er geen auto aan hangt (`_paal_zonder_auto`) en is niet offline. Zegt hij niets, dan niets.
+- Er staat een klaar-tijd aan (`_volgende_klaar`, uit het schema), en de accustand ligt onder de drempel.
+- Op de gekozen tijd, de laatste keer vóór de klaar-tijd. Haalt de coach de klaar-tijd vanaf dan niet meer, met zijn
+  uur reserve (eis 2, `_latest_start`), dan een half uur vóór dat laatste moment (`herinnering_moment`). Met de echte
+  uren, ook op de dag van 23 en van 25 uur.
+- Eén keer per klaar-tijd (`herinnering:<paal>` in het geheugen), dus ook na een herstart om 21:05 niet nog eens, en
+  ook niet als de kabel erin en weer uit gaat. Drie uur na het moment niet meer (`HERINNERING_TE_LAAT`), zoals na een
+  herstart midden in de nacht.
+
+**Slim** (`autoverbruik_bij`, `verbruik_op`, `herinnering_drempel`): de coach telt per dag wat de accustand daalt;
+een stijging van 2% of meer is laden en telt niet, aan de paal of ergens anders. Minder is ruis. Een dag telt als de
+accustand er 18 uur van te lezen was. De drempel is het 80e percentiel van die weekdag over acht weken, plus de reserve.
+Een weekdag met minder dan twee metingen neemt alle dagen samen. Onder zeven gemeten dagen geldt de vaste drempel, en
+zegt Instellen hoe ver hij is. De lopende dag staat in het geheugen (`autoverbruik:<paal>:<auto>`), een afgesloten dag
+in `car_usage` in de instellingen, want het geheugen vergeet na 48 uur.
+
+**De tekst**, met de naam die de bewoner invulde:
+- Vast: "Ford staat op 18% en hangt niet aan de paal."
+- Slim: "Ford staat op 30%. Morgen rijd je meestal 28%. Vergeet hem niet aan te sluiten."
+- De accustand weg: "Ford hangt niet aan de paal. Laatst bekend: 18% om 20:09." Geen schatting.
+- Niets bekend, alleen in de vaste stand: "Ford hangt niet aan de paal."
+
+**Wie hem krijgt**: de soort "herinnering" in `ontvangers.py`. Wie er al stond en de soort nog niet heeft, krijgt hem
+(`STANDAARD_SOORTEN`), ook met alle andere soorten uit; zo krijgt een tweede bewoner die verder niets wil hem toch.
+
+Keerzijde: bij een auto die lang moet laden (één fase en een grote accu) komt de herinnering ver vóór 21:00, bij
+65 kWh op 5% en 14 A op één fase al om 08:12 de ochtend ervoor. Zo stond het in het voorstel.
+
+Proef 81 in test_planner.py (het verbruik, de drempel, het moment, de klokwissel), proef 254 in test_coach.py (vast,
+slim, de accustand weg, te weinig tijd, Easee en Alfen, een herstart, het leren met een herstart), de proef "de
+herinnering bij de paal" in test_rapport.mjs, en de scenario's `vast-vergeten-aan-te-sluiten` en
+`vast-op-tijd-aangesloten`.

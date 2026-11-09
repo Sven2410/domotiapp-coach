@@ -298,5 +298,10 @@
   "{naam} is weer online.": "{naam} is online again.",
   "{naam} is sinds {tijd} offline. Staat de automaat aan en heeft hij internet?": "{naam} has been offline since {tijd}. Is its circuit breaker on, and does it have internet?",
   "{auto} staat op {pct}%.": "{auto} is at {pct}%.",
-  "{paal} neemt al {minuten} minuten de stroom van de coach niet aan en blijft op {limiet} A staan.{stand} Zo wordt {klok} niet gehaald. Kijk of de paal stroom en internet heeft.": "{paal} has not accepted the coach's current for {minuten} minutes and stays at {limiet} A.{stand} {klok} will not be met this way. Check whether the charger has power and internet."
+  "{paal} neemt al {minuten} minuten de stroom van de coach niet aan en blijft op {limiet} A staan.{stand} Zo wordt {klok} niet gehaald. Kijk of de paal stroom en internet heeft.": "{paal} has not accepted the coach's current for {minuten} minutes and stays at {limiet} A.{stand} {klok} will not be met this way. Check whether the charger has power and internet.",
+  "{naam} hangt niet aan de paal.": "{naam} is not plugged into the charger.",
+  "{naam} hangt niet aan de paal. Laatst bekend: {soc}% {wanneer}.": "{naam} is not plugged into the charger. Last known: {soc}% {wanneer}.",
+  "{naam} staat op {soc}% en hangt niet aan de paal.": "{naam} is at {soc}% and not plugged into the charger.",
+  "{naam} staat op {soc}%. Morgen rijd je meestal {verbruik}%. Vergeet hem niet aan te sluiten.": "{naam} is at {soc}%. Tomorrow you usually drive {verbruik}%. Remember to plug it in.",
+  "{naam} staat op {soc}%. Vandaag rijd je meestal {verbruik}%. Vergeet hem niet aan te sluiten.": "{naam} is at {soc}%. Today you usually drive {verbruik}%. Remember to plug it in."
 }

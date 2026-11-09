@@ -31,6 +31,9 @@ stopt niets.
 | een paal die offline is: sinds wanneer, herladen, gemeld | `GeheugenStore`, `paal-offline:<paal>` | v0.209.0 |
 | wat de paal in de storing zei, zodat online na een herstart de storing niet beëindigt | `GeheugenStore`, `paal-offline:<paal>` (`tekens`) | v0.210.0 |
 | een paal die deze beurt al klaar meldde, met de ene herstart | `GeheugenStore`, `paal-klaar:<paal>` | v0.209.0 |
+| voor welke klaar-tijd er al herinnerd is om de auto aan te sluiten | `GeheugenStore`, `herinnering:<paal>` | v0.212.0 |
+| het verbruik van de auto vandaag, en de laatst bekende accustand | `GeheugenStore`, `autoverbruik:<paal>:<auto>` | v0.212.0 |
+| het verbruik van de auto per dag, acht weken | `car_usage` in de instellingen | v0.212.0 |
 
 ## GeheugenStore (v0.172.0)
 

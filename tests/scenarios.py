@@ -59,6 +59,18 @@ vast_avond = vast_zonnig.kopie(
     naam="vast-avond-erin", uitleg="vast contract, kabel om 18:30 erin, klaar om 06:00",
     begin="2026-09-07 18:25", kabel_erin="18:30", duur_uren=13,
 )
+# De herinnering om de auto aan te sluiten (v0.212.0). In een klantwoning werd de bus op 08-11-2026 vergeten.
+vast_vergeten = vast_zonnig.kopie(
+    naam="vast-vergeten-aan-te-sluiten",
+    uitleg="vast contract, bus op 30% en niet aangesloten; herinnering om 21:00 onder 50%, de kabel pas om 22:30 erin",
+    begin="2026-09-07 20:00", kabel_erin="22:30", duur_uren=11,
+    herinnering={"mode": "vast", "time": "21:00", "below_percent": 50},
+)
+vast_op_tijd_erin = vast_vergeten.kopie(
+    naam="vast-op-tijd-aangesloten",
+    uitleg="hetzelfde, maar de kabel gaat om 20:30 al erin: geen herinnering",
+    kabel_erin="20:30",
+)
 vast_grote_auto = vast_zonnig.kopie(
     naam="vast-grote-auto", uitleg="vast contract, driefasige auto van 77 kWh op 20%",
     auto=GROTE,
@@ -1942,6 +1954,7 @@ groep_paal_batterij_zonder_meter = groep_paal_batterij.kopie(
 )
 
 ALLE = [
+    vast_vergeten, vast_op_tijd_erin,
     alfen_auto_weg, alfen_auto_weg_gast, paal_offline, paal_offline_nacht, klaar_equalizer,
     paal_offline_herladen, paal_offline_herladen_nacht, alfen_offline_herladen,
     groep_paal_batterij, groep_paal_batterij_los, groep_paal_batterij_zonder_meter,

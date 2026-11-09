@@ -107,7 +107,43 @@ function laadpaal(device, zon) {
       t("Het vaste vermogen van Continu. Geeft de zon meer, dan laadt hij mee omhoog; nooit boven je zekering."))}
     ${zon ? getal("data-vk", "solar_start_percent", t("Zon: beginnen vanaf (%)"), 'min="10" max="100" step="5"', "90",
       t("Van het kleinste laadvermogen: 6 A, op drie fasen 4,1 kW. Bij 50% begint Zon al op 2,1 kW zon en komt de rest van het net. Op 100% begint hij pas als de zon het hele vermogen geeft.")) : ""}`)}
-    ${(device.cars ?? []).length ? blok(t("Auto's"), `${autos}${autoUitleg}`) : ""}`;
+    ${(device.cars ?? []).length ? blok(t("Auto's"), `${autos}${autoUitleg}`) : ""}
+    ${(device.cars ?? []).length ? herinnering() : ""}`;
+}
+
+/** Wat de herinnering zonder instelling doet: `HERINNERING_STANDAARD` in planner.py (v0.212.0). */
+export const HERINNERING_STANDAARD = { mode: "uit", time: "21:00", below_percent: 50, reserve_percent: 10 };
+/** Zoveel gemeten dagen heeft de slimme stand nodig: `HERINNERING_LEREN` in planner.py. */
+export const HERINNERING_LEREN = 7;
+
+/**
+ * De herinnering om de auto aan te sluiten (v0.212.0). In een klantwoning werd de bus op 08-11-2026
+ * vergeten aan te sluiten; de eigenaar wilde een vaste en een slimme. Standaard uit.
+ */
+function herinnering() {
+  return blok(t("Herinnering"), `
+    <div class="row">
+      <label for="vk-herinnering">${t("Melding als de auto niet aan de paal hangt")}</label>
+      <select id="vk-herinnering" data-vk-herinnering="mode">
+        <option value="uit">${t("Uit")}</option>
+        <option value="vast">${t("Vast: op een tijd, onder een accustand")}</option>
+        <option value="slim">${t("Slim: naar wat je die dag meestal rijdt")}</option>
+      </select>
+      <span class="sub">${t("Alleen als er een klaar-tijd aanstaat. Haalt de coach die vanaf die tijd niet meer, dan komt de melding eerder.")}</span>
+    </div>
+    <div class="row" data-vk-rij="herinnering_time">
+      <label for="vk-herinnering-tijd">${t("Om")}</label>
+      <input type="time" id="vk-herinnering-tijd" data-vk-herinnering="time" step="300">
+    </div>
+    <div class="row" data-vk-rij="herinnering_below">
+      <label>${t("Als de accu onder (%) staat")}</label>
+      <input type="number" class="getal" data-vk-herinnering="below_percent" min="1" max="100" step="5" inputmode="decimal" placeholder="50">
+    </div>
+    <div class="row" data-vk-rij="herinnering_reserve">
+      <label>${t("Reserve bovenop wat je rijdt (%)")}</label>
+      <input type="number" class="getal" data-vk-herinnering="reserve_percent" min="0" max="100" step="5" inputmode="decimal" placeholder="10">
+      <span class="sub" data-vk-rij="herinnering_leren"></span>
+    </div>`, "herinnering");
 }
 
 /**
@@ -227,7 +263,7 @@ export function voorkeurHtml(device, { zon = true } = {}) {
  * bij de laadpaal Slim. Wat er stond blijft bewaard: de coach doet er bij een
  * vlakke prijs niets mee, en na een overstap naar dynamisch staat het er weer.
  */
-export function vulVoorkeuren(root, device, actief = null, contract = null) {
+export function vulVoorkeuren(root, device, actief = null, contract = null, gebruik = null) {
   const b = device?.battery ?? {};
   const zet = (el, waarde) => {
     if (el === actief) return;
@@ -257,6 +293,10 @@ export function vulVoorkeuren(root, device, actief = null, contract = null) {
     if (el === actief) continue;
     el.checked = b[el.dataset.vkAan] != null || el.dataset.open === "1";
   }
+  const herinnering = { ...HERINNERING_STANDAARD, ...(device?.reminder ?? {}) };
+  for (const el of root.querySelectorAll("[data-vk-herinnering]")) {
+    zet(el, herinnering[el.dataset.vkHerinnering]);
+  }
   for (const knop of root.querySelectorAll("[data-vk-wek]")) {
     const [id, modus] = knop.dataset.vkWek.split(":");
     const auto = (device?.cars ?? []).find((c) => c.id === id);
@@ -267,6 +307,20 @@ export function vulVoorkeuren(root, device, actief = null, contract = null) {
     if (el) el.hidden = !aan;
   };
   rij("reserve_percent", b.reserve_enabled);
+  // De herinnering (v0.212.0): de tijd en de drempel bij vast en slim, de reserve alleen bij slim, met hoe
+  // ver het leren is (`car_usage`, het meeste van de auto's van deze paal).
+  rij("herinnering_time", herinnering.mode !== "uit");
+  rij("herinnering_below", herinnering.mode !== "uit");
+  rij("herinnering_reserve", herinnering.mode === "slim");
+  const leren = root.querySelector('[data-vk-rij="herinnering_leren"]');
+  if (leren) {
+    const dagen = Math.max(0, ...(gebruik ?? [])
+      .filter((r) => r?.device === device?.id)
+      .map((r) => Object.keys(r.days ?? {}).length));
+    leren.textContent = dagen >= HERINNERING_LEREN
+      ? t("Geleerd uit {n} dagen.", { n: dagen })
+      : t("Nog aan het leren: {n} van {nodig} dagen gemeten. Tot dan geldt de accustand hierboven.", { n: dagen, nodig: HERINNERING_LEREN });
+  }
   rij("weekly_full_day", b.weekly_full);
   rij("holiday_max_percent", b.holiday);
   // De grens per richting alleen als die richting aanstaat (v0.141.0).
@@ -414,6 +468,16 @@ export function voorkeurWijziging(el) {
     const n = getalVan();
     if (n === null || !Number.isFinite(n) || sleutel !== "target_percent") return null;
     return { cars: [{ id, target_percent: Math.min(100, Math.max(10, n)) }] };
+  }
+  if (el.dataset.vkHerinnering) {
+    const sleutel = el.dataset.vkHerinnering;
+    if (sleutel === "mode") return { reminder: { mode: el.value } };
+    if (sleutel === "time") return /^([01]\d|2[0-3]):[0-5]\d$/.test(el.value) ? { reminder: { time: el.value } } : null;
+    const n = getalVan();
+    if (n === null || !Number.isFinite(n)) return null;
+    if (sleutel === "below_percent") return { reminder: { below_percent: binnen(n, 1, 100) } };
+    if (sleutel === "reserve_percent") return { reminder: { reserve_percent: binnen(n, 0, 100) } };
+    return null;
   }
   if (el.dataset.vkWek) {
     const [id, modus] = el.dataset.vkWek.split(":");

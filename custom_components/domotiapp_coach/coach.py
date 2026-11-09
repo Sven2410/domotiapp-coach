@@ -185,6 +185,12 @@ from .planner import (
     doel_bereikt,
     energy_needed_kwh,
     held_back,
+    hours_needed,
+    HERINNERING_TE_LAAT,
+    autoverbruik_bij,
+    herinnering_drempel,
+    herinnering_instelling,
+    herinnering_moment,
     MIN_AMPS,
     resolve_window,
     should_send,
@@ -2119,6 +2125,12 @@ class ChargerCoach:
         # is en of hij 's nachts wilde laden. In het geheugen als `paal-offline:<paal>`.
         self._offline: dict[str, dict[str, Any]] = {}
         self._online_van: dict[str, list[str]] = {}
+        # De herinnering om de auto aan te sluiten (v0.212.0): het verbruik van vandaag per paal en auto
+        # (`autoverbruik:<paal>:<auto>` in het geheugen; de dagen zelf in `car_usage`), voor welke klaar-tijd
+        # er al herinnerd is (`herinnering:<paal>`), en het maximum van de paal uit de laatste ronde.
+        self._autoverbruik: dict[str, dict[str, Any]] = {}
+        self._herinnerd: dict[str, str] = {}
+        self._paal_max: dict[str, float] = {}
         # Palen die deze beurt al klaar meldden (v0.209.0), met wat de bewoner toen gekozen had (de auto en de
         # opgegeven accustand). In het geheugen als `paal-klaar:<paal>`.
         self._klaar_beurt: dict[str, str] = {}
@@ -2354,7 +2366,7 @@ class ChargerCoach:
             await self._async_tell(f"{entry['title']}. {entry['body']}")
 
     async def _async_tell(
-        self, message: str, kritiek: bool = False, telefoon: bool = True
+        self, message: str, kritiek: bool = False, telefoon: bool = True, soort: str | None = None
     ) -> None:
         """Een melding sturen aan wie hem wil hebben, en in de geschiedenis zetten.
 
@@ -2367,7 +2379,9 @@ class ChargerCoach:
         filteren; de eigenaar op 05-09-2026: "dat je op normale en kritieke
         meldingen kan filteren".
         """
-        soort = "kritiek" if kritiek else "melding"
+        # Een eigen soort (v0.212.0): "herinnering", zodat wie die aan heeft hem krijgt, ook als
+        # verslagen uit staan.
+        soort = soort or ("kritiek" if kritiek else "melding")
         # De eigenaar op 06-09-2026: per beurt één verslag plus wat kritiek is. Wat
         # daarbuiten valt komt wel in de geschiedenis, niet op de telefoon.
         if telefoon:
@@ -2991,6 +3005,165 @@ class ChargerCoach:
             if rec.get("herlaadde") else
             t("{naam} is sinds {tijd} offline. Staat de automaat aan en heeft hij internet?", naam=naam, tijd=tijd)
         )
+
+    async def _async_herinnering(self, now: datetime, settings: dict[str, Any], device: dict[str, Any]) -> None:
+        """Een herinnering als de auto niet aan de paal hangt en te weinig heeft voor de klaar-tijd (v0.212.0).
+
+        In een klantwoning werd de bus op 08-11-2026 vergeten aan te sluiten. Eén melding per klaar-tijd, op de
+        gekozen tijd (standaard 21:00) of eerder als de coach de klaar-tijd anders niet meer haalt
+        (`herinnering_moment`), en alleen als de paal zelf zegt dat er geen auto aan hangt, er een klaar-tijd
+        aanstaat en de accustand onder de drempel ligt. Vast: de drempel die de bewoner koos. Slim: wat de auto
+        op die weekdag meestal verbruikt, plus een reserve (`herinnering_drempel`). Een eigen soort in
+        Meldingen ("herinnering"), standaard aan. Voor welke klaar-tijd er herinnerd is staat in het geheugen.
+        """
+        device_id = device.get("id", "")
+        await self._async_autoverbruik(now, settings, device)
+        instelling = herinnering_instelling(device)
+        if instelling["mode"] == "uit":
+            return
+        # Wat een paal die offline is zegt, is van voor hij wegviel (v0.209.0). Zegt hij niets over een auto,
+        # dan weet de coach het niet, en dan geen herinnering.
+        if device_id in self._offline or not self._paal_zonder_auto(device.get("entities") or {}):
+            return
+        _gekozen, profiel = self._chosen_car(settings, device)
+        tijd = _time(instelling["time"])
+        klaar = self._volgende_klaar(settings, device, now)
+        if profiel is None or tijd is None or klaar is None:
+            return
+        deadline, venster = klaar
+        sleutel = deadline.isoformat()
+        if self._herinnerd.get(device_id) == sleutel:
+            return
+        auto_id = str(profiel.get("id") or "")
+        soc = _number(self.hass, profiel.get("soc_entity")) if profiel.get("soc_entity") else None
+        laatst: datetime | None = None
+        rec = self._autoverbruik.get(f"{device_id}:{auto_id}")
+        if soc is None and rec is not None:
+            # De accustand is weg: de laatst bekende, met het tijdstip erbij. Geen schatting.
+            soc, laatst = rec["soc"], rec["laatst"]
+        drempel, verbruik = herinnering_drempel(
+            instelling, self._verbruik_dagen(settings, device_id, auto_id), deadline.weekday()
+        )
+        nodig = None
+        if soc is not None:
+            amps = min(
+                (a for a in (float(profiel.get("max_amps") or 0), self._paal_max.get(device_id, 0.0)) if a > 0),
+                default=16.0,
+            )
+            auto = Car(
+                capacity_kwh=float(profiel.get("capacity_kwh") or 0),
+                phases={"one": 1, "three": 3}.get(profiel.get("phases"), 3),
+                max_amps=float(profiel.get("max_amps") or 0),
+                soc_percent=soc,
+                target_percent=venster.target or float(profiel.get("target_percent") or 100),
+                tempo_per_band=self._tempo_uit(settings, device_id, auto_id),
+                tempo_vanaf=self._tempo_vanaf(settings, device_id, auto_id),
+                efficiency=self._rendement_uit(settings, device_id, auto_id),
+            )
+            nodig = hours_needed(auto, int(amps))
+        om = herinnering_moment(deadline, tijd, nodig)
+        if now < om or _tussen(om, now) > HERINNERING_TE_LAAT:
+            return
+        naam = _hoofdletter(str(profiel.get("name") or "").strip() or t("de auto"))
+        if soc is None:
+            # Niets bekend: alleen in de vaste stand, want de slimme heeft niets om mee te vergelijken.
+            if verbruik is not None:
+                return
+            tekst = t("{naam} hangt niet aan de paal.", naam=naam)
+        elif soc >= drempel:
+            return
+        elif laatst is not None:
+            wanneer = (t("om {klok}", klok=f"{laatst:%H:%M}") if laatst.date() == now.date()
+                       else _wanneer(now, laatst))
+            tekst = t("{naam} hangt niet aan de paal. Laatst bekend: {soc}% {wanneer}.",
+                      naam=naam, soc=f"{soc:.0f}", wanneer=wanneer)
+        elif verbruik is not None:
+            tekst = (
+                t("{naam} staat op {soc}%. Morgen rijd je meestal {verbruik}%. Vergeet hem niet aan te sluiten.",
+                  naam=naam, soc=f"{soc:.0f}", verbruik=f"{verbruik:.0f}")
+                if deadline.date() > now.date() else
+                t("{naam} staat op {soc}%. Vandaag rijd je meestal {verbruik}%. Vergeet hem niet aan te sluiten.",
+                  naam=naam, soc=f"{soc:.0f}", verbruik=f"{verbruik:.0f}")
+            )
+        else:
+            tekst = t("{naam} staat op {soc}% en hangt niet aan de paal.", naam=naam, soc=f"{soc:.0f}")
+        self._herinnerd[device_id] = sleutel
+        self._onthoud(f"herinnering:{device_id}", {"klaar": sleutel}, meteen=True)
+        _LOGGER.info("%s: herinnering voor de klaar-tijd %s (drempel %.0f%%)", device_id, sleutel, drempel)
+        await self._async_tell(tekst, soort="herinnering")
+
+    def _volgende_klaar(
+        self, settings: dict[str, Any], device: dict[str, Any], now: datetime
+    ) -> tuple[datetime, DayWindow] | None:
+        """De eerstvolgende klaar-tijd die aanstaat, met de dag van het schema erbij, of None."""
+        dagen = self._days(settings, device)
+        for extra in range(8):
+            dag = now.date() + timedelta(days=extra)
+            venster = dagen.get(dag.weekday())
+            if venster is None or not venster.enabled or venster.done_by is None:
+                continue
+            moment = datetime.combine(dag, venster.done_by)
+            if moment > now:
+                return moment, venster
+        return None
+
+    @staticmethod
+    def _verbruik_dagen(settings: dict[str, Any], device_id: str, auto_id: str) -> dict[str, float]:
+        """Het verbruik per dag van deze auto aan deze paal (`car_usage`), in procent."""
+        for rij in settings.get("car_usage") or []:
+            if isinstance(rij, dict) and rij.get("device") == device_id and rij.get("car") == auto_id:
+                uit: dict[str, float] = {}
+                for dag, waarde in (rij.get("days") or {}).items():
+                    try:
+                        uit[str(dag)] = float(waarde)
+                    except (TypeError, ValueError):
+                        continue
+                return uit
+        return {}
+
+    async def _async_autoverbruik(self, now: datetime, settings: dict[str, Any], device: dict[str, Any]) -> None:
+        """Het verbruik van elke auto van deze paal per dag, voor de slimme herinnering (v0.212.0).
+
+        Uit de accustand: elke daling telt, laden niet (`autoverbruik_bij`). De lopende dag staat in het
+        geheugen (`autoverbruik:<paal>:<auto>`), een afgesloten dag in de instellingen (`car_usage`), want het
+        geheugen vergeet na `GEHEUGEN_MAX_UREN` en dit gaat over acht weken.
+        """
+        device_id = device.get("id", "")
+        for profiel in device.get("cars") or []:
+            entiteit, auto_id = profiel.get("soc_entity"), str(profiel.get("id") or "")
+            if not entiteit or not auto_id:
+                continue
+            soc = _number(self.hass, entiteit)
+            if soc is None:
+                continue
+            sleutel = f"{device_id}:{auto_id}"
+            dagen = self._verbruik_dagen(settings, device_id, auto_id)
+            nieuw = autoverbruik_bij({**(self._autoverbruik.get(sleutel) or {}), "dagen": dagen}, soc, now)
+            nieuwe_dagen = nieuw.pop("dagen")
+            if nieuwe_dagen != dagen:
+                await self._async_verbruik_bewaren(settings, device_id, auto_id, nieuwe_dagen)
+            self._autoverbruik[sleutel] = nieuw
+            self._onthoud(f"autoverbruik:{sleutel}", {
+                "dag": nieuw["dag"], "eerste": _naar_geheugen(nieuw["eerste"]), "laatst": _naar_geheugen(nieuw["laatst"]),
+                "verbruik": round(nieuw["verbruik"], 2), "ref": nieuw["ref"], "soc": nieuw["soc"],
+            })
+
+    async def _async_verbruik_bewaren(
+        self, settings: dict[str, Any], device_id: str, auto_id: str, dagen: dict[str, float]
+    ) -> None:
+        """Een rij van `car_usage` bijwerken, eens per dag per auto."""
+        rijen = [
+            r for r in (settings.get("car_usage") or [])
+            if isinstance(r, dict) and not (r.get("device") == device_id and r.get("car") == auto_id)
+        ]
+        rijen.append({"device": device_id, "car": auto_id, "days": dagen})
+        settings["car_usage"] = rijen
+        try:
+            saved = await async_get_store(self.hass).async_save({"car_usage": rijen})
+        except Exception:  # noqa: BLE001 - een gemiste dag is geen reden om te stoppen
+            _LOGGER.exception("kon het verbruik van de auto niet bewaren")
+            return
+        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
 
     def _offline_onthouden(self, device_id: str) -> None:
         rec = self._offline.get(device_id)
@@ -4885,6 +5058,7 @@ class ChargerCoach:
                     bezet[sleutel] = bezet.get(sleutel, 0.0) + amps
                 claim = await self._one(moment, settings, device, level, bezet)
                 await self._async_paal_terug(device)
+                await self._async_herinnering(moment, settings, device)
                 sleutels = self._groep_sleutels(settings, device)
                 for sleutel in sleutels:
                     vergeven[sleutel] = vergeven.get(sleutel, 0.0) + claim
@@ -13259,6 +13433,8 @@ class ChargerCoach:
             if vorige is None or vorige.charge:
                 charger.started_at = self._since.setdefault(device_id, now)
         self._laadde[device_id] = charger.charging
+        if charger.max_amps:
+            self._paal_max[device_id] = float(charger.max_amps)
 
         # Eén fasemeting per ronde; `_fasetip` en `_car` lezen allebei deze.
         if charger.charging:
@@ -16940,6 +17116,19 @@ class ChargerCoach:
                     herstart = _uit_geheugen(data.get("herstart"))
                     if herstart is not None:
                         self._herstart_gedaan.setdefault(sleutel.split(":", 1)[1], herstart)
+            elif sleutel.startswith("autoverbruik:"):
+                eerste, laatst = _uit_geheugen(data.get("eerste")), _uit_geheugen(data.get("laatst"))
+                try:
+                    rec = {"dag": str(data["dag"]), "eerste": eerste, "laatst": laatst,
+                           "verbruik": float(data.get("verbruik") or 0.0), "ref": float(data["ref"]),
+                           "soc": float(data["soc"])}
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if eerste is not None and laatst is not None:
+                    self._autoverbruik[sleutel.split(":", 1)[1]] = rec
+            elif sleutel.startswith("herinnering:"):
+                if data.get("klaar"):
+                    self._herinnerd[sleutel.split(":", 1)[1]] = str(data["klaar"])
             elif sleutel.startswith("paal-offline:"):
                 sinds = _uit_geheugen(data.get("sinds"))
                 if sinds is not None:

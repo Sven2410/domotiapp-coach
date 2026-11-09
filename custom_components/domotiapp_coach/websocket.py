@@ -319,6 +319,17 @@ _BATTERY = _schema(
     }
 )
 
+
+# De herinnering om de auto aan te sluiten (v0.212.0): uit, vast (een tijd en een drempel) of slim (wat de
+# auto op die weekdag meestal verbruikt, plus een reserve). Standaard uit, om 21:00, onder 50%, 10% reserve.
+_HERINNERING = _schema(
+    {
+        vol.Optional("mode", default="uit"): vol.In(["uit", "vast", "slim"]),
+        vol.Optional("time", default="21:00"): vol.Match(r"^([01]\d|2[0-3]):[0-5]\d$"),
+        vol.Optional("below_percent", default=50): vol.All(vol.Coerce(int), vol.Range(1, 100)),
+        vol.Optional("reserve_percent", default=10): vol.All(vol.Coerce(int), vol.Range(0, 100)),
+    }
+)
 _DEVICE = _schema(
     {
         vol.Required("id"): str,
@@ -406,6 +417,8 @@ _DEVICE = _schema(
         # procent (v0.103.0, naar het voorbeeld van evcc). Standaard 90, zoals
         # het tot dan vast stond (`SURPLUS_SLACK`). Zie `Charger.zon_start`.
         vol.Optional("solar_start_percent", default=90): vol.All(vol.Coerce(int), vol.Range(10, 100)),
+        # De herinnering om de auto aan te sluiten (v0.212.0); zie `herinnering_instelling` in planner.py.
+        vol.Optional("reminder", default=dict): _HERINNERING,
     }
 )
 
@@ -1103,6 +1116,13 @@ _BATTERY_VOORKEUREN = vol.Schema(
 @websocket_api.websocket_command(
     {
         vol.Required("type"): "domotiapp_coach/device/preferences",
+        # Alleen wat er veranderde; de rest van de herinnering blijft staan (`voorkeuren_bijwerken`).
+        vol.Optional("reminder"): vol.Schema({
+            vol.Optional("mode"): vol.In(["uit", "vast", "slim"]),
+            vol.Optional("time"): vol.Match(r"^([01]\d|2[0-3]):[0-5]\d$"),
+            vol.Optional("below_percent"): vol.All(vol.Coerce(int), vol.Range(1, 100)),
+            vol.Optional("reserve_percent"): vol.All(vol.Coerce(int), vol.Range(0, 100)),
+        }),
         vol.Required("device_id"): str,
         vol.Optional("charge_mode"): vol.In(["zon", "continu", "goedkoopst"]),
         vol.Optional("continuous_amps"): vol.All(vol.Coerce(int), vol.Range(6, 32)),

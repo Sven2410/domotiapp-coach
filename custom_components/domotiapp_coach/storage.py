@@ -107,7 +107,7 @@ def schema_bijwerken(
 # hardware: alleen hoe hij het wil hebben. Alles daarbuiten blijft van de
 # installateur, via `settings/set`.
 VOORKEUREN: dict[str, frozenset[str]] = {
-    "laadpaal": frozenset({"charge_mode", "continuous_amps", "solar_start_percent"}),
+    "laadpaal": frozenset({"charge_mode", "continuous_amps", "solar_start_percent", "reminder"}),
     "vaatwasser": frozenset({"release_required"}),
 }
 VOORKEUREN_AUTO = frozenset({"target_percent", "wake_mode"})
@@ -163,7 +163,8 @@ def voorkeuren_bijwerken(
                 auto.update(velden)
             apparaat["cars"] = autos
         elif veld in mag:
-            apparaat[veld] = waarde
+            # Een herinnering (v0.212.0) komt per veld; de rest blijft staan.
+            apparaat[veld] = {**(apparaat.get(veld) or {}), **waarde} if isinstance(waarde, dict) else waarde
         else:
             raise ValueError(t("{veld} hoort niet bij een {soort}", veld=veld, soort=soort))
     return lijst
@@ -252,7 +253,7 @@ def _forget_removed_devices(data: dict[str, Any]) -> dict[str, Any]:
     # Hetzelfde geldt voor wat er per laadpunt over de lopende sessie bewaard
     # is: welke auto eraan hangt, wat de bewoner over de accustand zei en welke
     # knoppen aanstonden. Verdwijnt het apparaat, dan hoort dat mee weg.
-    for sleutel in ("active_cars", "car_soc", "car_pace", "car_efficiency", "car_phases", "sessions", "program_measured",
+    for sleutel in ("active_cars", "car_soc", "car_pace", "car_efficiency", "car_phases", "car_usage", "sessions", "program_measured",
                     "boiler_learned", "battery_state", "airco_learned"):
         data[sleutel] = [
             entry
