@@ -17497,6 +17497,140 @@ for sec in (300, 360, 480):
     h256 += [d[2]["message"] for d in h256h.services.verstuurd if d[0] == "notify"]
 controle("en wat gemeld was, niet nog een keer", h256 == [], f"{h256}")
 
+print("=== 257. Growatt: een laadschema van iemand anders (v0.215.0) ===")
+# Een klantwoning op 06-11-2026: om 08:05 zette de coach alles uit, en om 22:05 stond er een vak 01:00-07:00 tot 100%
+# met laden van het net aan, uit de app of van de installateur. De coach las alleen terug na zijn eigen schrijven, dus
+# hij zag het niet; het had elke nacht de accu vol van het net geladen, ook vóór een zonnige dag.
+GROWATT192["controllable"] = True
+coach192._batterij.clear()
+sys.modules["homeassistant.helpers.entity_registry"] = register192
+berichten257 = []
+
+
+async def tell257(bericht, kritiek=False, telefoon=True, soort=None):
+    berichten257.append((bericht, kritiek, telefoon))
+oud_tell257, coach192._async_tell = coach192._async_tell, tell257
+UIT257 = coachmod.GrowattSchema()
+oud_schema257 = coachmod.growatt_schema
+coachmod.growatt_schema = lambda *a, **k: coachmod.GrowattSchema()
+
+
+def vreemd257():
+    omvormer192.update(charge_power=100, charge_stop_soc=100, mains_enabled=True,
+                       periods=[{"period_id": 1, "start_time": "01:00", "end_time": "07:00", "enabled": True},
+                                {"period_id": 2, "start_time": "00:00", "end_time": "00:00", "enabled": False},
+                                {"period_id": 3, "start_time": "00:00", "end_time": "00:00", "enabled": False}])
+
+
+def uit257():
+    omvormer192.update(mains_enabled=False, periods=[{**p, "enabled": False} for p in omvormer192["periods"]])
+
+
+def gang257(van, minuten):
+    uit = []
+    for m in range(minuten + 1):
+        nu = van + dt.timedelta(minutes=m)
+        st, v = asyncio.run(ronde192(nu))
+        uit.append((nu, st, v))
+    return uit
+
+
+try:
+    T257 = dt.datetime(2026, 11, 6, 8, 5)
+    uit257()
+    # Stil, en het huis van het net: niets dat met het laadschema te maken heeft.
+    for e257, w257 in (("sensor.growatt_laden", "0"), ("sensor.growatt_ontladen", "0"), ("sensor.growatt_soc", "50")):
+        hass192.states.zet(e257, {"state": w257, "attributes": {"unit_of_measurement": "%" if "soc" in e257 else "kW"}})
+    # 1. De coach schrijft uit en bevestigt het; daarna leest hij elk uur terug.
+    gang257(T257, 8)
+    sessie257 = coach192._batterij["dev-growatt"]
+    terug257 = sessie257.get("growatt_terug_om")
+    controle("uit, bevestigd, en over een uur weer teruglezen",
+             sessie257.get("growatt_geschreven") == UIT257 and sessie257.get("growatt_bevestigd") is not None
+             and terug257 is not None and dt.timedelta(minutes=55) <= terug257 - T257 <= dt.timedelta(minutes=70),
+             f"{sessie257.get('growatt_geschreven')} {sessie257.get('growatt_bevestigd')} {terug257}")
+    gelezen257 = [r[0] for r in gang257(T257 + dt.timedelta(minutes=9), 120)
+                  if any(d[1] == "read_ac_charge_times" for d in r[2])]
+    controle("twee uur zonder iets: twee keer gelezen, niets geschreven", len(gelezen257) == 2 and berichten257 == [],
+             f"{gelezen257} {berichten257}")
+
+    # 2. Iemand zet een vak 01:00-07:00 tot 100% erin: binnen het uur gezien, vervangen, één regel.
+    vreemd257()
+    V257 = T257 + dt.timedelta(minutes=130)
+    r257 = gang257(V257, 75)
+    gezien257 = next((r[0] for r in r257 if berichten257), None)
+    print(f"  gezien om {gezien257}: {berichten257}")
+    controle("binnen het uur gezien", gezien257 is not None and gezien257 - V257 <= dt.timedelta(minutes=60), f"{gezien257}")
+    controle("één regel in de geschiedenis, niet op de telefoon",
+             berichten257 == [("Er stond een ander laadschema in de batterij (01:00-07:00, tot 100%); de coach vervangt het.",
+                               False, False)], f"{berichten257}")
+    controle("en het is eruit: geen laden van het net meer", omvormer192["mains_enabled"] is False
+             and not any(p["enabled"] for p in omvormer192["periods"]), f"{omvormer192}")
+    controle("de kaart zegt nog geen andere sturing", r257[-1][1].get("foreign") is False, "")
+
+    # 3. Het komt terug op dezelfde dag: niet vechten, één melding, en niets meer schrijven.
+    vreemd257()
+    W257 = V257 + dt.timedelta(minutes=180)
+    r257b = gang257(W257, 180)
+    geschreven257 = [r[0] for r in r257b if geschreven192(r[2])]
+    print(f"  terug: {berichten257[1:]}, geschreven {geschreven257}")
+    controle("de tweede keer: één gewone melding op de telefoon",
+             len(berichten257) == 2 and berichten257[1][0].startswith("Iemand zet steeds een ander laadschema in de batterij")
+             and berichten257[1][1] is False and berichten257[1][2] is True, f"{berichten257}")
+    controle("en daarna schrijft hij niets meer", geschreven257 == [] and omvormer192["mains_enabled"] is True,
+             f"{geschreven257}")
+    controle("de kaart zegt dat iets anders hem stuurt", r257b[-1][1].get("foreign") is True, "")
+    gelezen257b = [r[0] for r in r257b if any(d[1] == "read_ac_charge_times" for d in r[2])]
+    controle("hij kijkt elk uur of het eruit is", 2 <= len(gelezen257b) <= 4, f"{gelezen257b}")
+
+    # 4. Een herstart terwijl hij het laat staan: na de herstart laat hij het nog steeds staan.
+    coach192._batterij_onthouden("dev-growatt")
+    c257h = herstart213(hass192)
+    asyncio.run(c257h._async_geheugen_laden())
+    controle("na een herstart weet hij dat hij het laat staan",
+             c257h._batterij_sessie("dev-growatt").get("growatt_laat") is not None
+             and c257h._batterij_sessie("dev-growatt").get("growatt_vreemd") is not None, "")
+
+    # 5. Het gaat eruit: hij ziet het binnen het uur, één regel, en stuurt weer.
+    uit257()
+    X257 = W257 + dt.timedelta(minutes=181)
+    r257c = gang257(X257, 70)
+    print(f"  eruit: {berichten257[2:]}")
+    controle("eruit: één regel in de geschiedenis, en hij stuurt weer",
+             berichten257[2:] == [("Het andere laadschema is uit de batterij; de coach stuurt het laadschema weer.", False, False)]
+             and "growatt_laat" not in sessie257 and r257c[-1][1].get("foreign") is False, f"{berichten257[2:]}")
+
+    # 6. Een dag later weer een ander vak: dat is weer de eerste keer.
+    vreemd257()
+    Y257 = X257 + dt.timedelta(days=1, hours=1)
+    gang257(Y257, 70)
+    controle("een dag later: weer vervangen, niet laten staan",
+             berichten257[3:] and "de coach vervangt het" in berichten257[3][0] and "growatt_laat" not in sessie257,
+             f"{berichten257[3:]}")
+
+    # 7. Een schema met laden van het net dat de coach zelf schreef en dat bevestigd is: geen vreemd vak.
+    controle("een eigen schema van het net valt hier niet onder", not any("ander laadschema" in b[0] and "Iemand" in b[0]
+                                                                         for b in berichten257[4:]), "")
+
+    # 8. Een Growatt die de coach niet stuurt: alleen een regel, één keer per schema, en hij schrijft niets.
+    GROWATT192["controllable"] = False
+    coach192._batterij.clear()
+    berichten257.clear()
+    Z257 = Y257 + dt.timedelta(days=2)
+    vreemd257()
+    r257s = gang257(Z257, 130)
+    controle("zonder het vinkje: één regel dat er een schema in staat dat niet van de coach is",
+             berichten257 == [("Er staat een laadschema in de batterij dat niet van de coach is (01:00-07:00, tot 100%); "
+                               "de coach stuurt hem niet.", False, False)], f"{berichten257}")
+    controle("en hij schrijft niets", not any(geschreven192(r[2]) for r in r257s), "")
+    omvormer192.update(periods=[{**p, "start_time": "02:00"} if p["period_id"] == 1 else p for p in omvormer192["periods"]])
+    gang257(Z257 + dt.timedelta(minutes=131), 61)
+    controle("een ander schema: nog een regel", len(berichten257) == 2 and "02:00-07:00" in berichten257[1][0], f"{berichten257}")
+finally:
+    coachmod.growatt_schema = oud_schema257
+    coach192._async_tell = oud_tell257
+    del sys.modules["homeassistant.helpers.entity_registry"]
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

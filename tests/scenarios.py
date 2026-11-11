@@ -1753,6 +1753,13 @@ growatt_eigen_zon = growatt_zon.kopie(
     uitleg="dezelfde Growatt zonder zonvoorspeller: de zon van morgen uit de eigen opwek en het weer",
     zon=Zon(wolken="helder"), voorspeller="geen", weer=True,
 )
+# Een laadschema van iemand anders (v0.215.0). In een klantwoning op 06-11-2026 stond er om 22:05 een vak 01:00-07:00 tot
+# 100% met laden van het net in de Growatt, uit de app of van de installateur, terwijl de coach alles uit had gezet.
+growatt_vreemd = growatt_zon.kopie(
+    naam="growatt-vreemd",
+    uitleg="growatt-zon, en om 23:30 zet iemand een vak 01:00-07:00 tot 100% met laden van het net in de Growatt",
+    gebeurtenissen=[("23:30", "growatt_vreemd", None)],
+)
 growatt_schaduw = growatt_bihorario.kopie(
     naam="growatt-schaduw",
     uitleg="dezelfde Growatt zonder het vinkje: de coach rekent en zegt wat hij zou schrijven, maar schrijft niets",
@@ -2002,7 +2009,7 @@ ALLE = [
     vast_kosten_kwh, vast_kosten_schalen, vast_kosten_overschot, vast_kosten_overschot_netto, dyn_salderen_vol,
     planning_auto_eerst, planning_accu_eerst,
     *HERSTART,
-    growatt_bihorario, growatt_zon, growatt_eigen_zon, growatt_schaduw, growatt_vasthouden,
+    growatt_bihorario, growatt_zon, growatt_vreemd, growatt_eigen_zon, growatt_schaduw, growatt_vasthouden,
     growatt_zon_onzeker_zonder, growatt_zon_onzeker, growatt_zon_te_hoog,
     growatt_ochtend, growatt_ochtend_zonder_grens, growatt_herstart, growatt_weigert, growatt_terug_100,
     batterij_volgt_niet, batterij_volgt_niet_zelf, batterij_volgt_even_niet,

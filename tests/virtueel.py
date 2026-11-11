@@ -2490,6 +2490,16 @@ class Wereld:
             # Een klare auto: de Equalizer zet de paal even op 0 A, en de Easee springt naar awaiting_start.
             self.paal.wacht_na_klaar = True
             return "de Equalizer zet de paal even op 0 A; de paal zegt nu awaiting_start"
+        if actie == "growatt_vreemd":
+            # Iemand zet een eigen vak in de Growatt, uit de app (v0.215.0): 01:00-07:00 tot 100%, laden van het net aan.
+            bat = self.batterij
+            bat.schema = {
+                "charge_power": 100, "charge_stop_soc": 100, "mains_enabled": True,
+                "periods": [{"period_id": 1, "start_time": "01:00", "end_time": "07:00", "enabled": True},
+                            {"period_id": 2, "start_time": "00:00", "end_time": "00:00", "enabled": False},
+                            {"period_id": 3, "start_time": "00:00", "end_time": "00:00", "enabled": False}],
+            }
+            return "iemand zet een vak 01:00-07:00 tot 100% in de Growatt, met laden van het net"
         if actie == "paal_onbereikbaar":
             # Een paal die zichzelf herstart: elke opdracht faalt, en hij doet wat hij deed.
             self.paal_weg_tot = self.nu + dt.timedelta(minutes=int(arg))
