@@ -520,6 +520,14 @@ GROWATT_TERUG = timedelta(minutes=6)
 # klantwoning op 26-10-2026 bevestigde hij na een herstart 8%, terwijl er 100 stond.
 GROWATT_CONTROLE = timedelta(minutes=30)
 GROWATT_WACHT = timedelta(seconds=45)
+# Een laadschema dat iemand anders in de Growatt zet (v0.215.0). In een klantwoning op 06-11-2026 stond er om 22:05 een
+# vak 01:00-07:00 tot 100% met laden van het net aan, uit de app of van de installateur, terwijl de coach om 08:05 alles
+# uit had gezet. Hij las alleen terug na zijn eigen schrijven en zolang hij van het net laadde, dus hij zag het niet, en
+# het had elke nacht de accu vol van het net geladen, ook vóór een zonnige dag. Nu leest hij een schema zonder laden van
+# het net elk `GROWATT_VREEMD_LEZEN` terug. Een ander vak vervangt hij, met een regel in de geschiedenis; komt het binnen
+# `GROWATT_VREEMD_OPNIEUW` terug, dan vecht hij niet: één melding, en hij laat het staan tot het eruit is.
+GROWATT_VREEMD_LEZEN = timedelta(hours=1)
+GROWATT_VREEMD_OPNIEUW = timedelta(hours=24)
 GROWATT_OPNIEUW = timedelta(hours=1)
 # Na een herstart is de Growatt-integratie soms later klaar dan de coach (v0.162.0). Zolang
 # de accustand er niet is vraagt hij elke ronde opnieuw; lukte het lezen niet, dan na
@@ -10087,6 +10095,11 @@ class ChargerCoach:
             "kwh": round(toon.kwh, 2), "written": None if geschreven is None else geschreven.net,
             "confirmed": sessie.get("growatt_bevestigd") is not None,
         }
+        if stuurt and sessie.get("growatt_laat") is not None:
+            # Niet vechten met een ander laadschema (v0.215.0): niets schrijven, en elk uur kijken of het eruit is.
+            self.state[device_id]["foreign"] = True
+            await self._async_growatt_laat(now, device, sessie, wil)
+            return
 
         if not stuurt:
             # De schaduw: zeggen wat hij zou schrijven, op dezelfde momenten als hij het zou
@@ -10105,6 +10118,7 @@ class ChargerCoach:
             if geschreven is not None and geschreven.net:
                 wil = GrowattSchema()
             else:
+                await self._async_growatt_kijk(now, device, sessie)
                 return
 
         laatst = sessie.get("growatt_op")
@@ -10146,9 +10160,16 @@ class ChargerCoach:
                 if geschreven.net:
                     # Zolang het van het net laadt blijft hij het nakijken.
                     sessie["growatt_terug_om"] = now + GROWATT_CONTROLE
+                else:
+                    # En zonder laden van het net elk uur, voor een schema van iemand anders (v0.215.0).
+                    sessie["growatt_terug_om"] = now + GROWATT_VREEMD_LEZEN
                 self.state[device_id]["schedule"]["confirmed"] = True
                 if sessie.pop("growatt_gemeld", False):
                     await self._async_tell(t("{naam} neemt het laadschema weer aan.", naam=naam), telefoon=False)
+            elif (not geschreven.net and sessie.get("growatt_bevestigd") is not None
+                  and isinstance(gelezen, dict) and gelezen.get("mains_enabled")):
+                # Uit stond er al, en nu laadt hij van het net: dat is iemand anders (v0.215.0).
+                await self._async_growatt_vreemd(now, device, sessie, gelezen)
             else:
                 if self._growatt_vermogen_geweigerd(geschreven, gelezen):
                     # Alles staat er, behalve het vermogen. Geweigerd is alleen een getal dat er bij het
@@ -10192,6 +10213,98 @@ class ChargerCoach:
                 # Opnieuw schrijven na de pauze.
                 sessie["growatt_geschreven"] = None
                 await self._async_growatt_fout(now, device, sessie, geschreven)
+
+    @staticmethod
+    def _growatt_vreemd_zin(gelezen: dict[str, Any]) -> str:
+        """Een laadschema zoals de Growatt het teruggeeft, kort in woorden: "01:00-07:00, tot 100%"."""
+        vakken = [
+            f"{str(p.get('start_time'))[:5]}-{str(p.get('end_time'))[:5]}"
+            for p in gelezen.get("periods") or [] if isinstance(p, dict) and p.get("enabled")
+        ]
+        delen = [", ".join(vakken) or t("laden van het net aan")]
+        try:
+            delen.append(t("tot {soc}%", soc=int(gelezen.get("charge_stop_soc"))))
+        except (TypeError, ValueError):
+            pass
+        return ", ".join(delen)
+
+    async def _async_growatt_vreemd(
+        self, now: datetime, device: dict[str, Any], sessie: dict[str, Any], gelezen: dict[str, Any]
+    ) -> None:
+        """Een laadschema van iemand anders in een Growatt die de coach stuurt (v0.215.0).
+
+        De eerste keer vervangt hij het, met een regel in de geschiedenis. Komt het binnen
+        `GROWATT_VREEMD_OPNIEUW` terug, dan vecht hij niet: één melding, en hij laat het staan tot het eruit is
+        (`_async_growatt_laat`), net als iets anders dat de Easee stuurt (v0.198.0).
+        """
+        device_id = device.get("id", "")
+        naam = device.get("name") or t("de batterij")
+        schema = self._growatt_vreemd_zin(gelezen)
+        vorige = sessie.get("growatt_vreemd")
+        sessie["growatt_vreemd"] = now
+        if vorige is not None and _tussen(vorige, now) < GROWATT_VREEMD_OPNIEUW:
+            sessie["growatt_laat"] = now
+            sessie["growatt_laat_lees"] = now
+            self.state[device_id]["foreign"] = True
+            _LOGGER.warning("%s: weer een ander laadschema in de Growatt (%s); de coach laat het staan", device_id, gelezen)
+            await self._async_tell(t(
+                "Iemand zet steeds een ander laadschema in {naam} ({schema}). De coach laat het staan en stuurt het "
+                "laadschema niet tot het eruit is. Haal het eruit in de Growatt-app, of haal bij de coach het vinkje "
+                "'mag sturen' weg.", naam=naam, schema=schema))
+            return
+        _LOGGER.warning("%s: een ander laadschema in de Growatt (%s); de coach vervangt het", device_id, gelezen)
+        sessie["growatt_geschreven"] = None
+        await self._async_tell(
+            t("Er stond een ander laadschema in {naam} ({schema}); de coach vervangt het.", naam=naam, schema=schema),
+            telefoon=False,
+        )
+
+    async def _async_growatt_laat(
+        self, now: datetime, device: dict[str, Any], sessie: dict[str, Any], wil: GrowattSchema
+    ) -> None:
+        """Een ander laadschema dat de coach laat staan: elk `GROWATT_VREEMD_LEZEN` kijken of het eruit is (v0.215.0)."""
+        laatst = sessie.get("growatt_laat_lees")
+        if laatst is not None and _tussen(laatst, now) < GROWATT_VREEMD_LEZEN:
+            return
+        sessie["growatt_laat_lees"] = now
+        gelezen = await self._async_growatt_lees(device)
+        if gelezen is None or (gelezen.get("mains_enabled") and not wil.gelijk(gelezen)):
+            return
+        sessie.pop("growatt_laat", None)
+        sessie.pop("growatt_laat_lees", None)
+        sessie["growatt_geschreven"] = None
+        naam = device.get("name") or t("de batterij")
+        _LOGGER.info("%s: het andere laadschema is eruit; de coach stuurt weer", device.get("id"))
+        await self._async_tell(
+            t("Het andere laadschema is uit {naam}; de coach stuurt het laadschema weer.", naam=naam), telefoon=False)
+
+    async def _async_growatt_kijk(self, now: datetime, device: dict[str, Any], sessie: dict[str, Any]) -> None:
+        """Een Growatt die de coach niet stuurt: elk `GROWATT_VREEMD_LEZEN` kijken of er een ander laadschema in
+        staat, en een nieuw schema één keer in de geschiedenis (v0.215.0). Zonder iets te schrijven."""
+        om = sessie.get("growatt_kijk_om")
+        if om is None:
+            # De eerste keer leest `_async_growatt_soort` het al: dan pas na het teruglezen van een schrijfbeurt.
+            sessie["growatt_kijk_om"] = now + GROWATT_TERUG
+            return
+        if now < om:
+            return
+        sessie["growatt_kijk_om"] = now + GROWATT_VREEMD_LEZEN
+        gelezen = await self._async_growatt_lees(device)
+        if gelezen is None:
+            return
+        if not gelezen.get("mains_enabled"):
+            sessie.pop("growatt_kijk_gezien", None)
+            return
+        schema = self._growatt_vreemd_zin(gelezen)
+        if sessie.get("growatt_kijk_gezien") == schema:
+            return
+        sessie["growatt_kijk_gezien"] = schema
+        naam = device.get("name") or t("de batterij")
+        await self._async_tell(
+            t("Er staat een laadschema in {naam} dat niet van de coach is ({schema}); de coach stuurt hem niet.",
+              naam=naam, schema=schema),
+            telefoon=False,
+        )
 
     @staticmethod
     def _growatt_pct(rij: dict[str, Any], sleutel: str) -> int | None:
@@ -17325,7 +17438,7 @@ class ChargerCoach:
     # stuurt (dan laat de coach hem een uur los), of hij de coach niet volgt, en wat de cloud
     # van een Growatt weigerde. Zonder dit nam de coach hem na een herstart meteen weer over,
     # en kwam dezelfde kritieke melding opnieuw.
-    _BATTERIJ_MOMENTEN = ("vreemd", "growatt_houden_mis")
+    _BATTERIJ_MOMENTEN = ("vreemd", "growatt_houden_mis", "growatt_vreemd", "growatt_laat")
     _BATTERIJ_VLAGGEN = ("volgt_niet_gemeld", "growatt_gemeld")
 
     def _batterij_sessie(self, device_id: str) -> dict[str, Any]:

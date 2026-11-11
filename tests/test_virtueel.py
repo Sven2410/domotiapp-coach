@@ -2750,6 +2750,16 @@ if (vl := v("growatt-bihorario")):
     controle("growatt: het kost minder dan zonder batterij", vl.bat_kosten_met < vl.bat_kosten_zonder - 0.5,
              f"€{vl.bat_kosten_met:.2f} tegen €{vl.bat_kosten_zonder:.2f}")
     controle("growatt: geen melding naar de telefoon", not vl.meldingen, f"{vl.meldingen}")
+# Een laadschema van iemand anders (v0.215.0): om 23:30 zet iemand een vak 01:00-07:00 tot 100% in de Growatt.
+if (vr := v("growatt-vreemd")) and (gz := v("growatt-zon")):
+    schrijf_vr = [(w[0].strftime("%a %H:%M"), w[1]) for w in vr.gw_schrijf]
+    print(f"  growatt-vreemd: {schrijf_vr}, net in de accu {vr.bat_afname_kwh:.2f} kWh tegen {gz.bat_afname_kwh:.2f}")
+    controle("growatt-vreemd: binnen het uur weer uit, voor het vak om 01:00 begint",
+             any(not aan and w[0].strftime("%a") == "Thu" and "23:30" <= w[0].strftime("%H:%M") <= "23:59"
+                 for w, aan in zip(vr.gw_schrijf, [x[1] for x in vr.gw_schrijf])), f"{schrijf_vr}")
+    controle("growatt-vreemd: de accu laadt niet meer van het net dan zonder dat vak",
+             abs(vr.bat_afname_kwh - gz.bat_afname_kwh) < 0.05, f"{vr.bat_afname_kwh:.2f} tegen {gz.bat_afname_kwh:.2f}")
+
 if (vl := v("growatt-zon")):
     print(f"  growatt-zon: {[(f'{t:%a %H:%M}', aan, pct, stop, vak) for t, aan, pct, stop, vak in vl.gw_schrijf]}")
     nacht = [r for r in vl.bat_verloop if r[2] > 100 and r[1] > 100 and r[0] < bat_moment(vl, "09:00")]

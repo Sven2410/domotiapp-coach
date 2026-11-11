@@ -23,6 +23,7 @@ stopt niets.
 | water dat blijft lopen | `GeheugenStore`, `water` | v0.172.0 |
 | een programma dat vrijgegeven is maar nog niet draait, en uitruimen | `GeheugenStore`, `programma:<id>` | v0.172.0 |
 | iets anders stuurt de batterij, hij volgt niet, de Growatt weigert | `GeheugenStore`, `batterij:<id>` | v0.173.0 |
+| een ander laadschema in de Growatt: wanneer vervangen, en of hij het laat staan | `GeheugenStore`, `batterij:<id>` (`growatt_vreemd`, `growatt_laat`) | v0.215.0 |
 | meldingen die al gedaan zijn | `GeheugenStore`, `meldingen` | v0.173.0 |
 | een airco die niet luistert: de pogingen en of het gemeld is | `sessions` (`airco_miss`, `airco_try`, `airco_miss_told`) | v0.205.0 |
 | wat een kamer met een airco doet: het geleerde | `airco_learned` in de instellingen | v0.207.0 |

@@ -303,5 +303,12 @@
   "{naam} hangt niet aan de paal. Laatst bekend: {soc}% {wanneer}.": "{naam} is not plugged into the charger. Last known: {soc}% {wanneer}.",
   "{naam} staat op {soc}% en hangt niet aan de paal.": "{naam} is at {soc}% and not plugged into the charger.",
   "{naam} staat op {soc}%. Morgen rijd je meestal {verbruik}%. Vergeet hem niet aan te sluiten.": "{naam} is at {soc}%. Tomorrow you usually drive {verbruik}%. Remember to plug it in.",
-  "{naam} staat op {soc}%. Vandaag rijd je meestal {verbruik}%. Vergeet hem niet aan te sluiten.": "{naam} is at {soc}%. Today you usually drive {verbruik}%. Remember to plug it in."
+  "{naam} staat op {soc}%. Vandaag rijd je meestal {verbruik}%. Vergeet hem niet aan te sluiten.": "{naam} is at {soc}%. Today you usually drive {verbruik}%. Remember to plug it in.",
+  "de batterij": "the battery",
+  "laden van het net aan": "charging from the grid on",
+  "tot {soc}%": "up to {soc}%",
+  "Iemand zet steeds een ander laadschema in {naam} ({schema}). De coach laat het staan en stuurt het laadschema niet tot het eruit is. Haal het eruit in de Growatt-app, of haal bij de coach het vinkje 'mag sturen' weg.": "Someone keeps putting a different charging schedule in {naam} ({schema}). The coach leaves it and does not control the charging schedule until it is gone. Remove it in the Growatt app, or untick 'The coach may control this device' in the coach.",
+  "Er stond een ander laadschema in {naam} ({schema}); de coach vervangt het.": "There was a different charging schedule in {naam} ({schema}); the coach replaces it.",
+  "Het andere laadschema is uit {naam}; de coach stuurt het laadschema weer.": "The other charging schedule is gone from {naam}; the coach controls the charging schedule again.",
+  "Er staat een laadschema in {naam} dat niet van de coach is ({schema}); de coach stuurt hem niet.": "There is a charging schedule in {naam} that is not from the coach ({schema}); the coach does not control it."
 }

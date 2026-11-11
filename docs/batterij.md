@@ -2586,3 +2586,36 @@ dezelfde tijd) en nog een (niet opnieuw), de accu bij zijn vloer, een batterij d
 paal die laadt, vasthouden in een vak, en een batterij met een regelaar (eerst opnieuw, dan de melding). Het
 virtuele huis: `growatt-levert-niets` (melding om 19:10 na een stop om 18:30) en `growatt-levert`, en geen enkel
 ander scenario krijgt hem. Elke beveiliging is met een mutatie nagekeken.
+
+## Growatt: een laadschema van iemand anders (v0.215.0)
+
+In een klantwoning op 06-11-2026 zette de coach om 08:05 het laadschema uit ("no charging from the grid"); om 08:10 las
+hij terug dat alles uit stond. Die dag breidde de installateur de accu uit. Om 22:05 stond er een vak 01:00-07:00 met
+laadvermogen 100, stopgrens 100 en laden van het net aan, terwijl de coach niets geschreven had: uit de app of van de
+installateur. De coach las alleen terug na zijn eigen schrijven en zolang hij van het net laadde, dus hij zag het
+niet. Het had elke nacht de accu vol van het net geladen, ook vóór een zonnige dag, en dan is er geen plek meer voor de
+zon: bij 10 kWh die de zon had gevuld zo'n € 1,85 per zonnige dag.
+
+Nu:
+- **Elk uur teruglezen** (`GROWATT_VREEMD_LEZEN`), ook als het schema van de coach uit staat. Met laden van het net
+  bleef hij al elk half uur nakijken (`GROWATT_CONTROLE`, v0.163.1); een ander vak dan het zijne schrijft hij dan
+  opnieuw, zoals altijd.
+- **Uit stond er en nu laadt hij van het net** (`_async_growatt_vreemd`): de eerste keer vervangt hij het, met één regel
+  in de geschiedenis: "Er stond een ander laadschema in {naam} (01:00-07:00, tot 100%); de coach vervangt het."
+- **Komt het binnen `GROWATT_VREEMD_OPNIEUW` (24 uur) terug**, dan vecht hij niet: één gewone melding ("Iemand zet
+  steeds een ander laadschema in ..."), hij schrijft niets meer, en de kaart zegt dat iets anders hem stuurt
+  (`foreign`). Elk uur kijkt hij of het eruit is (`_async_growatt_laat`); dan één regel in de geschiedenis en stuurt hij
+  weer. Een dag later is een nieuw vak weer de eerste keer.
+- **Zonder het vinkje** (de schaduw) schrijft hij niets en zegt hij één keer per schema in de geschiedenis dat er een
+  laadschema in staat dat niet van hem is (`_async_growatt_kijk`), elk uur gekeken.
+- **Een herstart:** wanneer hij vervangen heeft en of hij het laat staan staan in het geheugen (`growatt_vreemd`,
+  `growatt_laat` in `batterij:<id>`). Wat hij schreef niet: na een herstart schrijft hij zijn eigen schema meteen, en
+  dat vervangt een ander vak ook, zonder regel, want dan weet hij niet of het vak van hemzelf was.
+- Een Growatt die de coach alleen uitleest (v0.123.0) heeft geen laadschema in de coach, en blijft zoals hij was.
+
+Punt 3 van de werkbon (vasthouden onder de ontlaadgrens niet schrijven) is vervallen: de weigeringen van 06-11 kwamen
+van de cloud, niet van de lage stopgrens.
+
+Proef 257 in test_coach.py: uit en bevestigd, elk uur lezen, een vreemd vak binnen het uur vervangen met één regel, het
+vak dat terugkomt (één melding, niets meer schrijven, `foreign`), een herstart terwijl hij het laat staan, het vak
+eruit, een dag later weer de eerste keer, en een Growatt zonder het vinkje.
