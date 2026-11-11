@@ -1844,6 +1844,36 @@ gevonden wordt (en een slot dat het niet is), en een herstart halverwege. In het
 tracker die de hele dag `not_home` zegt op 17 m, dezelfde kilowatturen als `alfen-auto-weg`, en om 15:48 dezelfde ene
 melding als hij 5 km verderop staat.
 
+## De auto komt terug na een paal die bleef hangen: een nieuwe beurt (v0.216.0)
+
+In een klantwoning bleef een Alfen van 07-11-2026 05:45 tot 08-11 18:10 op `B1` en "auto aangesloten" staan, ook toen
+de Tesla weg was. Voor de coach was het één beurt van anderhalve dag. Om 08:00 ging de klaar-tijd voorbij en zette hij
+de beurt op te laat (`_te_laat`, eis 7), en een herstart om 10:52 zette dat uit het geheugen terug. Om 18:10 stak de
+bewoner de Tesla echt in; de Alfen ging van `B1` meteen naar `C2`, zonder dat de kabel er voor de paal uit was. De
+coach laadde door op vol vermogen ("De klaar-tijd is voorbij en de auto is nog niet vol"), 15,25 kWh tegen 0,50-0,51 in
+plaats van 0,40 om 23:00: ongeveer € 1,79 te veel. De vooruitblik plande intussen 23:00 en 03:00.
+
+Nu, voor Easee en Alfen gelijk:
+- **Geen te laat voor een auto die zegt dat hij weg is** of dat er geen kabel in zit (`_weg_nu`, v0.208.0). Die
+  afspraak kon niemand halen; de volgende klaar-tijd telt.
+- **Komt de auto terug** (thuis, de kabel weer in de auto, of de paal laadt) nadat hij als weg gemeld was
+  (`_async_auto_weg`), dan is dat een nieuwe beurt (`_async_terug_na_weg`). De oude beurt gaat dicht zoals bij een kabel
+  die eruit gaat (`_beurt_afsluiten`, in Sessies, als vorige beurt op de kaart, zonder verslag want de auto reed al uren
+  eerder weg), en alles ervan wordt vergeten zoals bij "geen auto" (`_async_beurt_vergeten`): te laat, de klaar-tijd
+  waar hij naartoe werkte, de pauze, het mikpunt, het wekken, de herstart van eis 7, het tempo, een opgegeven accustand.
+  Ook een gastauto die gaat laden is zo een nieuwe beurt.
+- **Een herstart:** dat de auto als weg gemeld was staat in het geheugen (`auto-weg:<paal>`), dus komt hij tijdens of
+  na een herstart terug, dan is het ook een nieuwe beurt, en te laat dat het geheugen van de oude beurt terugzette
+  (`laden:<paal>`) gaat mee weg; de ronde schrijft `laden:<paal>` daarna zonder.
+- **Een auto zonder locatie of kabelsensor:** alles zoals altijd, ook te laat. Een veilige vangst zonder die velden
+  (een paal die na de klaar-tijd nog `B1` meldt zonder een kWh te leveren) zou raden: een auto die vol was en weer
+  wil laden ziet er net zo uit. Dus niet.
+
+Proef 258 in test_coach.py: thuis en niet vol (te laat zoals altijd), weg en geen kabel (niet te laat), terug met wat
+er van de oude beurt stond, een herstart terwijl hij weg is, en een auto zonder die velden. In het virtuele huis
+`alfen-auto-terug`: de klaar-tijd van dinsdag gaat voorbij terwijl de auto weg is, hij komt dinsdag om 18:10 terug op
+27%, laadt niet op de avond maar in de goedkope nacht, en is woensdag om 04:51 vol.
+
 ## De paal is offline: één keer herladen, en het zeggen (v0.209.0)
 
 In een klantwoning op 08-11-2026 ging de automaat van de Easee uit. De integratie bleef op loaded met de laatste

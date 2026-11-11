@@ -2151,6 +2151,8 @@ class ChargerCoach:
         self._weg_gemeld: dict[str, str] = {}
         # Wanneer de auto weer bleek te zijn waar de paal zei: daarvoor telt "neemt geen stroom af" niet.
         self._weg_eind: dict[str, datetime] = {}
+        # Een auto die terugkomt na een paal die bleef hangen (v0.216.0): deze ronde een nieuwe beurt.
+        self._terug_na_weg: set[str] = set()
         # Wat de auto nu zegt, ook korter dan `AUTO_WEG_NA` ("weg", "kabel"), en sinds wanneer de paal
         # onafgebroken een auto meldt. Een gastauto die net ingeplugd is krijgt zo geen melding.
         self._weg_nu: dict[str, str] = {}
@@ -2842,6 +2844,9 @@ class ChargerCoach:
         self._weg_gemeld.pop(device_id, None)
         self._weg_eind[device_id] = now
         self._onthoud(f"auto-weg:{device_id}", None, meteen=True)
+        if charger.connected:
+            # Thuis, de kabel weer in de auto, of de paal laadt: een nieuwe beurt (v0.216.0).
+            self._terug_na_weg.add(device_id)
         auto = _hoofdletter(self._hoe_heet(car))
         if not charger.connected:
             tekst = t("{naam} meldt geen auto meer.", naam=_hoofdletter(naam))
@@ -11016,6 +11021,9 @@ class ChargerCoach:
         await self._async_soc_vast_melden(device, car)
         if offline is None:
             await self._async_auto_weg(now, settings, device, car, charger)
+            if device_id in self._terug_na_weg:
+                self._terug_na_weg.discard(device_id)
+                await self._async_terug_na_weg(settings, device, car, now)
             try:
                 await self._async_auto_wekken(now, settings, device, charger.connected)
             except ServiceNotFound:
@@ -11040,6 +11048,11 @@ class ChargerCoach:
             and mikpunt <= now
             and charger.connected
             and not charger.complete
+            # Een klaar-tijd die voorbijgaat terwijl de auto zelf zegt dat hij weg is, of dat er geen kabel in
+            # zit, kon niemand halen (v0.216.0). In een klantwoning op 08-11-2026 bleef een Alfen op B1 terwijl
+            # de auto weg was; om 08:00 ging de klaar-tijd voorbij, en toen de auto om 18:10 echt aan de paal
+            # kwam laadde hij door op vol vermogen, tegen 0,51 in plaats van 0,40 die nacht.
+            and device_id not in self._weg_nu
         ):
             self._te_laat.add(device_id)
 
@@ -11301,49 +11314,7 @@ class ChargerCoach:
         # paal waarvan de integratie nog laadt eerst niets, en dan wiste dit de
         # knoppen die `_restore` net had teruggehaald, en de opgegeven accustand.
         if not charger.connected and self._echt_los.get(device_id, True):
-            self._fasen_beurt_af(settings, device, now)
-            self._approved.discard(device_id)
-            self._boost.discard(device_id)
-            self._snel_app.discard(device_id)
-            self._nul_geschreven.discard(device_id)
-            self._nul_gezien.discard(device_id)
-            self._geschreven.pop(device_id, None)
-            self._vreemde_limiet.discard(device_id)
-            for lijst in (self._vreemd_aantal, self._vreemd_stand, self._vreemd_gezien, self._vreemd_los,
-                          self._vreemd_proef, self._vreemd_teltijd):
-                lijst.pop(device_id, None)
-            self._vreemd_geteld.discard(device_id)
-            self._modus.pop(device_id, None)
-            self._doel.pop(device_id, None)
-            self._rend_start.pop(device_id, None)
-            self._paused.discard(device_id)
-            self._zon.pop(device_id, None)
-            self._holding.pop(device_id, None)
-            self._pause_until.pop(device_id, None)
-            self._woken.discard(device_id)
-            self._wake_until.pop(device_id, None)
-            self._asking_since.pop(device_id, None)
-            self._deadline_for.pop(device_id, None)
-            self._te_laat.discard(device_id)
-            self._herstart_open.discard(device_id)
-            self._herstart_gedaan.pop(device_id, None)
-            self._herstart_melden.discard(device_id)
-            self._tempo_band.pop(device_id, None)
-            self._tempo_vorig.pop(device_id, None)
-            self._limiet_vorig.pop(device_id, None)
-            self._limiet_omhoog.pop(device_id, None)
-            self._weerleg_vorig.pop(device_id, None)
-            self._soc_asked.discard(device_id)
-            self._warned.pop(device_id, None)
-            if self._getipt.get(device_id) != "net":
-                self._getipt.pop(device_id, None)
-            # Wat er over deze sessie bewaard is gaat mee weg. Een opgegeven
-            # accustand hoort bij de auto die eraan hing: blijft die staan, dan
-            # rekent de coach morgen met het percentage van gisteren terwijl er
-            # honderd kilometer tussen zit, en dat is de gevaarlijke kant op.
-            # Voor de knoppen geldt hetzelfde: wie de kabel eruit trekt, heeft
-            # niets meer goedgekeurd of gepauzeerd.
-            await self._async_forget(settings, device_id)
+            await self._async_beurt_vergeten(settings, device, now)
 
         self._laden_onthouden(device_id)
         self.state[device_id]["applied"] = may_act
@@ -15773,6 +15744,110 @@ class ChargerCoach:
             "herstart_op": tijd(bewaard.get("herstart_op")),
         }
 
+    def _beurt_afsluiten(self, device: dict[str, Any], car: Car, now: datetime, afscheid: bool = True) -> None:
+        """De laadbeurt afsluiten: in de opslag, op de kaart als vorige beurt, en het verslag (`_afscheid`).
+
+        Als de kabel eruit gaat, en sinds v0.216.0 ook als de auto terugkomt na een paal die bleef hangen; dan
+        zonder verslag, want de auto reed al uren eerder weg.
+        """
+        device_id = device.get("id", "")
+        # Een beurt die nog open stond in de opslag terwijl de kabel er nu
+        # niet in zit: de kabel ging eruit terwijl Home Assistant herstartte.
+        # Afsluiten met wat er bekend is, want anders blijft hij eeuwig lopen.
+        open_beurt = self._beurt_open.pop(device_id, None)
+        if open_beurt is not None:
+            kaart = self._beurt_kaart_uit(open_beurt)
+            if kaart is not None:
+                self._vorige_beurt[device_id] = kaart
+            self._beurt_schrijven({**open_beurt, "complete": True,
+                                   "ended": open_beurt.get("ended") or now.isoformat()})
+        # De kabel is eruit. Voordat deze beurt wordt vergeten gaat hij naar
+        # `_afscheid`, want er hoort nog een verslag over. De eigenaar trok hem er
+        # op 20-08-2026 twee keer uit tijdens het laden en hoorde niets: er
+        # kwam alleen iets bij "vol" en bij een gemiste klaar-tijd.
+        #
+        # Alleen als er ook werkelijk geladen is, en alleen als er nog niets
+        # over gezegd is: een auto die vol was en daarna van de kabel gaat
+        # heeft zijn verslag al gehad.
+        beurt = self._sessie.pop(device_id, None)
+        if beurt:
+            kaart = self._beurt_kaart(device, beurt, actief=False)
+            if kaart["kwh"] >= BEURT_KAART_MIN_KWH:
+                self._vorige_beurt[device_id] = kaart
+        if beurt and beurt.get("geld"):
+            self._beurt_schrijven(self._beurt_regel(device, car, beurt, now, klaar=True))
+        if afscheid and beurt and beurt.get("begon") and "vol" not in beurt.get("gemeld", set()):
+            # Het moment waarop de paal het zei, niet het moment waarop de
+            # coach het na `KABEL_ONTDREUN` geloofde. Anders staat er in het
+            # verslag een tijd die een halve minuut naast de werkelijkheid
+            # ligt.
+            self._afscheid[device_id] = (self._los_sinds.get(device_id) or now, beurt)
+
+    async def _async_beurt_vergeten(self, settings: dict[str, Any], device: dict[str, Any], now: datetime) -> None:
+        """Alles van deze beurt vergeten: de knoppen, de klaar-tijd, de pauze, het wekken, de herstart, het tempo."""
+        device_id = device.get("id", "")
+        self._fasen_beurt_af(settings, device, now)
+        self._approved.discard(device_id)
+        self._boost.discard(device_id)
+        self._snel_app.discard(device_id)
+        self._nul_geschreven.discard(device_id)
+        self._nul_gezien.discard(device_id)
+        self._geschreven.pop(device_id, None)
+        self._vreemde_limiet.discard(device_id)
+        for lijst in (self._vreemd_aantal, self._vreemd_stand, self._vreemd_gezien, self._vreemd_los,
+                      self._vreemd_proef, self._vreemd_teltijd):
+            lijst.pop(device_id, None)
+        self._vreemd_geteld.discard(device_id)
+        self._modus.pop(device_id, None)
+        self._doel.pop(device_id, None)
+        self._rend_start.pop(device_id, None)
+        self._paused.discard(device_id)
+        self._zon.pop(device_id, None)
+        self._holding.pop(device_id, None)
+        self._pause_until.pop(device_id, None)
+        self._woken.discard(device_id)
+        self._wake_until.pop(device_id, None)
+        self._asking_since.pop(device_id, None)
+        self._deadline_for.pop(device_id, None)
+        self._te_laat.discard(device_id)
+        self._herstart_open.discard(device_id)
+        self._herstart_gedaan.pop(device_id, None)
+        self._herstart_melden.discard(device_id)
+        self._tempo_band.pop(device_id, None)
+        self._tempo_vorig.pop(device_id, None)
+        self._limiet_vorig.pop(device_id, None)
+        self._limiet_omhoog.pop(device_id, None)
+        self._weerleg_vorig.pop(device_id, None)
+        self._soc_asked.discard(device_id)
+        self._warned.pop(device_id, None)
+        if self._getipt.get(device_id) != "net":
+            self._getipt.pop(device_id, None)
+        # Wat er over deze sessie bewaard is gaat mee weg. Een opgegeven
+        # accustand hoort bij de auto die eraan hing: blijft die staan, dan
+        # rekent de coach morgen met het percentage van gisteren terwijl er
+        # honderd kilometer tussen zit, en dat is de gevaarlijke kant op.
+        # Voor de knoppen geldt hetzelfde: wie de kabel eruit trekt, heeft
+        # niets meer goedgekeurd of gepauzeerd.
+        await self._async_forget(settings, device_id)
+
+    async def _async_terug_na_weg(
+        self, settings: dict[str, Any], device: dict[str, Any], car: Car, now: datetime
+    ) -> None:
+        """De auto komt terug na een paal die bleef hangen: een nieuwe beurt (v0.216.0).
+
+        De paal meldde de hele tijd een auto, dus voor de coach was het één beurt: een Alfen in een klantwoning
+        bleef van 07-11-2026 05:45 tot 08-11 18:10 op B1, en ging bij het inpluggen meteen naar C2, zonder dat de
+        kabel er voor de paal uit was. Nu sluit de coach de oude beurt af en vergeet hij alles ervan, zoals bij
+        een kabel die eruit gaat (`_beurt_afsluiten`, `_async_beurt_vergeten`); ook te laat dat hij na een herstart
+        uit het geheugen terugzette, en `laden:<paal>` schrijft de ronde daarna zonder. Alleen als de auto zelf zei dat hij weg was
+        en daarvoor gemeld is (`_async_auto_weg`): zonder locatie of kabelsensor gaat alles zoals altijd.
+        """
+        device_id = device.get("id", "")
+        self._beurt_afsluiten(device, car, now, afscheid=False)
+        await self._async_beurt_vergeten(settings, device, now)
+        self._klaar_vergeten(device_id)
+        _LOGGER.info("%s: de auto is terug na een paal die een auto bleef melden; een nieuwe beurt", device_id)
+
     def _bijhouden(
         self,
         now: datetime,
@@ -15791,37 +15866,7 @@ class ChargerCoach:
             # herstart is dat de integratie die nog laadt (v0.98.0).
             return
         if not charger.connected:
-            # Een beurt die nog open stond in de opslag terwijl de kabel er nu
-            # niet in zit: de kabel ging eruit terwijl Home Assistant herstartte.
-            # Afsluiten met wat er bekend is, want anders blijft hij eeuwig lopen.
-            open_beurt = self._beurt_open.pop(device_id, None)
-            if open_beurt is not None:
-                kaart = self._beurt_kaart_uit(open_beurt)
-                if kaart is not None:
-                    self._vorige_beurt[device_id] = kaart
-                self._beurt_schrijven({**open_beurt, "complete": True,
-                                       "ended": open_beurt.get("ended") or now.isoformat()})
-            # De kabel is eruit. Voordat deze beurt wordt vergeten gaat hij naar
-            # `_afscheid`, want er hoort nog een verslag over. De eigenaar trok hem er
-            # op 20-08-2026 twee keer uit tijdens het laden en hoorde niets: er
-            # kwam alleen iets bij "vol" en bij een gemiste klaar-tijd.
-            #
-            # Alleen als er ook werkelijk geladen is, en alleen als er nog niets
-            # over gezegd is: een auto die vol was en daarna van de kabel gaat
-            # heeft zijn verslag al gehad.
-            beurt = self._sessie.pop(device_id, None)
-            if beurt:
-                kaart = self._beurt_kaart(device, beurt, actief=False)
-                if kaart["kwh"] >= BEURT_KAART_MIN_KWH:
-                    self._vorige_beurt[device_id] = kaart
-            if beurt and beurt.get("geld"):
-                self._beurt_schrijven(self._beurt_regel(device, car, beurt, now, klaar=True))
-            if beurt and beurt.get("begon") and "vol" not in beurt.get("gemeld", set()):
-                # Het moment waarop de paal het zei, niet het moment waarop de
-                # coach het na `KABEL_ONTDREUN` geloofde. Anders staat er in het
-                # verslag een tijd die een halve minuut naast de werkelijkheid
-                # ligt.
-                self._afscheid[device_id] = (self._los_sinds.get(device_id) or now, beurt)
+            self._beurt_afsluiten(device, car, now)
             return
 
         vers = device_id not in self._sessie
