@@ -2381,6 +2381,12 @@ class Wereld:
                 self.auto.soc = float(arg)
                 self.auto.klaar = False
             return "de auto rijdt weg, de paal blijft een auto melden"
+        if actie == "auto_terug":
+            # De auto komt thuis en de kabel gaat erin; de paal meldde de hele tijd al een auto (v0.216.0).
+            self.auto.afwezig = False
+            self.plek_weg = False
+            self.plek_sinds = self.nu
+            return "de auto komt terug en de kabel gaat erin; de paal meldde al die tijd een auto"
         if actie == "gast_in":
             # Een andere auto aan dezelfde paal (na een kabel_uit); de gekozen auto blijft weg.
             self.paal.kabel = True

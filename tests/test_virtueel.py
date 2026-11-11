@@ -204,7 +204,8 @@ for naam, vl in V.items():
     # verslag; dat zijn de vaatwasserscenario's.
     if vl.klaar_op is not None and s.auto.laadgrens >= 100 and s.auto.meldt_soc and vl.geladen_kwh > 0.1:
         # Een gastauto aan dezelfde paal (v0.208.0) is een eigen beurt, met een eigen verslag.
-        gasten = sum(1 for g in s.gebeurtenissen if g[1] == "gast_in")
+        # En een auto die terugkomt na een paal die bleef hangen (v0.216.0) ook.
+        gasten = sum(1 for g in s.gebeurtenissen if g[1] in ("gast_in", "auto_terug"))
         controle(f"{naam}: precies één keer 'is vol' gemeld per auto",
                  len(meldingen(vl, "is vol")) == 1 + gasten, f"{meldingen(vl, 'is vol')}")
     # De eigenaar op 04-09-2026: "De eindtijd is heel belangrijk. Een uur daarvoor
@@ -2913,6 +2914,21 @@ if (oprit_a := v("alfen-auto-oprit")) and (weg_a := v("alfen-auto-weg")):
              [t.strftime("%H:%M") for t, m in oprit_a.meldingen if "is niet thuis" in m]
              == [t.strftime("%H:%M") for t, m in weg_a.meldingen if "is niet thuis" in m],
              f"{[(t.strftime('%H:%M'), m[:40]) for t, m in oprit_a.meldingen]}")
+
+# De auto komt terug na een paal die bleef hangen (v0.216.0): een nieuwe beurt, in de goedkope nacht.
+if (terug_a := v("alfen-auto-terug")):
+    dinsdag = terug_a.regels[0].tijd + dt.timedelta(days=1)
+    na_terug = [r for r in terug_a.regels if r.tijd >= dinsdag.replace(hour=18, minute=10)]
+    avond = [r for r in na_terug if r.tijd < dinsdag.replace(hour=22, minute=0)]
+    print(f"  terug: {sorted({r.regel for r in na_terug})}, avond max {max((r.paal_w for r in avond), default=0):.0f} W,"
+          f" eind {na_terug[-1].soc if na_terug else None:.0f}%")
+    controle("alfen-auto-terug: terug om 18:10 laadt hij niet door op vol vermogen ('overdue')",
+             na_terug and not any(r.regel.startswith("overdue") for r in na_terug), f"{sorted({r.regel for r in na_terug})}")
+    controle("alfen-auto-terug: de avond na het terugkomen trekt de paal niets", avond and all(r.paal_w < 50 for r in avond),
+             f"{max((r.paal_w for r in avond), default=None)}")
+    controle("alfen-auto-terug: en voor de klaar-tijd van woensdag is hij vol",
+             any("van 27 naar 100%" in m and tijd < dinsdag.replace(hour=6) + dt.timedelta(days=1)
+                 for tijd, m in terug_a.meldingen), f"{[(t.strftime('%a %H:%M'), m[:30]) for t, m in terug_a.meldingen]}")
 
 # De paal is offline (v0.209.0). Een Easee in een klantwoning op 08-11-2026: de automaat ging uit, de integratie
 # bleef geladen, en de coach bleef "Laadt" zeggen en elke minuut een start sturen die nergens aankwam.

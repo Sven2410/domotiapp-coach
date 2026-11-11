@@ -17631,6 +17631,88 @@ finally:
     coach192._async_tell = oud_tell257
     del sys.modules["homeassistant.helpers.entity_registry"]
 
+print("=== 258. de auto komt terug na een paal die bleef hangen: een nieuwe beurt (v0.216.0) ===")
+# Een klantwoning op 08-11-2026: de Alfen bleef van 07-11 05:45 tot 08-11 18:10 een auto melden, ook toen de Tesla weg
+# was. Om 08:00 ging de klaar-tijd voorbij en zette de coach de beurt op te laat; toen de auto om 18:10 echt aan de
+# paal kwam, laadde hij door op vol vermogen (`overdue`) tegen 0,51 in plaats van 0,40 die nacht.
+VAN258, TOT258 = dt.datetime(2026, 11, 8, 6, 30), dt.datetime(2026, 11, 8, 7, 30)
+
+# 1. Ter vergelijking: thuis en de kabel erin, niet vol om 07:00. Dan laadt hij door (eis 7), zoals altijd.
+i258t, h258t, c258t, b258t = bouw248(locatie="home", kabel="on")
+t258 = nacht248(i258t, c258t, VAN258, TOT258)
+controle("thuis aan de kabel en niet vol: na de klaar-tijd te laat, en hij laadt door",
+         "dev-laadpaal" in c258t._te_laat and t258[-1][1]["rule"].startswith("overdue"), f"{t258[-1][1]['rule']}")
+
+# 2. De auto is weg: de klaar-tijd gaat voorbij, maar dat is niet te laat.
+i258, h258, c258, b258 = bouw248()
+w258 = nacht248(i258, c258, VAN258, TOT258)
+controle("de auto weg: na de klaar-tijd niet te laat", "dev-laadpaal" not in c258._te_laat
+         and all(not r[1]["rule"].startswith("overdue") for r in w258), f"{[r[1]['rule'] for r in w258][-3:]}")
+# Ook een kabel die niet in de auto zit, met de auto thuis.
+i258k, h258k, c258k, b258k = bouw248(locatie="home", kabel="off")
+nacht248(i258k, c258k, VAN258, TOT258)
+controle("geen kabel in de auto: ook niet te laat", "dev-laadpaal" not in c258k._te_laat, "")
+
+
+def terug258(hass, om):
+    stempel = om.replace(tzinfo=dt.timezone.utc)
+    hass.states.zet("device_tracker.tesla", "home", last_updated=stempel)
+    hass.states.zet("binary_sensor.tesla_kabel", "on", last_updated=stempel)
+    hass.states.zet("sensor.tesla_soc", "27")
+
+
+# 3. De auto komt om 18:10 terug, met wat er van de oude beurt nog stond (te laat van een eerdere versie, een pauze,
+#    een klaar-tijd waar hij naartoe werkte): een nieuwe beurt, en alles van de oude is weg.
+c258._te_laat.add("dev-laadpaal")
+c258._paused.add("dev-laadpaal")
+c258._deadline_for["dev-laadpaal"] = dt.datetime(2026, 11, 8, 7, 0)
+oud258 = c258._sessie.get("dev-laadpaal")
+TERUG258 = dt.datetime(2026, 11, 8, 18, 10)
+terug258(h258, TERUG258)
+r258 = nacht248(i258, c258, TERUG258, TERUG258 + dt.timedelta(minutes=5))
+print(f"  terug: {[(r[0].strftime('%H:%M'), r[1]['rule'], r[1]['amps']) for r in r258]} {b258[-1:]}")
+controle("terug: niet meer te laat, geen pauze, geen oude klaar-tijd",
+         "dev-laadpaal" not in c258._te_laat and "dev-laadpaal" not in c258._paused
+         and c258._deadline_for.get("dev-laadpaal") != dt.datetime(2026, 11, 8, 7, 0), "")
+controle("en dus niet doorladen op vol vermogen", all(not r[1]["rule"].startswith("overdue") for r in r258), f"{[r[1]['rule'] for r in r258]}")
+controle("een nieuwe beurt", c258._sessie.get("dev-laadpaal") is not oud258, "")
+controle("'is weer thuis' alleen in de geschiedenis", b258[-1] == ("Tesla is weer thuis.", False, False), f"{b258[-1:]}")
+controle("en de oude beurt is uit het geheugen", "dev-laadpaal" not in c258._mikpunt_terug, "")
+
+# 4. Een herstart terwijl de auto weg is en de oude beurt te laat stond (van een eerdere versie): na de herstart komt
+#    te laat uit het geheugen terug, maar als de auto terugkomt is hij weg, en na nog een herstart ook.
+i258h, h258h, c258h, b258h = bouw248()
+nacht248(i258h, c258h, VAN258, dt.datetime(2026, 11, 8, 6, 45))
+c258h._te_laat.add("dev-laadpaal")
+c258h._laden_onthouden("dev-laadpaal")
+c258h2 = herstart213(h258h)
+b258h2 = []
+
+
+async def tell258(bericht, kritiek=False, telefoon=True, soort=None):
+    b258h2.append((bericht, kritiek, telefoon))
+c258h2._async_tell = tell258
+asyncio.run(c258h2._async_geheugen_laden())
+controle("na de herstart staat te laat er weer", "dev-laadpaal" in c258h2._te_laat, "")
+NA258 = dt.datetime(2026, 11, 8, 10, 52)
+for entiteit in ("device_tracker.tesla", "binary_sensor.tesla_kabel"):
+    h258h.states.zet(entiteit, h258h.states.get(entiteit).state, last_updated=NA258.replace(tzinfo=dt.timezone.utc))
+nacht248(i258h, c258h2, NA258, NA258 + dt.timedelta(minutes=20))
+controle("de auto nog weg: geen vals 'weer thuis' na de herstart", b258h2 == [], f"{b258h2}")
+terug258(h258h, TERUG258)
+rh258 = nacht248(i258h, c258h2, TERUG258, TERUG258 + dt.timedelta(minutes=5))
+controle("terug na de herstart: niet te laat, niet doorladen", "dev-laadpaal" not in c258h2._te_laat
+         and all(not r[1]["rule"].startswith("overdue") for r in rh258), f"{[r[1]['rule'] for r in rh258]}")
+c258h3 = herstart213(h258h)
+asyncio.run(c258h3._async_geheugen_laden())
+controle("en een herstart daarna zet het niet terug", "dev-laadpaal" not in c258h3._te_laat,
+         f"{c258h3._te_laat} {c258h3._mikpunt_terug}")
+
+# 5. Een auto zonder locatie of kabelsensor: alles zoals altijd, ook te laat.
+i258z, h258z, c258z, b258z = bouw248(paal={**LAADPAAL, "cars": [AUTO248z]})
+z258 = nacht248(i258z, c258z, VAN258, TOT258, {**LAADPAAL, "cars": [AUTO248z]})
+controle("zonder die velden: te laat zoals altijd", "dev-laadpaal" in c258z._te_laat, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
