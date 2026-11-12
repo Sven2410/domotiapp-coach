@@ -2813,6 +2813,14 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
     coach._async_zon_uit_integratie = wereld.zonkromme_via_sensor
     coach._async_voorspeller = wereld.voorspellers
     coachmod.async_get_archive = lambda hass: wereld.archief()
+    # De klokken van `async_call_later` lopen op de klok van de wereld (v0.218.0), zoals in Home Assistant.
+    klokken: list = []
+
+    def later(_hass, wacht, actie):
+        klok = [wereld.nu + dt.timedelta(seconds=float(getattr(wacht, "total_seconds", lambda: wacht)())), actie]
+        klokken.append(klok)
+        return lambda: klok in klokken and klokken.remove(klok)
+    coachmod.async_call_later = later
     jaarbalans(coach, s)
     # Het register van Home Assistant: de sensoren van de Growatt hangen aan zijn omvormer.
     register = types.ModuleType("homeassistant.helpers.entity_registry")
@@ -2891,6 +2899,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
                     # opnieuw uit de opslag. De eigenaar op 04-09-2026: "ook
                     # onverwachte herstarten."
                     coach = nieuwe_coach()
+                    klokken.clear()
                     laatste_ronde = None
                     tekst = "Home Assistant herstart: de coach begint met een leeg geheugen"
                     if s.paal_cache_min and wereld.paal.uit:
@@ -2923,6 +2932,9 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
                         coach._async_phase_changed(Fasemelding(E[naam], fase_gemeld[naam]))
                         continue
                     coach._async_phase_changed(Fasemelding(E[naam], f"{a:.2f}"))
+            for klok in [k for k in klokken if k[0] <= nu]:
+                klokken.remove(klok)
+                klok[1](nu)
             gewekt = bool(hass.taken)
             await hass.afmaken()
             if gewekt:

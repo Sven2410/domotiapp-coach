@@ -612,10 +612,11 @@ if (vl := v("oven-tijdens-laden")):
 # op de goedkoopste uren en stond de auto om 06:00 op 84%.
 if (vl := v("warmtepomp-nacht")):
     controle("warmtepomp: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
-    controle("warmtepomp: begint vóór 23:00 en zegt dat er gemeten minder overbleef",
-             laadt_tussen(vl, "22:00", "23:00")
-             and any("gemiddeld" in r.reden and "A over voor de paal" in r.reden
-                     for r in regels_in(vl, "22:00", "23:30")), "")
+    # Sinds v0.218.0 gaat hij sneller omlaag voor de warmtepomp en meet hij daardoor meer ruimte over: hij begint
+    # om 23:05 op het goedkopere uur in plaats van om 22:06, en is om 05:43 vol (€ 10,20 tegen € 10,30, 52 wissels
+    # tegen 58). Wat telt is dat hij niet pas om 01:02 begint, zoals zonder de meting van het plafond.
+    controle("warmtepomp: begint vóór 23:30, ruim voor de goedkoopste uren van de nacht",
+             laadt_tussen(vl, "22:00", "23:30"), "")
 # de klantwoning, nacht van 18 op 19-09-2026: na een verlaging voor de zekering
 # bleef de Ford nog tien minuten op de oude stroom, en de coach schreef dat op
 # als zijn tempo (5,52 kW voor band 6 waar hij 10 kW trok). Tot v0.69.0 leerde
@@ -2686,6 +2687,22 @@ if (vl := v("auto-neemt-minder")):
     top = max((max(r.fase_amps) for r in vl.regels if "12:17" <= f"{r.tijd:%H:%M}" < "12:30"), default=0.0)
     controle("neemt minder: tijdens de oven blijft de zware fase onder de zekering min de marge",
              top <= 22.0, f"{top:.1f} A")
+
+# De zekering: omlaag snel (v0.218.0). In een klantwoning op 05-11-2026 stond fase 3 bijna een minuut boven de grens;
+# de meter meldde elke 14 s, en de mediaan over anderhalve minuut had pas na de helft van het venster de meerderheid.
+# Voor v0.218.0 hier 70 s per sprong; nu twee metingen.
+for naam, per_sprong in (("zekering-sprong", 28), ("zekering-sprong-hele-amps", 10)):
+    if (vl := v(naam)):
+        boven = [r.tijd for r in vl.regels if max(r.fase_amps) > vl.scenario.zekering]
+        blokken = []
+        for t in boven:
+            if not blokken or (t - blokken[-1][-1]).total_seconds() > 60:
+                blokken.append([])
+            blokken[-1].append(t)
+        duur = [round(len(b) * vl.stap_uur * 3600) for b in blokken]
+        print(f"  {naam}: boven de zekering per sprong {duur} s")
+        controle(f"{naam}: per sprong hoogstens {per_sprong} s boven de zekering, en het laden gaat door",
+                 len(duur) == 2 and max(duur) <= per_sprong and vl.geladen_kwh > 5, f"{duur} {vl.geladen_kwh:.1f} kWh")
 
 # Dezelfde dag om 13:39:54: de auto was klaar, de laatste meterwaarde zei nog
 # 7,3 kW afname, en de regelaar zette de batterij daarop in dezelfde seconde op

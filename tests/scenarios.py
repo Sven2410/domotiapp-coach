@@ -1310,6 +1310,25 @@ auto_neemt_minder = Scenario(
     begin="2026-09-07 11:55", kabel_erin="12:00", schema_aan=False, duur_uren=1.25, stap_seconden=5,
     gebeurtenissen=[("12:01", "snelladen", True), ("12:15", "oven", 15), ("13:05", "kabel_uit", None)],
 )
+# Het voorval in een klantwoning op 05-11-2026 (v0.218.0): de auto laadt op Snel, en er komt in één keer een grote
+# last bij, het zwaarst op de derde fase. De meter meldde elke 14 s; fase 3 stond bijna een minuut op 35 A bij een
+# grens van 30. Omlaag hoort na twee metingen te gaan, niet na de helft van het venster van de mediaan.
+zekering_sprong = Scenario(
+    "zekering-sprong",
+    "snelladen op 3x25 A; om 12:15 en 12:45 komt er tien minuten 6 kW bij, het meest op de derde fase; de meter meldt elke 14 s",
+    contract="vast", zon=Zon(wolken="geen"), voorspeller="geen",
+    huis=Huis(basis_w=350.0, verdeling=(0.2, 0.2, 0.6)), oven_w=6000.0,
+    auto=replace(GROTE, soc=40.0), zekering=25.0, aansluiting_fasen=3,
+    begin="2026-09-07 11:55", kabel_erin="12:00", schema_aan=False, duur_uren=1.25, stap_seconden=14,
+    gebeurtenissen=[("12:01", "snelladen", True), ("12:15", "oven", 10), ("12:45", "oven", 10), ("13:05", "kabel_uit", None)],
+)
+# Hetzelfde met een meter van hele ampères die elke 5 s meet: Home Assistant geeft dan alleen een wissel door, en een
+# stand die blijft staan komt niet opnieuw binnen.
+zekering_sprong_hele = replace(
+    zekering_sprong, naam="zekering-sprong-hele-amps",
+    uitleg="zoals zekering-sprong, met een meter van hele ampères die elke 5 s meet",
+    fase_hele_amps=True, stap_seconden=5,
+)
 # Dezelfde dag om 13:39:54: de auto is klaar, de laatste meterwaarde is van een
 # paar seconden eerder en zegt nog de afname van de auto. De regelaar zette de
 # batterij daarop in dezelfde seconde op ontladen op vol vermogen (v0.102.2: de
@@ -2005,7 +2024,7 @@ ALLE = [
     vast_geen_klaar_tijd, vast_krap, vast_onhaalbaar,
     dyn_zonnig, dyn_bewolkt, dyn_geen_zon, dyn_markt, dyn_salderen, dyn_avond, dyn_grote_auto,
     dyn_negatief, dyn_kwartier_later, dyn_geen_klaar_tijd,
-    meter_teken, meter_teken_om, een_fase_krap, ford_geen_ruimte, eigen_marge, teller_achter, oven, puls_snelladen, auto_neemt_minder, lastbewaker, warmtepomp, ford_bijkomen, ford_oude_opslag, warmtepomp_uit,
+    meter_teken, meter_teken_om, een_fase_krap, ford_geen_ruimte, eigen_marge, teller_achter, oven, puls_snelladen, auto_neemt_minder, zekering_sprong, zekering_sprong_hele, lastbewaker, warmtepomp, ford_bijkomen, ford_oude_opslag, warmtepomp_uit,
     geen_soc, soc_opgegeven, soc_traag, laadgrens, laadgrens_ingesteld,
     doel_onder_auto, soc_stappen, bijna_vol, auto_slaapt,
     pauze, pauze_vergeten, snelladen, kabel_eruit, oude_tijden,

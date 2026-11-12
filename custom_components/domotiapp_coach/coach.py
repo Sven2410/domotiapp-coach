@@ -647,6 +647,17 @@ MEETNAIJL = timedelta(minutes=5)
 # want een ronde per minuut levert nooit genoeg punten voor een mediaan.
 FASE_VENSTER = timedelta(seconds=90)
 
+# Omlaag snel, omhoog rustig (v0.218.0). De mediaan over `FASE_VENSTER` heeft bij een echte sprong
+# pas na ongeveer de helft van het venster de meerderheid. In een klantwoning op 05-11-2026 stond
+# fase 3 zo van 14:58:17 tot 14:59:13 op 35 A bij een grens van 30 A; de meter meldde elke 14 s.
+# Een fase telt daarom ook zo hoog als hij volgehouden is: twee metingen na elkaar
+# (`FASE_BEVESTIGD`), of één die al `FASE_STAAT` keer het gewone tempo van zijn meter staat. Een
+# meter met hele ampères meldt een stand die blijft staan niet opnieuw, want Home Assistant geeft
+# alleen een wissel door. De enkele uitschieter van 30-08 stond één tussentijd en telt zo niet.
+# Omhoog blijft de hoogste meting van het venster gelden (`_fase_piek`, `ruimten_nu`).
+FASE_BEVESTIGD = 2
+FASE_STAAT = 2
+
 # Vanaf welke stroom de fasemeting van een laadpunt iets betekent, en hoe vers
 # de twee sensoren van elkaar moeten zijn. Zie `_measured_phases`.
 FASEMETING_AMPS = 5.0
@@ -1853,6 +1864,10 @@ class ChargerCoach:
         # enkele uitschieter uit te kunnen middelen. Per entiteit, want de drie
         # fasen melden niet tegelijk. Zie `FASE_VENSTER`.
         self._fase_historie: dict[str, list[tuple[datetime, float]]] = {}
+        # Het gewone tempo van elke fasemeter in seconden, en de klok die bij een eerste meting boven
+        # de grens nog eens kijkt als die blijft staan (v0.218.0). Zie `FASE_STAAT`.
+        self._fase_tempo: dict[str, float] = {}
+        self._fase_klok: Any = None
         # Wat elke paal in de vorige ronde trok, en wanneer er voor het laatst
         # een paal een stap omlaag deed. Zie `_gladde_fase`.
         self._stroom_vorige: dict[str, float] = {}
@@ -2326,6 +2341,9 @@ class ChargerCoach:
         self._batterij_meters = set()
         for sleutel in list(self._stekker_klok):
             self._stekker_klok_stop(sleutel)
+        if self._fase_klok is not None:
+            self._fase_klok()
+            self._fase_klok = None
         if self._cancel is not None:
             self._cancel()
             self._cancel = None
@@ -5072,6 +5090,12 @@ class ChargerCoach:
         # naast de tijd van die ronde. Zie `_moment`.
         nu = _moment()
         historie = self._fase_historie.setdefault(new.entity_id, [])
+        if historie:
+            # Niet sneller dan een seconde: twee meldingen in één telegram zijn geen tempo.
+            tussen = max(1.0, (nu - historie[-1][0]).total_seconds())
+            if tussen <= FASE_VENSTER.total_seconds():
+                oud = self._fase_tempo.get(new.entity_id)
+                self._fase_tempo[new.entity_id] = tussen if oud is None else 0.7 * oud + 0.3 * tussen
         historie.append((nu, amps))
         grens = nu - FASE_VENSTER
         # Eén meting van vóór het venster blijft staan: die zegt wat er aan
@@ -5084,10 +5108,36 @@ class ChargerCoach:
         if grens is None or amps < grens:
             return
 
-        if self._last_urgent is not None and nu - self._last_urgent < HURRY_INTERVAL:
+        # De meting die een overschrijding bevestigt krijgt altijd een ronde (v0.218.0): in de klantwoning
+        # van 05-11-2026 kwam die 14 s na de eerste, en `HURRY_INTERVAL` hield hem tegen.
+        venster = [w for stempel, w in historie if stempel >= nu - FASE_VENSTER][-FASE_BEVESTIGD - 1:]
+        boven = [w >= grens for w in venster]
+        bevestigt = boven[-FASE_BEVESTIGD:] == [True] * FASE_BEVESTIGD and (
+            len(boven) <= FASE_BEVESTIGD or not boven[0])
+        if not bevestigt and self._last_urgent is not None and nu - self._last_urgent < HURRY_INTERVAL:
             return
         self._last_urgent = nu
+        if len(boven) < 2 or not boven[-2]:
+            self._fase_klok_zetten(new.entity_id)
         _LOGGER.debug("fasestroom %.1f A boven %.1f A, meteen opnieuw kijken", amps, grens)
+        self.async_refresh()
+
+    def _fase_klok_zetten(self, entity_id: str) -> None:
+        """Een eerste meting boven de grens: nog eens kijken als hij blijft staan (v0.218.0).
+
+        Een meter die alleen een wissel doorgeeft meldt een stand die blijft niet opnieuw; zonder deze klok
+        zou de coach dan tot de volgende ronde wachten. Zie `FASE_STAAT`.
+        """
+        tempo = self._fase_tempo.get(entity_id)
+        if tempo is None or self._fase_klok is not None:
+            return
+        wacht = min(FASE_STAAT * tempo, FASE_VENSTER.total_seconds()) + 1
+        self._fase_klok = async_call_later(self.hass, wacht, self._fase_klok_af)
+
+    @callback
+    def _fase_klok_af(self, _now: Any) -> None:
+        """De klok van een fase boven de grens is om: nu kijken."""
+        self._fase_klok = None
         self.async_refresh()
 
     async def _tick(self, now: datetime | None = None) -> None:
@@ -13490,7 +13540,23 @@ class ChargerCoach:
         waarden = sorted(waarde for stempel, waarde in historie if stempel >= grens)
         if len(waarden) < 3:
             return amps
-        return waarden[len(waarden) // 2]
+        return max(waarden[len(waarden) // 2], self._fase_volgehouden(entity_id, grens, now))
+
+    def _fase_volgehouden(self, entity_id: str | None, vanaf: datetime, now: datetime) -> float:
+        """Wat deze fase volhoudt (v0.218.0): het laagste van de laatste `FASE_BEVESTIGD` metingen, of de laatste
+        als die al `FASE_STAAT` keer het gewone tempo van de meter staat. 0 als er niets volgehouden is.
+
+        Naast de mediaan in `_gladde_fase`, en alleen naar boven: omlaag snel, zonder dat één uitschieter
+        telt. Zie `FASE_BEVESTIGD`.
+        """
+        binnen = [waarde for stempel, waarde in (self._fase_historie.get(entity_id or "") or []) if stempel >= vanaf]
+        volgehouden = [min(binnen[-FASE_BEVESTIGD:])] if len(binnen) >= FASE_BEVESTIGD else []
+        tempo = self._fase_tempo.get(entity_id or "")
+        laatste = (self._fase_historie.get(entity_id or "") or [None])[-1]
+        if binnen and tempo and laatste is not None and laatste[0] >= vanaf:
+            if (now - laatste[0]).total_seconds() >= FASE_STAAT * tempo:
+                volgehouden.append(laatste[1])
+        return max(volgehouden, default=0.0)
 
     def _read(
         self,
