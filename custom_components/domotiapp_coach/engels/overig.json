@@ -42,6 +42,7 @@
   "De coach meet het zelf terwijl hij de batterij laadt en ontlaadt; je kunt het ook invullen bij Apparaten.": "The coach measures it itself while it charges and discharges the battery; you can also enter it under Devices.",
   "Hij houdt de meter op nul.": "It keeps the meter at zero.",
   "Hij maakt het laden van het net af tot {tijd} en geeft tot dan niets af.": "It finishes charging from the grid until {tijd} and discharges nothing until then.",
+  "Van het net laden voor de zon van straks doet hij nog niet: die kwam hier vaak lager uit dan voorspeld. Hij rekent tot de zon er is met {pct}% van de verwachting.": "It does not charge from the grid yet for the sun later on: here it often came in lower than forecast. Until the sun is there it counts on {pct}% of the forecast.",
   "Hij laadt van het net op {kw}, rustig verdeeld tot {tijd}.": "It charges from the grid at {kw}, spread out until {tijd}.",
   "Hij laadt van het net op {kw}.": "It charges from the grid at {kw}.",
   "Stroom kost nu {prijs} en dat is goedkoper dan wat de batterij je straks bespaart.": "Electricity now costs {prijs}, which is less than the battery will save you later.",

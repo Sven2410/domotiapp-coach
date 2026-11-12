@@ -2188,6 +2188,34 @@ controle("met de marge laadt hij minder van het net", nacht63(1.251) < nacht63(N
 controle("heeft hij vandaag al gemeten, dan geldt die meting en niet de marge",
          abs(nacht63(1.251, factor=1.0) - nacht63(None, factor=1.0)) < 1e-9, "")
 
+
+print("=== 64. een plan dat omsloeg houdt zichzelf niet vast, en een voorzichtige zon (v0.219.0) ===")
+# In een klantwoning op 11-11-2026 laadde de Anker tot 08:04 van het net; toen sloeg het plan om naar nul, en hield
+# hij tot 09:00 vast (`_houden_tot`, de vorige ronde is het eigen besluit) terwijl het huis tegen € 0,547 van het net
+# haalde. Vasthouden is er voor een accustand die een tik voorloopt: met een procent minder laadt het plan dan nog.
+tik64 = op42(5, 46, 84, overgenomen=True, vorige_stand=NETLADEN, vorige_op=DAG42.replace(hour=5, minute=45))
+om64 = op42(5, 46, 87, overgenomen=True, vorige_stand=NETLADEN, vorige_op=DAG42.replace(hour=5, minute=45))
+print(f"  05:46 op 84%: {tik64.stand} {tik64.power_w:.0f} W; op 87%: {om64.stand} {om64.power_w:.0f} W")
+controle("een tik voor op het plan: vasthouden tot het blok om is", tik64.stand == NETLADEN and tik64.power_w < 5
+         and "af tot 06:00" in tik64.reason, f"{tik64.stand} {tik64.reason}")
+controle("en dan geen prijszin: hij koopt nu niets", "Stroom kost nu" not in tik64.reason, tik64.reason)
+controle("wil het plan ook met een procent minder niets meer van het net: niet vasthouden", om64.stand != NETLADEN,
+         f"{om64.stand} {om64.power_w:.0f}")
+
+from domotiapp_coach.batterij import ZON_VOORZICHTIG, zon_verhoudingen, zon_voorzichtig  # noqa: E402
+
+# De ochtenden van die woning: vaak 0,2 tot 0,7 keer de verwachting, op heldere dagen 1,0 tot 1,1.
+DAGEN64 = [[f"2026-11-{1 + i:02d}", 10.0, round(10.0 * r, 2)]
+           for i, r in enumerate([0.70, 0.77, 0.45, 0.20, 1.05, 0.20, 0.53, 1.10, 0.20, 0.45])]
+voorzichtig64 = zon_voorzichtig(DAGEN64)
+print(f"  voorzichtige zon uit tien dagen: {voorzichtig64} (kwantiel {ZON_VOORZICHTIG})")
+controle("het lage kwantiel van wat het dak gaf tegenover de verwachting", voorzichtig64 is not None
+         and abs(voorzichtig64 - kwantiel(zon_verhoudingen(DAGEN64), ZON_VOORZICHTIG)) < 0.001 and voorzichtig64 < 0.3,
+         f"{voorzichtig64}")
+controle("minder dan zeven dagen: niets", zon_voorzichtig(DAGEN64[:6]) is None, "")
+controle("een woning waar de verwachting klopt: niets", zon_voorzichtig(
+    [[d, v, round(v * r, 2)] for (d, v, _), r in zip(DAGEN64, [1.0, 1.05, 0.95, 1.1, 1.0, 0.98, 1.02, 1.1, 0.97, 1.0])]) is None, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

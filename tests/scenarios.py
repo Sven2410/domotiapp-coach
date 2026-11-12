@@ -2011,6 +2011,37 @@ groep_paal_batterij_zonder_meter = groep_paal_batterij.kopie(
     groep_meter=False,
 )
 
+# De ochtend van 11-11-2026 in een klantwoning (v0.219.0): een Anker van 2,5 kW, dynamisch met salderen, gemeten
+# rendement 76%. De verwachting zei een heldere dag, en de coach laadde van 06:04 tot 08:05 op vol vermogen van het net
+# om de middagzon tegen € 0,58 het net op te laten gaan. De zon kwam niet; ochtenden als die gaven daar vaak 0,2 tot 0,7
+# keer de verwachting. Voor 11-11 de echte prijzen; 01:00 tot 04:00 zijn geschat op die van 00:00 en 05:00.
+ANKER_OCHTEND_PRIJZEN = {"2026-11-11": [0.390, 0.388, 0.385, 0.383, 0.381, 0.379, 0.427, 0.479, 0.547, 0.561, 0.565,
+                                        0.570, 0.575, 0.585, 0.580, 0.575, 0.620, 0.666, 0.650, 0.603, 0.553, 0.485,
+                                        0.433, 0.396]}
+ANKER_OCHTEND_DAGEN = [[f"2026-11-{1 + i:02d}", 10.0, round(10.0 * r, 2)]
+                       for i, r in enumerate([0.70, 0.77, 0.45, 0.20, 1.05, 0.20, 0.53, 1.10, 0.20, 0.45])]
+anker_ochtend = Scenario(
+    "anker-ochtend",
+    "11-11: Anker 2,5 kW, dynamisch met salderen, rendement 76%; heldere dag verwacht, het wordt grijs; tien gemeten dagen waarop het dak vaak minder gaf",
+    contract="dynamisch-salderen", zon=Zon(wolken="bewolkt", voorspeld="helder", piek_kw=6.0, opkomst=8.0, onder=17.25),
+    prijzen=Prijzen(per_dag=ANKER_OCHTEND_PRIJZEN),
+    batterij=Batterij(soc=40.0, max_laden_w=2500.0, rte=0.76, **ANKER_SENSOR),
+    batterij_stand={"zon_dagen": ANKER_OCHTEND_DAGEN},
+    begin="2026-11-11 04:30", duur_uren=20, kabel_erin="+9 07:00", schema_aan=False, stap_seconden=15,
+)
+anker_ochtend_zonder = anker_ochtend.kopie(
+    naam="anker-ochtend-zonder",
+    uitleg="dezelfde ochtend zonder gemeten dagen: zoals tot v0.219.0, de ruil met de zon",
+    batterij_stand={},
+)
+anker_ochtend_helder = anker_ochtend.kopie(
+    naam="anker-ochtend-helder",
+    uitleg="dezelfde ochtend, een woning waar de verwachting klopt en de zon komt: de ruil met de zon blijft",
+    zon=Zon(wolken="helder", voorspeld="helder", piek_kw=6.0, opkomst=8.0, onder=17.25),
+    batterij_stand={"zon_dagen": [[d, v, round(v * r, 2)] for (d, v, _), r in
+                                  zip(ANKER_OCHTEND_DAGEN, [1.0, 1.05, 0.95, 1.1, 1.0, 0.98, 1.02, 1.1, 0.97, 1.0])]},
+)
+
 ALLE = [
     vast_vergeten, vast_op_tijd_erin,
     alfen_auto_weg, alfen_auto_weg_gast, alfen_auto_terug, alfen_auto_oprit, paal_offline, paal_offline_nacht, klaar_equalizer,
@@ -2057,6 +2088,7 @@ ALLE = [
     growatt_ochtend, growatt_ochtend_zonder_grens, growatt_herstart, growatt_weigert, growatt_terug_100,
     batterij_volgt_niet, batterij_volgt_niet_zelf, batterij_volgt_even_niet,
     growatt_levert_niets, growatt_levert,
+    anker_ochtend, anker_ochtend_zonder, anker_ochtend_helder,
 ]
 
 

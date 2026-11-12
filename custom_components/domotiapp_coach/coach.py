@@ -109,10 +109,13 @@ from .batterij import (
     zon_marge,
     zon_verhoudingen,
     zon_vergissing,
+    zon_voorzichtig,
+    eta_in,
 )
 from . import berichten, prijsopbouw, taal, tarifas
 from .taal import getal, t, tn
 from .planner import (
+    echte_uren,
     _dag_om,
     DAGNAMEN,
     MODI_ZONDER_SOM,
@@ -8995,15 +8998,27 @@ class ChargerCoach:
         )
         # De som over de tijd kost met een lange prijslijst een tiende seconde,
         # en dat hoort niet in de lus van Home Assistant zelf.
-        besluit = await self.hass.async_add_executor_job(
-            partial(
-                plan_batterij, now, prijzen, tarief, verwachting, b,
-                enabled=True, paal_laadt=self._paal_laadt(settings),
-                helpt=bool(sessie.get("helpt")),
-                auto_laden=self._auto_laden(),
-                laadruimte=self._laadruimte_plan(settings, device),
-            )
+        plan = partial(
+            plan_batterij, now, prijzen, tarief, b=b,
+            enabled=True, paal_laadt=self._paal_laadt(settings),
+            helpt=bool(sessie.get("helpt")),
+            auto_laden=self._auto_laden(),
+            laadruimte=self._laadruimte_plan(settings, device),
         )
+        besluit = await self.hass.async_add_executor_job(partial(plan, forecast=verwachting))
+        # Vóór er vandaag zon gemeten is, en alleen als het laden van het net met een voorzichtige zon wegvalt: dan
+        # was de ruil met de zon de reden, en daar wacht hij op (v0.219.0). Zie `ZON_VOORZICHTIG` in batterij.py.
+        voorzichtig = zon_voorzichtig(rij.get("zon_dagen") or []) if gemeten_nu is None else None
+        if voorzichtig is not None and besluit.stand == NETLADEN and besluit.rule == "netladen":
+            ander = await self.hass.async_add_executor_job(partial(plan, forecast=replace(
+                verwachting, solar_prior=voorzichtig)))
+            if ander.stand != NETLADEN:
+                ander.reason = f"{ander.reason} " + t(
+                    "Van het net laden voor de zon van straks doet hij nog niet: die kwam hier vaak lager uit dan "
+                    "voorspeld. Hij rekent tot de zon er is met {pct}% van de verwachting.",
+                    pct=round(voorzichtig * 100),
+                )
+                besluit = ander
 
         # Zolang hij vandaag nog niets van het dak gemeten heeft, zegt de kaart dat hij met meer
         # zon rekent dan voorspeld, en waarom (v0.193.0).
@@ -9198,7 +9213,7 @@ class ChargerCoach:
 
         # Het hele plan, voor de vooruitblik op het overzicht (v0.133.0): de
         # toestand neemt er 48 blokken van, met kwartierprijzen maar twaalf uur.
-        sessie["uren"] = list(besluit.uren)
+        sessie["uren"] = self._uren_met_besluit(besluit, b, now)
         self.state[device_id] = {
             "charge": besluit.stand in (NETLADEN, MAX_LADEN),
             "amps": 0,
@@ -12338,6 +12353,30 @@ class ChargerCoach:
             return False
         vandaag = dt_util.as_local(now or dt_util.utcnow()).date()
         return vandaag < NETTING_ENDS
+
+    @staticmethod
+    def _uren_met_besluit(besluit: Besluit, b: Batterij, now: datetime) -> list:
+        """Het plan voor de vooruitblik, met het blok van nu zoals het besluit het doet (v0.219.0).
+
+        Het plan en het besluit kunnen voor het lopende blok verschillen: vasthouden tot het eind van een beurt, een
+        Growatt die zijn schema volgt, een batterij die het plan nu niet volgt. In een klantwoning op 11-11-2026
+        zei de vooruitblik om 08:38 "nul op de meter, 0,1 kW eruit" en de kaart "geeft tot dan niets af". De kaart
+        zegt wat hij doet, dus het eerste blok volgt de kaart.
+        """
+        uren = list(besluit.uren)
+        if not uren or not uren[0].start <= now < uren[0].end or uren[0].stand == besluit.stand:
+            return uren
+        eerste = uren[0]
+        if besluit.stand in (NETLADEN, MAX_LADEN) and besluit.power_w:
+            kwh = besluit.power_w / 1000.0 * echte_uren(now, eerste.end)
+            net = kwh
+        elif besluit.stand in (STANDBY, NETLADEN, MAX_LADEN):
+            kwh = net = 0.0
+        else:
+            return uren
+        soc = b.soc + (kwh * eta_in(b) / b.capacity_kwh * 100.0 if b.capacity_kwh else 0.0)
+        uren[0] = replace(eerste, stand=besluit.stand, kwh=kwh, net_kwh=net, soc=min(100.0, soc), vast=False)
+        return uren
 
     def vooruitblik(self, settings: dict[str, Any], now: datetime | None = None) -> dict[str, Any]:
         """Wat er de komende uren gebeurt, per uur, voor de vooruitblik op het overzicht (v0.133.0).
