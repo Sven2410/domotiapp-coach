@@ -122,6 +122,50 @@ weg te laten (`docs/batterij.md`, v0.174.0).
 Sinds v0.179.0 bewaart `growatt_dag` altijd een begin, ook na een nacht zonder vak. Een telling van een
 eerdere coach zonder begin zoekt het laatste vak in de kwartieren op (`docs/batterij.md`, v0.179.0).
 
+## Eerst herstellen, dan sturen (v0.217.0)
+
+In een klantwoning startte Home Assistant op 12-11-2026 om 11:21 opnieuw. De zonvoorspeller was er om
+11:23:20, een paar seconden na de eerste ronde van de coach. Die had toen al de schatting uit de eigen
+opwek en het weer genomen (6,3 kWh zon) en hield die een half uur vast (`ZON_VERVERSEN`). Met die zon
+plande de batterij laden van het net, en om 11:43 stond dat als vak in de Growatt. Om 11:53 kwam de echte
+kromme (31,2 kWh), en pas om 13:14 ging het vak eruit. De eigenaar: "laat dit dan ook alle andere fouten
+oplossen [...] We moeten het zo bouwen dat hij leert van alle verschillende merken en installaties."
+
+**De regel**: een reserve of een lege uitkomst houdt de coach niet vast als de echte bron er weer is. Wat
+hij niet uit de bron kreeg, vraagt hij na `OPSTART_OPNIEUW` (een minuut) opnieuw, en niet pas na de
+gewone verversing. Een goede uitkomst houdt hij zo lang als altijd. Eén hulpfunctie, `_ververs_om`:
+
+| bron | gewoon | wat er niet lukte | nu |
+|---|---|---|---|
+| de zon (`_async_zonkromme`) | 30 min | een schatting terwijl er een voorspeller is ingesteld (energiedashboard of de integratie achter de zonsensoren, `_async_voorspeller`) | elke minuut de voorspeller opnieuw; de schatting uit de opwek (een databaselezing) blijft eens per half uur |
+| het huisverbruik (`_async_huisverbruik`) | 1 uur | de eigen opslag gaf een fout | over een minuut |
+| het jaarsaldo voor salderen (`_async_jaarsaldo`) | 24 uur | de recorder gaf een fout; tot nu was het saldo dan een dag weg | het vorige blijft, over een minuut |
+| de schaal van de terugleverkosten (`_async_schaal`) | 24 uur | hetzelfde | het vorige blijft, over een minuut |
+| Nord Pool (`_async_nordpool`) | 10 min | vandaag leeg: de dienst is er nog niet | over een minuut; morgen leeg blijft tien minuten, want die komt pas rond 13:00 |
+| het soort Growatt (`_async_growatt_soort`) | 1 uur | geen acties vlak na de opstart (`INTEGRATIE_OPSTART`) | over een minuut; daarna een uur, zoals een Growatt die het niet kan |
+
+Zonder voorspeller verandert er niets. Wat er vóór v0.217.0 al zo was: de accustand van een Growatt
+(v0.162.0, elke ronde) en de dagen zon van voor de coach (v0.196.0, een kwartier, want dat zijn dagen
+van vroeger en geen bron voor nu).
+
+**Leren hoe lang een integratie nodig heeft** (`_async_opstart_meten`). Per integratie achter de
+entiteiten van de coach, dus per merk (de paal, de batterij, de auto, de meter, de prijzen), de seconden
+tussen de eerste ronde van de coach en het moment dat er iets van terugkwam: de vroegste `last_changed`
+van wat niet `unavailable` is. Wat er bij de eerste ronde al was telt als 0. Voor de zonvoorspeller de
+eerste ronde met een echte kromme (`zon:<integratie>`), dus op de minuut. Zodra alles er is, of na een
+kwartier, één regel in het log:
+
+```
+na de opstart: accumerk na 150 s, paalmerk na 0 s, zon:forecast_solar na 120 s
+```
+
+Als info, en als waarschuwing als er iets niet binnen het kwartier kwam. De uitkomst staat in de
+instellingen (`startup_learned`, de laatste vijf per integratie, `None` voor niet gekomen), dus ook na de
+volgende herstart. Na een herladen door de coach (v0.166.0, v0.188.0) hetzelfde, vanaf het herladen,
+onder `reload`.
+
+Proef 259 in test_coach.py; `growatt-opstart` en `growatt-opstart-nooit` in het virtuele huis.
+
 ## Wat er nog open staat
 
 Zie de werkbon van 28-10-2026 in de privénotities:

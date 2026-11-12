@@ -1815,6 +1815,21 @@ growatt_zon_onzeker_zonder = growatt_ochtend.kopie(
     batterij=Batterij(**{**GROWATT_SPH, "soc": 15.0}, min_winst=0.0),
     duur_uren=24,
 )
+# Na een opstart is de zonvoorspeller er pas even na de coach (v0.217.0). In een klantwoning op 12-11-2026
+# rekende de coach daarna een half uur met de schatting uit de opwek en het weer, en zette hij een vak met
+# laden van het net in de Growatt; het weerbericht zei regen. Hier om 23:00, in het goedkope vak, na een week die een
+# vijfde van een heldere dag gaf, voor een heldere dag.
+growatt_opstart = growatt_zon_onzeker_zonder.kopie(
+    naam="growatt-opstart",
+    uitleg="dezelfde Growatt na een donkere week, morgen helder, herstart om 23:00 en de zonvoorspeller een minuut later",
+    zon=Zon(wolken="helder", piek_kw=2.5), weer="regen", opwek_eerder=0.2,
+    gebeurtenissen=[("23:00", "herstart", None), ("23:00", "voorspeller_weg", 1)],
+)
+growatt_opstart_nooit = growatt_opstart.kopie(
+    naam="growatt-opstart-nooit",
+    uitleg="hetzelfde, en de zonvoorspeller komt de hele nacht niet: dan de schatting, zoals tot v0.217.0",
+    gebeurtenissen=[("23:00", "herstart", None), ("23:00", "voorspeller_weg", 600)],
+)
 growatt_zon_onzeker = growatt_zon_onzeker_zonder.kopie(
     naam="growatt-zon-onzeker",
     uitleg="hetzelfde, met acht dagen waarop het dak 0,79 tot 2,33 keer de verwachting gaf: minder van het net",
@@ -2018,7 +2033,7 @@ ALLE = [
     vast_kosten_kwh, vast_kosten_schalen, vast_kosten_overschot, vast_kosten_overschot_netto, dyn_salderen_vol,
     planning_auto_eerst, planning_accu_eerst,
     *HERSTART,
-    growatt_bihorario, growatt_zon, growatt_vreemd, growatt_eigen_zon, growatt_schaduw, growatt_vasthouden,
+    growatt_bihorario, growatt_zon, growatt_vreemd, growatt_opstart, growatt_opstart_nooit, growatt_eigen_zon, growatt_schaduw, growatt_vasthouden,
     growatt_zon_onzeker_zonder, growatt_zon_onzeker, growatt_zon_te_hoog,
     growatt_ochtend, growatt_ochtend_zonder_grens, growatt_herstart, growatt_weigert, growatt_terug_100,
     batterij_volgt_niet, batterij_volgt_niet_zelf, batterij_volgt_even_niet,

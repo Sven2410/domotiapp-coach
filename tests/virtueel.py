@@ -1205,8 +1205,12 @@ class Scenario:
     # ingevulde sensoren, en die sensoren zelf een uur achter (v0.100.1).
     voorspeller: str = "dashboard"
     # Een weerentiteit met een uurverwachting en een plek op de kaart (v0.151.0), voor de
-    # zon uit eigen opwek: de bewolking volgt het weer van `zon` (`Wereld.bewolking`).
-    weer: bool = False
+    # zon uit eigen opwek: de bewolking volgt het weer van `zon` (`Wereld.bewolking`). Een woord uit
+    # `Wereld.BEWOLKING` (of "regen", 100%) is een weerbericht dat iets anders zegt dan het dak doet (v0.217.0).
+    weer: bool | str = False
+    # Welk deel van een heldere dag het dak de zeven dagen vóór de proef gaf, in de kwartieropslag (v0.217.0).
+    # Zonder: twee bewolkte dagen en vijf heldere.
+    opwek_eerder: float | None = None
     # Wat de coach bij een eerdere beurt over deze auto leerde: kW per band van
     # tien procent, zoals `car_pace` in de instellingen, of (kW, vanaf welke
     # accustand hij remde). Zie `_tempo_leren`.
@@ -1936,6 +1940,8 @@ class Wereld:
         self.gw_gemeld: dt.datetime | None = None
         self.stroom_gemeld: tuple[str, dt.datetime | None] = ("", None)
         self.prijzen_weg_tot: dt.datetime | None = None
+        # Tot wanneer de zonvoorspeller niets geeft, zoals na een opstart (`voorspeller_weg`, v0.217.0).
+        self.voorspeller_weg_tot: dt.datetime | None = None
         self.oven_tot: dt.datetime | None = None
         self.equalizer_vrij: float | None = None
         # Sensoren die tijdelijk `unavailable` zijn, met tot wanneer.
@@ -2278,7 +2284,10 @@ class Wereld:
                            "attributes": {"unit_of_measurement": "€/kWh",
                                           "prices": self.prijzen.lijst(nu, False)}})
 
-        if self.s.voorspeller != "geen":
+        if self.s.voorspeller != "geen" and self.voorspeller_weg():
+            for naam in ("zon_rest", "zon_dit_uur", "zon_volgend_uur", "zon_piek"):
+                z(E[naam], weg)
+        elif self.s.voorspeller != "geen":
             uur = nu.replace(minute=0, second=0, microsecond=0)
             rest = sum(self.zon.verwacht_kwh(uur + dt.timedelta(hours=i))
                        for i in range(24 - uur.hour))
@@ -2293,9 +2302,16 @@ class Wereld:
 
     # --- wat de coach van buiten krijgt ---
 
+    def voorspeller_weg(self) -> bool:
+        return self.voorspeller_weg_tot is not None and self.nu < self.voorspeller_weg_tot
+
+    async def voorspellers(self, settings=None) -> list:
+        """Welke voorspeller er is ingesteld (v0.217.0); ook als hij nog niets geeft."""
+        return [] if self.s.voorspeller == "geen" else ["forecast_solar"]
+
     async def zonkromme(self) -> dict:
         """Wat het energiedashboard zou geven: een uurkromme, vandaag en morgen."""
-        if self.s.voorspeller not in ("dashboard", "forecast_solar"):
+        if self.s.voorspeller not in ("dashboard", "forecast_solar") or self.voorspeller_weg():
             return {}
         uit = {}
         vandaag = dt.datetime.combine(self.nu.date(), dt.time(0))
@@ -2318,7 +2334,7 @@ class Wereld:
 
     async def zonkromme_via_sensor(self, settings=None) -> dict:
         """Wat de integratie achter de ingevulde zonsensoren geeft (v0.100.1)."""
-        if self.s.voorspeller != "forecast_solar_sensoren":
+        if self.s.voorspeller != "forecast_solar_sensoren" or self.voorspeller_weg():
             return {}
         vandaag = dt.datetime.combine(self.nu.date(), dt.time(0))
         uit = {}
@@ -2334,6 +2350,8 @@ class Wereld:
                  "middag-dicht": 60.0}
 
     def bewolking(self, moment: dt.datetime) -> float:
+        if isinstance(self.s.weer, str):
+            return self.BEWOLKING.get(self.s.weer, 100.0)
         return self.BEWOLKING.get(self.zon.weer_op(moment), 50.0)
 
     def archief(self):
@@ -2348,8 +2366,10 @@ class Wereld:
                     for k in range(96):
                         t = dag0 - dt.timedelta(days=d) + dt.timedelta(minutes=15 * k)
                         huis = wereld.huis.watt(t, dag_offset=-d)
-                        # Twee van de zeven dagen bewolkt, de rest helder.
-                        zon = wereld.zon.helder_kw(t) * (0.3 if d in (3, 6) else 1.0) * 1000
+                        # Twee van de zeven dagen bewolkt, de rest helder; of een week die maar een deel gaf
+                        # (`opwek_eerder`, v0.217.0).
+                        deel = wereld.s.opwek_eerder if wereld.s.opwek_eerder is not None else (0.3 if d in (3, 6) else 1.0)
+                        zon = wereld.zon.helder_kw(t) * deel * 1000
                         netto = huis - zon
                         stempel = calendar.timegm(t.timetuple())
                         rij = {
@@ -2481,6 +2501,11 @@ class Wereld:
         if actie == "airco_temp":
             self.airco.doel_c = float(arg)
             return f"de bewoner zet de airco zelf op {arg} graden"
+        if actie == "voorspeller_weg":
+            # De zonvoorspeller is er na een opstart nog niet (v0.217.0): geen kromme, en zijn sensoren
+            # unavailable.
+            self.voorspeller_weg_tot = self.nu + dt.timedelta(minutes=int(arg))
+            return f"de zonvoorspeller geeft {arg} minuten niets"
         if actie == "sensor_weg":
             naam, minuten = arg
             self.weg[naam] = self.nu + dt.timedelta(minutes=int(minuten))
@@ -2786,6 +2811,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
     coach._sleep = lambda seconds: asyncio.sleep(0)
     coach._async_zon_uit_dashboard = wereld.zonkromme
     coach._async_zon_uit_integratie = wereld.zonkromme_via_sensor
+    coach._async_voorspeller = wereld.voorspellers
     coachmod.async_get_archive = lambda hass: wereld.archief()
     jaarbalans(coach, s)
     # Het register van Home Assistant: de sensoren van de Growatt hangen aan zijn omvormer.
@@ -2849,6 +2875,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
         c._sleep = lambda seconds: asyncio.sleep(0)
         c._async_zon_uit_dashboard = wereld.zonkromme
         c._async_zon_uit_integratie = wereld.zonkromme_via_sensor
+        c._async_voorspeller = wereld.voorspellers
         jaarbalans(c, s)
         return c
 
