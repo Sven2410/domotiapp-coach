@@ -18096,6 +18096,87 @@ finally:
     entries259.pop("e-uit", None)
     entries259["e-bat"] = types.SimpleNamespace(domain="accumerk")
 
+
+print("=== 262. de zekering: omlaag snel, omhoog rustig (v0.218.0) ===")
+# In een klantwoning op 05-11-2026 stond fase 3 van 14:58:17 tot 14:59:13 op 35 A bij een grens van 30 A. De meter
+# meldde elke 14 s; de mediaan over anderhalve minuut kwam pas na de helft van het venster boven de grens.
+NU262 = coachmod._moment()
+
+
+def glad262(reeks, tempo, nu=NU262):
+    _, _, c = bouw(huis(), instellingen())
+    c._fase_historie["sensor.l3"] = [(nu - dt.timedelta(seconds=sec), float(w)) for sec, w in reeks]
+    if tempo is not None:
+        c._fase_tempo["sensor.l3"] = float(tempo)
+    return c._gladde_fase("sensor.l3", float(reeks[-1][1]), nu)
+
+
+een262 = glad262([(50, 27.0), (36, 27.0), (22, 27.0), (8, 35.2)], 14)
+twee262 = glad262([(50, 27.0), (36, 27.0), (22, 27.0), (14, 35.2), (0, 35.27)], 14)
+print(f"  de reeks van 05-11: na één meting {een262} A, na twee {twee262} A")
+controle("één meting boven de grens telt nog niet, de tweede wel", een262 == 27.0 and twee262 == 35.2, f"{een262} {twee262}")
+controle("de uitschieter van 30-08 valt er nog steeds uit", glad262([(40, 10), (30, 10), (20, 27), (0, 10)], 10) == 10.0
+         and glad262([(40, 10), (30, 10), (20, 10), (0, 27)], 10) == 10.0, "")
+# Een meter met hele ampères meldt een stand die blijft niet opnieuw.
+blijft262 = glad262([(60, 4), (50, 4), (40, 4), (12, 35)], 5)
+traag262 = glad262([(60, 4), (50, 4), (40, 4), (12, 35)], 30)
+print(f"  hele ampères, 35 staat 12 s: bij een meter van 5 s {blijft262} A, bij een van 30 s {traag262} A")
+controle("een stand die twee keer het tempo van de meter blijft staan telt, één tussentijd niet",
+         blijft262 == 35.0 and traag262 == 4.0, f"{blijft262} {traag262}")
+controle("een uitschieter die één tussentijd staat telt niet", glad262([(40, 10), (30, 10), (20, 10), (10, 27)], 10) == 10.0, "")
+controle("zonder geleerd tempo de mediaan, zoals voor v0.218.0", glad262([(60, 4), (50, 4), (40, 4), (12, 35)], None) == 4.0, "")
+
+# De luisteraar: de meting die het bevestigt krijgt altijd een ronde, ook binnen `HURRY_INTERVAL`, en de eerste zet
+# een klok die nog eens kijkt.
+_, _, c262 = bouw(huis(), instellingen())
+c262._urgent_above = {"sensor.l3": 25.0}
+c262._fase_tempo["sensor.l3"] = 14.0
+rondes262, klokken262 = [], []
+c262.async_refresh = lambda *a, **k: rondes262.append(1)
+oud_later262 = coachmod.async_call_later
+coachmod.async_call_later = lambda hass, wacht, actie: klokken262.append(wacht) or (lambda: None)
+try:
+    for w in ("10", "10", "30"):
+        c262._async_phase_changed(Meting("sensor.l3", w))
+    eerste262 = (len(rondes262), list(klokken262))
+    c262._async_phase_changed(Meting("sensor.l3", "30.2"))
+    c262._async_phase_changed(Meting("sensor.l3", "30.4"))
+finally:
+    coachmod.async_call_later = oud_later262
+print(f"  na de eerste: {eerste262}, daarna {len(rondes262)} rondes")
+controle("de eerste meting boven de grens: een ronde en een klok", eerste262[0] == 1 and len(eerste262[1]) == 1
+         and 2 <= eerste262[1][0] <= 30, f"{eerste262}")
+controle("de tweede: meteen een ronde, de derde wacht op HURRY_INTERVAL", len(rondes262) == 2 and len(klokken262) == 1,
+         f"{len(rondes262)} {klokken262}")
+c262._fase_klok_af(None)
+controle("de klok gaat af en kijkt", len(rondes262) == 3 and c262._fase_klok is None, "")
+
+# De hele keten: een paal die laadt, en een fase die naar boven de grens springt. Twee metingen en hij gaat omlaag.
+inst262 = instellingen()
+inst262["strategy"]["schedules"][0]["window"]["done_by"] = "07:00"
+inst262["car_soc"] = [{"device": "dev-laadpaal", "car": "car-1", "percent": 40.0, "at": coachmod._moment().isoformat()}]
+hass262, _, coach262 = bouw(huis(status="ready_to_charge", teruglevering=0.0, afname=1800.0), inst262)
+asyncio.run(ronde(coach262, inst262, nu=coachmod._moment()))
+coach262.async_mode("dev-laadpaal", "snel")
+hass262.states.zet("sensor.laadpaal_status", "charging")
+hass262.states.zet("sensor.laadpaal_stroom", "12")
+hass262.states.zet("sensor.laadpaal_vermogen", "8200")
+for w in ("20", "20", "20", "20"):
+    coach262._async_phase_changed(Meting("sensor.l3", w))
+hass262.states.zet("sensor.l3", "20")
+voor262, _ = asyncio.run(ronde(coach262, inst262, nu=coachmod._moment()))
+for w in ("33", "33.2"):
+    coach262._async_phase_changed(Meting("sensor.l3", w))
+hass262.states.zet("sensor.l3", "33.2")
+na262, _ = asyncio.run(ronde(coach262, inst262, nu=coachmod._moment()))
+print(f"  voor: {voor262['rule']} {voor262['amps']} A, na twee metingen van 33 A: {na262['rule']} {na262['amps']} A")
+controle("na twee metingen boven de zekering gaat de paal omlaag, niet pas na de helft van het venster",
+         voor262["amps"] >= 6 and na262["amps"] < voor262["amps"], f"{voor262['rule']} {voor262['amps']} {na262['rule']} {na262['amps']}")
+
+# Na een herstart is er geen historie: dan telt wat de meter nu zegt, dus voorzichtig.
+_, _, c262h = bouw(huis(), instellingen())
+controle("na een herstart telt de meting zelf", c262h._gladde_fase("sensor.l3", 35.0, NU262) == 35.0, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

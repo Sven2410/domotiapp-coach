@@ -710,6 +710,33 @@ in vier stuks met een oven, een warmtepomp of een Equalizer (`ford-bijkomen`,
 `ford-oude-opslag`, `klantwoning-oven`, en `equalizer-knijpt` met vier cent
 erbij). Proef 70 in test_planner.py, proef 128 in test_coach.py.
 
+**Omlaag snel** (v0.218.0). In een klantwoning op 05-11-2026 laadde de auto op Snel, en om 14:56 kwam er bijna
+8 kW bij. Fase 3 stond van 14:58:17 tot 14:59:13 op 35 A bij een grens van 30 A; om 14:59:10 zette de coach de paal
+op 0 A. De meter meldde elke 14 s, en de mediaan over anderhalve minuut had pas na ongeveer de helft van het venster
+de meerderheid. Daarbij kwam de tweede meting boven de grens 14 s na de eerste, en `HURRY_INTERVAL` (15 s) hield de
+extra ronde tegen.
+
+Nu telt een fase omlaag ook zo hoog als hij volgehouden is (`_fase_volgehouden` naast de mediaan in `_gladde_fase`):
+- twee metingen na elkaar (`FASE_BEVESTIGD`): het laagste van die twee. De enkele uitschieter van 30-08 (10, 27, 10)
+  telt zo niet.
+- of één meting die al twee keer het gewone tempo van zijn meter staat (`FASE_STAAT`, het tempo per sensor in
+  `_fase_tempo`). Een meter met hele ampères meldt een stand die blijft niet opnieuw, want Home Assistant geeft
+  alleen een wissel door; in een klantwoning stond 11 A er zo tien seconden zonder melding. Eén tussentijd telt niet,
+  dus de uitschieter van 30-08 ook hier niet.
+
+De meting die het bevestigt krijgt altijd een ronde, ook binnen `HURRY_INTERVAL`, en de eerste meting boven de grens
+zet een klok die na twee tussentijden nog eens kijkt (`_fase_klok_zetten`). Omhoog blijft zoals hierboven. Het tempo
+staat alleen in het geheugen: na een herstart is het er binnen een paar metingen weer, en tot dan telt de mediaan,
+of met minder dan drie metingen wat de meter nu zegt.
+
+Gemeten in vier woningen: een meter elke 14 s met drie decimalen, een elke 5 s met drie decimalen, en twee met
+hele ampères (alleen de wissels). In het virtuele huis (`zekering-sprong`, een meter van 14 s, twee keer
+6 kW erbij tijdens Snel): 70 s boven de zekering per sprong werd 28 s. Met hele ampères
+(`zekering-sprong-hele-amps`) was het al 5 s en bleef het 5 s. `warmtepomp-nacht` werd er goedkoper van: de coach
+staat korter onterecht op 0 A, meet meer ruimte over, en begint om 23:05 op het goedkopere uur in plaats van om
+22:06 (€ 10,20 tegen € 10,30, 52 wissels tegen 58, vol om 05:43). Het virtuele huis heeft daarvoor een echte klok
+voor `async_call_later` gekregen. Proef 262 in test_coach.py.
+
 **Waarom hij minder vraagt dan hij kan** (v0.102.2). Diezelfde middag stond er
 tien minuten "Snelladen staat aan, dus hij laadt op 14 A, ongeacht de prijs" bij
 een paal van 16 A. Wat hem op 14 hield was de rail van `ceiling_amps`: de paal
