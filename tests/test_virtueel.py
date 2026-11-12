@@ -2704,6 +2704,17 @@ for naam, per_sprong in (("zekering-sprong", 28), ("zekering-sprong-hele-amps", 
         controle(f"{naam}: per sprong hoogstens {per_sprong} s boven de zekering, en het laden gaat door",
                  len(duur) == 2 and max(duur) <= per_sprong and vl.geladen_kwh > 5, f"{duur} {vl.geladen_kwh:.1f} kWh")
 
+# De voorzichtige zon (v0.219.0) neemt alleen laden weg dat er voor de zon van straks was. Op de ochtend van 11-11
+# laadt de Anker hier in het goedkope uur voor 06:00 voor de avond; dat blijft, met en zonder gemeten dagen.
+if (vl := v("anker-ochtend")) and (zonder := v("anker-ochtend-zonder")) and (helder := v("anker-ochtend-helder")):
+    def na_zes(x):
+        return sum(1 for r in x.bat_verloop if r[0].hour >= 6 and r[2] > 100 and r[1] > 100)
+    print(f"  anker-ochtend: net in de accu {vl.bat_afname_kwh:.2f} kWh (zonder dagen {zonder.bat_afname_kwh:.2f}, "
+          f"helder {helder.bat_afname_kwh:.2f}); stappen van het net na 06:00: {na_zes(vl)}")
+    controle("anker-ochtend: het laden voor de avond in het goedkope uur blijft, met en zonder gemeten dagen",
+             abs(vl.bat_afname_kwh - zonder.bat_afname_kwh) < 0.2 and vl.bat_afname_kwh > 3 and na_zes(vl) <= na_zes(zonder),
+             f"{vl.bat_afname_kwh:.2f} {zonder.bat_afname_kwh:.2f}")
+
 # Dezelfde dag om 13:39:54: de auto was klaar, de laatste meterwaarde zei nog
 # 7,3 kW afname, en de regelaar zette de batterij daarop in dezelfde seconde op
 # ontladen op vol vermogen: een paar seconden 4,2 kW het net op. In dit huis

@@ -2619,3 +2619,39 @@ van de cloud, niet van de lage stopgrens.
 Proef 257 in test_coach.py: uit en bevestigd, elk uur lezen, een vreemd vak binnen het uur vervangen met één regel, het
 vak dat terugkomt (één melding, niets meer schrijven, `foreign`), een herstart terwijl hij het laat staan, het vak
 eruit, een dag later weer de eerste keer, en een Growatt zonder het vinkje.
+
+## De ochtend: een ruil met de zon die niet kwam, en vasthouden na een plan dat omsloeg (v0.219.0)
+
+In een klantwoning op 11-11-2026 (een Anker van 2,5 kW, dynamisch met salderen, gemeten rendement 76%) laadde de
+batterij van 06:04 tot 08:05 op vol vermogen van het net, tegen € 0,427, € 0,479 en € 0,547. Om 06:04 sprong de waarde
+van een kWh in de accu van € 0,447 naar € 0,667 en de inkoopgrens van € 0,390 naar € 0,583: het plan laadde tot 93% en
+stond van 11:00 tot 15:00 vol stil, zodat de middagzon tegen € 0,58 het net op ging. Netstroom en zon gaan door
+hetzelfde laadrendement, dus dat is een ruil: teruglevering min inkoop. Die klopt alleen als de zon de accu toch
+gevuld had. Hij kwam niet (0,24 van de verwachting), en ochtenden als die gaven daar vaak 0,2 tot 0,7. Om 08:04 sloeg
+het plan om naar nul, en hield hij tot 09:00 vast terwijl het huis tegen € 0,547 van het net haalde.
+
+**Een voorzichtige zon vóór er vandaag iets gemeten is.** De eigenaar op 12-11-2026, na uitleg van de regel "alleen
+naar boven" (v0.194.0) tegenover dit voorstel: ja, en het kost de ruil op een dag dat de zon wel komt. Laadt de som van
+het net terwijl er vandaag nog geen zon gemeten is (`_zon_gemeten`), dan rekent de coach nog eens met een voorzichtige
+zon: het kwantiel `ZON_VOORZICHTIG` (0,25) van wat het dak gaf tegenover de verwachting, uit dezelfde dagen als
+`zon_marge` (`zon_dagen`, in de opslag, dus ook na een herstart), alleen als dat onder `ZON_VOORZICHTIG_ONDER` (0,9)
+ligt (`zon_voorzichtig` in batterij.py). Valt het laden van het net met die zon weg, dan was de ruil de reden, en dan
+laadt hij niet: "Van het net laden voor de zon van straks doet hij nog niet". Laadt hij met de voorzichtige zon ook
+(of meer) van het net, zoals voor een avond in het goedkope uur, dan blijft het plan zoals het was. Na de eerste
+meting van vandaag geldt die meting, zoals altijd. Voor die woning is het kwantiel 0,26.
+
+**Vasthouden alleen voor een tik.** `_houden_tot` hield een beurt tot het eind van het blok vast zodra de vorige ronde
+van het net laadde (v0.108.0, een accustand die een procent voorloopt). Maar de vorige ronde is het eigen besluit, dus
+een plan dat omsloeg hield zichzelf ook vast. Nu houdt hij alleen vast als het plan met een procent minder binnen twee
+uur nog van het net zou laden (`_een_tik`, `HOUD_KIJK`); en dan zonder de zin dat stroom nu goedkoper is, want hij koopt
+niets. Twee uur en niet alleen dit blok: met kwartierprijzen laadt het plan vaak een paar kwartieren verder, in een die
+net goedkoper is (`batterij-kwartier-voorloper`, dat met alleen dit blok weer laden en ontladen in één kwartier gaf). Op
+11-11-2026 laadde het plan om 08:04 pas om 22:00 weer.
+
+**De vooruitblik volgt het besluit** voor het blok van nu (`_uren_met_besluit` in coach.py): vasthouden staat er als
+van het net op niets, niet als "nul, 0,1 kW eruit".
+
+Wat niet nagerekend is: het virtuele huis en de som op de getallen van die ochtend kwamen niet tot de ruil van 06:04
+(de zonverwachting per uur van toen staat in geen log). Proef 263 in test_coach.py zet daarom de uitkomst van de som
+vast en meet de bedrading na; proef 64 in test_batterij.py het vasthouden en het kwantiel. `anker-ochtend` in het
+virtuele huis bewaakt dat laden voor de avond in het goedkope uur blijft.

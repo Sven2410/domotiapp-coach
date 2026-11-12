@@ -18177,6 +18177,86 @@ controle("na twee metingen boven de zekering gaat de paal omlaag, niet pas na de
 _, _, c262h = bouw(huis(), instellingen())
 controle("na een herstart telt de meting zelf", c262h._gladde_fase("sensor.l3", 35.0, NU262) == 35.0, "")
 
+print("=== 263. de batterij: een voorzichtige zon vóór er iets gemeten is, alleen voor de ruil met de zon (v0.219.0) ===")
+# In een klantwoning op 11-11-2026 laadde de Anker van 06:04 tot 08:05 van het net om de middagzon het net op te laten
+# gaan; de zon kwam niet. De eigenaar op 12-11-2026: vóór er vandaag zon gemeten is een voorzichtige zon, alleen als
+# de ruil met de zon de reden is. Hier geeft de som een vaste uitkomst: van het net met de gewone zon, en met de
+# voorzichtige zon `voorzichtig263` (nul, of ook van het net).
+from domotiapp_coach.batterij import Besluit as Besluit263, NETLADEN as NETLADEN263, NUL as NUL263  # noqa: E402
+
+DAGEN263 = [[f"2026-11-{1 + i:02d}", 10.0, round(10.0 * r, 2)]
+            for i, r in enumerate([0.70, 0.77, 0.45, 0.20, 1.05, 0.20, 0.53, 1.10, 0.20, 0.45])]
+echt263 = coachmod.plan_batterij
+gevraagd263 = []
+
+
+def nep263(voorzichtig):
+    def plan(now, prices, tariff, forecast, b, **kw):
+        gevraagd263.append(forecast.solar_prior)
+        if voorzichtig == "geen":
+            return Besluit263(NUL263, reason="Hij houdt de meter op nul.", rule="nul")
+        if forecast.solar_prior is not None and forecast.solar_prior < 1:
+            if voorzichtig == "nul":
+                return Besluit263(NUL263, reason="Hij houdt de meter op nul.", rule="nul")
+        return Besluit263(NETLADEN263, power_w=2500.0, reason="Stroom kost nu € 0,427.", rule="netladen")
+    return plan
+
+
+def batterij263(voorzichtig="nul", dagen=DAGEN263, gemeten=None, coach=None, hass=None, inst=None):
+    if coach is None:
+        inst = instellingen(devices=[LAADPAAL, BATTERIJ])
+        inst["battery_state"] = [{"device": "dev-batterij", "zon_dagen": dagen}] if dagen else []
+        hass, _, coach = bouw(huis75(), inst)
+    coach._zon_gemeten = lambda now: gemeten
+    gevraagd263.clear()
+    coachmod.plan_batterij = nep263(voorzichtig)
+    try:
+        b = asyncio.run(ronde75(hass, coach, dt.datetime(2026, 11, 11, 6, 4)))
+    finally:
+        coachmod.plan_batterij = echt263
+    return b, list(gevraagd263), (coach, hass, inst)
+
+
+b263, v263, bij263 = batterij263()
+print(f"  {b263.get('mode')}: {b263.get('reason')} (gevraagd met {v263})")
+controle("laadt hij alleen voor de zon van straks: niet van het net, en de kaart zegt waarom",
+         b263.get("mode") == "nul" and "zon van straks" in (b263.get("reason") or "")
+         and v263[0] is None and v263[1] is not None and v263[1] < 0.3, f"{b263.get('mode')} {v263}")
+b263b, v263b, _ = batterij263(voorzichtig="ook")
+controle("laadt hij met de voorzichtige zon ook van het net, dan is de ruil niet de reden: van het net",
+         b263b.get("mode") == "netladen" and "zon van straks" not in (b263b.get("reason") or ""), f"{b263b.get('mode')}")
+b263c, v263c, _ = batterij263(gemeten=0.4)
+controle("is er vandaag al zon gemeten, dan geldt die meting en niet de voorzichtige zon",
+         b263c.get("mode") == "netladen" and v263c == [None], f"{b263c.get('mode')} {v263c}")
+b263e, v263e, _ = batterij263(voorzichtig="geen")
+controle("laadt hij niet van het net, dan geen tweede som en niets erbij op de kaart",
+         b263e.get("mode") == "nul" and v263e == [None] and "zon van straks" not in (b263e.get("reason") or ""),
+         f"{b263e.get('mode')} {v263e}")
+b263d, v263d, _ = batterij263(dagen=None)
+controle("zonder gemeten dagen zoals het was", b263d.get("mode") == "netladen" and v263d == [None], f"{v263d}")
+coach263, hass263, inst263 = bij263
+coach263h = herstart213(hass263)
+b263h, v263h, _ = batterij263(coach=coach263h, hass=hass263, inst=inst263)
+controle("na een herstart dezelfde voorzichtige zon: de dagen staan in de opslag",
+         b263h.get("mode") == "nul" and v263h[1:] == v263[1:], f"{b263h.get('mode')} {v263h}")
+
+# Het eerste blok van de vooruitblik volgt het besluit: vasthouden is geen "nul, 0,1 kW eruit".
+from domotiapp_coach.batterij import Batterij as Batterij263, Uur as Uur263, HOUD_W as HOUD_W263  # noqa: E402
+
+NU263 = dt.datetime(2026, 11, 11, 8, 10)
+uren263 = [Uur263(NU263, NU263.replace(minute=0) + dt.timedelta(hours=1), NUL263, -0.28, 0.0, 64.0, 0.547),
+           Uur263(NU263.replace(hour=9, minute=0), NU263.replace(hour=10, minute=0), NUL263, -0.3, 0.0, 62.0, 0.561)]
+houd263 = Besluit263(NETLADEN263, power_w=HOUD_W263, reason="Hij maakt het laden van het net af tot 09:00.",
+                     rule="netladen", uren=uren263)
+b_accu263 = Batterij263(soc=65.0, capacity_kwh=14.5, rte=0.76)
+eerste263 = coachmod.ChargerCoach._uren_met_besluit(houd263, b_accu263, NU263)
+print(f"  eerste blok: {eerste263[0].stand} {eerste263[0].kwh:.3f} kWh naar {eerste263[0].soc:.0f}%")
+controle("vasthouden: het eerste blok zegt van het net op niets, op dezelfde accustand",
+         eerste263[0].stand == NETLADEN263 and abs(eerste263[0].kwh) < 0.01 and round(eerste263[0].soc) == 65
+         and eerste263[1] == uren263[1], f"{eerste263[0]}")
+controle("en is het besluit wat het plan zegt, dan blijft het plan", coachmod.ChargerCoach._uren_met_besluit(
+    Besluit263(NUL263, reason="", rule="nul", uren=uren263), b_accu263, NU263) == uren263, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

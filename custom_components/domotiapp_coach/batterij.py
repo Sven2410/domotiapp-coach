@@ -963,6 +963,29 @@ def _houden_tot(b: Batterij, som: _Som) -> datetime | None:
     return None
 
 
+# Hoe ver `_een_tik` vooruit kijkt of de beurt nog verder gaat.
+HOUD_KIJK = timedelta(hours=2)
+
+
+def _een_tik(now: datetime, prices: list[dict], tariff: Tariff, forecast: Forecast, b: Batterij, kw: dict) -> bool:
+    """Of het plan met een procent minder binnen `HOUD_KIJK` nog van het net zou laden (v0.219.0).
+
+    Dan is het een accustand die een tik voorloopt, en houdt hij vast tot het blok om is (`_houden_tot`). Zo niet,
+    dan sloeg het plan om, en dan houdt een beurt zichzelf anders tot het eind van het blok in stand: de vorige ronde
+    is het eigen besluit. In een klantwoning op 11-11-2026 stond het plan om 08:04 op nul, omdat de zon waarvoor hij
+    laadde niet kwam; hij hield tot 09:00 vast terwijl het huis tegen € 0,547 van het net haalde.
+    """
+    if b.soc is None:
+        return False
+    lager = plan_batterij(now, prices, tariff, forecast, replace(b, soc=b.soc - 1.0), **kw, _tik=True)
+    if lager.stand == NETLADEN and lager.power_w > HOUD_W + 1e-6:
+        return True
+    # Met kwartierprijzen laadt het plan vaak een paar kwartieren verder, in een die net goedkoper is: dat telt ook,
+    # binnen `HOUD_KIJK` (`batterij-kwartier-voorloper` in het virtuele huis). Op 11-11-2026 laadde het plan om 08:04
+    # pas om 22:00 weer.
+    return any(uur.stand == NETLADEN and uur.net_kwh > 1e-3 for uur in lager.uren if uur.start < now + HOUD_KIJK)
+
+
 # Vasthouden is laden van het net op niets: de regelaar haalt dan niets uit de
 # batterij, en het telt overal als een lopende netlading. Eén watt en geen nul,
 # want nul betekent bij een netlading "het volle vermogen" (`doel_w` in coach.py).
@@ -1122,6 +1145,32 @@ def zon_marge(dagen: list, te_veel: float | None, te_weinig: float | None) -> fl
     kans = te_weinig / (te_veel + te_weinig)
     marge = kwantiel(verhoudingen, 1.0 - kans)
     return round(marge, 3) if marge > 1.0 + 1e-6 else None
+
+
+# Een voorzichtige zon vóór er vandaag iets gemeten is (v0.219.0), alleen als de ruil met de zon de reden is om
+# van het net te laden. In een klantwoning op 11-11-2026 laadde de Anker van 06:04 tot 08:05 op vol vermogen van het
+# net tegen € 0,43 tot € 0,55, om de middagzon tegen € 0,58 het net op te laten gaan; de zon kwam niet (0,24 van de
+# verwachting), en ochtenden als die gaven daar vaak 0,2 tot 0,7. De eigenaar op 12-11-2026: ja, en het kost de ruil
+# op een dag dat de zon wel komt. Het kwantiel van wat het dak gaf tegenover de verwachting, uit dezelfde dagen als
+# `zon_marge`, dus per woning en in de opslag.
+ZON_VOORZICHTIG = 0.25
+# Pas daaronder: een paar procent onder de verwachting is ruis, en dan blijft de ruil met de zon.
+ZON_VOORZICHTIG_ONDER = 0.9
+
+
+def zon_voorzichtig(dagen: list) -> float | None:
+    """Met hoeveel keer de verwachting een voorzichtige zon rekent, of None.
+
+    Alleen onder `ZON_VOORZICHTIG_ONDER`: zat de verwachting hier zelden te hoog, dan is er niets om voorzichtig
+    over te zijn. Onder
+    `ZON_DAGEN_MIN` dagen ook niets. Zie `ZON_VOORZICHTIG`; de coach gebruikt hem alleen vóór er vandaag zon gemeten
+    is, en alleen als het laden van het net met deze zon wegvalt.
+    """
+    verhoudingen = zon_verhoudingen(dagen)
+    if len(verhoudingen) < ZON_DAGEN_MIN:
+        return None
+    laag = kwantiel(verhoudingen, ZON_VOORZICHTIG)
+    return round(laag, 3) if laag < ZON_VOORZICHTIG_ONDER else None
 
 
 def zon_vergissing(
@@ -1452,6 +1501,7 @@ def plan_batterij(
     helpt: bool = False,
     auto_laden: list[tuple[datetime, datetime, float]] | None = None,
     laadruimte: list[tuple[datetime, datetime, float]] | None = None,
+    _tik: bool = False,
 ) -> Besluit:
     """Welke stand de batterij nu hoort te hebben.
 
@@ -1463,7 +1513,11 @@ def plan_batterij(
 
     `laadruimte` is per blok hoeveel watt de zekeringen die ze met een paal deelt haar
     laten (v0.164.0); zie `_met_laadruimte`.
+
+    `_tik` is voor `_een_tik`: de som met een procent minder, zonder die vraag nog eens te stellen.
     """
+    invoer = (now, prices, tariff, forecast, b, dict(enabled=enabled, paal_laadt=paal_laadt, helpt=helpt,
+                                                       auto_laden=auto_laden, laadruimte=laadruimte))
     if not enabled:
         return Besluit(
             STANDBY,
@@ -1626,8 +1680,11 @@ def plan_batterij(
     # Van het net laden en handelen: die volgen het plan zelf. Zie
     # `_rustig_vermogen`.
     if not vol and not piek:
+        houden = _houden_tot(b, som)
+        if houden is not None and not _tik and not _een_tik(*invoer):
+            houden = None
         vermogen, tot = _rustig_vermogen(
-            uren, b, piek=dicht, drempel=_overname_drempel(som, b), houden_tot=_houden_tot(b, som),
+            uren, b, piek=dicht, drempel=_overname_drempel(som, b), houden_tot=houden,
         )
         if vermogen > 0:
             rustig = vermogen < b.max_charge_w - 1.0
@@ -1642,7 +1699,8 @@ def plan_batterij(
             return Besluit(
                 NETLADEN,
                 power_w=vermogen,
-                reason=(
+                # Bij vasthouden geen prijszin (v0.219.0): dan koopt hij nu niets.
+                reason=hoe if _kw(vermogen) == _kw(0.0) and b.vol_voor is None else (
                     t("Stroom kost nu {prijs} en dat is goedkoper dan wat de batterij je straks bespaart.", prijs=_euro(koop))
                     + " " + hoe
                 ) if b.vol_voor is None else t(
