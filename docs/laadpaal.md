@@ -1620,6 +1620,13 @@ weer aangezet en nu laad hij 1 fases en allemaal ongein check alles en repareer"
 - zet de bewoner Snel uit, dan telt pas een 0 die de coach daarna ziet staan, en dan het maximum. Een limiet die nog
   van voor zijn keuze is zet Snel niet terug.
 
+**Het maximum als entiteit, het gemeten maximum apart (v0.217.1).** De herinnering van v0.212.0 bewaarde het
+maximum uit de ronde onder dezelfde naam (`_paal_max`) als de entiteit van het maximum hierboven. Na de eerste ronde
+stond er dus 16.0 waar `_number` een entiteit verwacht, en in een klantwoning viel op 12-11-2026 om 19:51 het nakijken
+van een limiet die de coach niet schreef om (`AttributeError`): die wissel werd niet verwerkt. Het gemeten maximum heet
+nu `_paal_ampere`. Het nagemaakte Home Assistant in de proeven valt sindsdien om op een getal of None in plaats van
+een entiteit, zoals het echte; tot dan gaf het stil niets terug, en daardoor zag proef 238 het niet. Proef 260.
+
 Proef 238 in test_coach.py. Wat er bij de eigenaar verder gebeurde (de coach en slim laden die om de limiet vechten, de
 fasemelding die de groep niet noemt) kwam in v0.198.0, hieronder.
 

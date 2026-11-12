@@ -166,6 +166,13 @@ onder `reload`.
 
 Proef 259 in test_coach.py; `growatt-opstart` en `growatt-opstart-nooit` in het virtuele huis.
 
+**Een integratie die iemand uitzette telt niet mee (v0.217.1).** In de woning van de eigenaar staat de integratie
+van de auto bewust uit, en het autoprofiel noemt nog een sensor ervan. Na de eerste uitrol van v0.217.0, op
+12-11-2026, stond die in de regel als "niet binnen 15 min": een waarschuwing, en dus een alarm, bij elke opstart, en
+een `None` in `startup_learned`. Een entry met `disabled_by` slaat de meting nu over, na een opstart en na een
+herladen, zoals `_async_online_herladen` dat al deed. Een integratie die niet laadt zonder dat iemand hem uitzette
+(`setup_retry`, `setup_error`) telt wel, want die hoort in die waarschuwing. Proef 261.
+
 ## Wat er nog open staat
 
 Zie de werkbon van 28-10-2026 in de privénotities:

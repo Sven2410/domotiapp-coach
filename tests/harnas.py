@@ -287,6 +287,9 @@ class Staten:
         self.stempels = {}
 
     def get(self, entity_id):
+        # Zoals Home Assistant zelf (`entity_id.lower()`): een getal of None in plaats van een entiteit valt om.
+        # Bij een klant op 12-11-2026 kreeg `_number` 16.0, en hier gaf dat stil None (v0.217.1).
+        entity_id.lower()
         waarde = self.waarden.get(entity_id)
         if waarde is None:
             return None
