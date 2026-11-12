@@ -499,6 +499,8 @@ INTEGRATIE_STIL = timedelta(hours=1)
 # controle (`INTEGRATIE_CONTROLE` na de start). Stil sinds de opstart: de laatste die stilviel deed dat
 # binnen dit venster rond de start van de coach, ervoor of erna.
 INTEGRATIE_OPSTART = timedelta(minutes=15)
+# Hoeveel opstarts en herladens per integratie de coach onthoudt (v0.217.0, `_async_opstart_leren`).
+OPSTART_LEREN = 5
 # Na een opstart eerst herstellen, dan melden (v0.203.0). In een klantwoning kwam op 04-11-2026 na een
 # stroomstoring de paal zonder netwerk op; de coach meldde hem na 1 en na 10 minuten als kritiek, en herlaadde
 # hem pas bij de eerste controle (`INTEGRATIE_CONTROLE`), waarna alles binnen drie seconden terug was. Wat bij
@@ -866,6 +868,12 @@ HUIS_VERVERSEN = timedelta(hours=1)
 # van salderen nog bij komt, eens per dag uit de statistiek van Home Assistant.
 JAARSALDO_VERVERSEN = timedelta(hours=24)
 ZON_VERVERSEN = timedelta(minutes=30)
+# Eerst herstellen, dan sturen (v0.217.0): wat een bron na een opstart of een storing niet gaf (een
+# schatting, een lege lijst, een fout), vraagt de coach na deze tijd opnieuw, en niet pas na de gewone
+# verversing. In een klantwoning op 12-11-2026 was de zonvoorspeller er een paar seconden na de coach;
+# die rekende daardoor een half uur met 6,3 kWh zon in plaats van 31,2, en zette een vak met laden van
+# het net in de Growatt. Zie `_ververs_om`.
+OPSTART_OPNIEUW = timedelta(minutes=1)
 # Hoeveel uur vooruit de zon uit de eigen opwek gaat (v0.151.0): tot morgenavond.
 ZON_VOORUIT_UREN = 40
 
@@ -1183,6 +1191,12 @@ def _tussen(van: datetime, tot: datetime) -> timedelta:
     if van.tzinfo is None and tot.tzinfo is None:
         return dt_util.as_utc(tot) - dt_util.as_utc(van)
     return tot.astimezone(timezone.utc) - van.astimezone(timezone.utc)
+
+
+def _ververs_om(now: datetime, gelukt: bool, gewoon: timedelta) -> datetime:
+    """Wanneer de coach een bron weer leest (v0.217.0): na een goede uitkomst over de gewone tijd,
+    anders over `OPSTART_OPNIEUW`. Een reserve houdt hij niet vast als de echte bron er weer is."""
+    return now + (gewoon if gelukt else OPSTART_OPNIEUW)
 
 
 def _naar_geheugen(moment: datetime | None) -> str | None:
@@ -1882,6 +1896,13 @@ class ChargerCoach:
         self._integratie_stil: dict[str, datetime] = {}
         # De eerste controle van deze start (v0.195.0); hoort bij deze start, dus niet in de opslag.
         self._integratie_start: datetime | None = None
+        # Hoe lang elke integratie na de opstart nodig had (v0.217.0): per config entry de integratie en
+        # na hoeveel seconden er iets van terugkwam, tot alles er is of `INTEGRATIE_OPSTART` voorbij is.
+        # En na een herladen door de coach: wanneer. Zie `_async_opstart_meten`.
+        self._opstart_entries: dict[str, dict[str, Any]] = {}
+        self._opstart_zon: float | None = None
+        self._opstart_gemeten = False
+        self._herladen_om: dict[str, datetime] = {}
         # De eerste ronde na het starten, voor de rust na een opstart (v0.203.0, `_opstart_rust`).
         self._opstart: datetime | None = None
         # Wanneer de laatste gemelde stekker terug was (v0.203.0, `STEKKER_NALOOP`).
@@ -1966,6 +1987,10 @@ class ChargerCoach:
         # een laadpunt: de zon is van de woning. Zie `_zon_gemeten`.
         self._zon_reeks: list[tuple[datetime, float, float, float]] = []
         self._zon_tot: datetime | None = None
+        # Wanneer hij de voorspeller weer vraagt terwijl hij met een schatting rekent, en of er een
+        # voorspeller is om te vragen (v0.217.0). Zie `_async_zonkromme`.
+        self._zon_opnieuw: datetime | None = None
+        self._zon_voorspeller: list[str] = []
         # Wie er op snelladen staat. Net als een akkoord niet bewaard over een
         # herstart heen en afgelopen zodra de kabel eruit gaat: snelladen is
         # iets voor nu, niet iets wat stilletjes blijft staan.
@@ -3677,21 +3702,11 @@ class ChargerCoach:
             return
         self._integratie_om = now + INTEGRATIE_CONTROLE
         try:
-            from homeassistant.helpers import entity_registry as er
-
-            register = er.async_get(self.hass)
-            entries: list[str] = []
-            per_entry: dict[str, list[str]] = {}
-            for entity_id in sorted(self._eigen_entiteiten(settings)):
-                rij = register.async_get(entity_id)
-                entry_id = getattr(rij, "config_entry_id", None) if rij is not None else None
-                if entry_id and entry_id not in entries:
-                    entries.append(entry_id)
-                if entry_id:
-                    per_entry.setdefault(entry_id, []).append(entity_id)
+            per_entry = self._per_integratie(settings)
         except Exception:  # noqa: BLE001 - zonder register geen controle
             _LOGGER.debug("kon de integraties niet nakijken", exc_info=True)
             return
+        entries = list(per_entry)
         inloggen = self._inloggen_gevraagd()
         for entry_id in entries:
             entry = self.hass.config_entries.async_get_entry(entry_id)
@@ -3728,6 +3743,7 @@ class ChargerCoach:
                 continue
             sinds = self._integratie_stuk.setdefault(entry_id, now)
             _LOGGER.warning("de integratie %s (%s) staat op %s; de coach herlaadt hem", naam, entry.domain, stand)
+            self._herladen_om[entry_id] = now
             try:
                 async with asyncio.timeout(INTEGRATIE_WACHT.total_seconds()):
                     await self.hass.config_entries.async_reload(entry_id)
@@ -3746,6 +3762,136 @@ class ChargerCoach:
                       "het doet.", naam=naam),
                     kritiek=True,
                 )
+
+    def _per_integratie(self, settings: dict[str, Any]) -> dict[str, list[str]]:
+        """Elke entiteit van de coach bij de config entry van haar integratie (v0.166.0)."""
+        from homeassistant.helpers import entity_registry as er
+
+        register = er.async_get(self.hass)
+        per_entry: dict[str, list[str]] = {}
+        for entity_id in sorted(self._eigen_entiteiten(settings)):
+            rij = register.async_get(entity_id)
+            entry_id = getattr(rij, "config_entry_id", None) if rij is not None else None
+            if entry_id:
+                per_entry.setdefault(entry_id, []).append(entity_id)
+        return per_entry
+
+    def _terug_sinds(self, entity_ids: list[str], vanaf: datetime) -> datetime | None:
+        """Wanneer er van deze entiteiten weer iets was, op of na `vanaf` (v0.217.0).
+
+        De vroegste `last_changed` van wat niet `unavailable` is; `unknown` telt als er, zoals bij
+        `_async_stil_herladen`. Was het er al voor `vanaf`, dan `vanaf`. None als er niets is.
+        """
+        momenten = []
+        for entity_id in entity_ids:
+            staat = self.hass.states.get(entity_id)
+            if staat is None or str(staat.state) == "unavailable":
+                continue
+            moment = dt_util.as_local(staat.last_changed).replace(tzinfo=None)
+            momenten.append(max(moment, vanaf))
+        return min(momenten) if momenten else None
+
+    async def _async_opstart_meten(self, settings: dict[str, Any], now: datetime) -> None:
+        """Hoe lang elke integratie na de opstart nodig heeft, en na een herladen (v0.217.0).
+
+        De eigenaar op 12-11-2026: "We moeten het zo bouwen dat hij leert van alle verschillende
+        merken en installaties". Per integratie achter de entiteiten van de coach (dus per merk: de
+        paal, de batterij, de auto, de meter, de prijzen) de seconden tussen de eerste ronde van de
+        coach en het moment dat er iets van terugkwam (`_terug_sinds`), en voor de zonvoorspeller de
+        eerste ronde met een echte kromme. Wat er bij de eerste ronde al was telt als 0. Zodra alles
+        er is, of na `INTEGRATIE_OPSTART`, één regel in het log en de uitkomst in de instellingen
+        (`startup_learned`, de laatste `OPSTART_LEREN` per integratie); wat er dan nog niet is, telt
+        als niet gekomen en geeft een waarschuwing. Na een herladen door de coach (v0.166.0,
+        v0.188.0) hetzelfde, vanaf het herladen.
+
+        In een klantwoning op 12-11-2026: de zonvoorspeller na ongeveer anderhalve minuut, de
+        batterij pas na een herladen, zestien minuten later.
+        """
+        if self._opstart is None:
+            return
+        if self._opstart_gemeten and not self._herladen_om:
+            return
+        try:
+            geleerd = self._opstart_tellen(settings, now)
+        except Exception:  # noqa: BLE001 - een meting mag een ronde niet kosten
+            _LOGGER.debug("kon niet meten hoe lang de integraties nodig hadden", exc_info=True)
+            return
+        if geleerd:
+            await self._async_opstart_leren(settings, geleerd)
+
+    def _opstart_tellen(self, settings: dict[str, Any], now: datetime) -> list[tuple[str, str, float | None]]:
+        """Het tellen van `_async_opstart_meten`: wat er deze ronde te leren is."""
+        per_entry = self._per_integratie(settings)
+        geleerd: list[tuple[str, str, float | None]] = []
+
+        for entry_id, om in list(self._herladen_om.items()):
+            entry = self.hass.config_entries.async_get_entry(entry_id)
+            terug = self._terug_sinds(per_entry.get(entry_id) or [], om)
+            if entry is None:
+                self._herladen_om.pop(entry_id, None)
+            elif terug is not None:
+                self._herladen_om.pop(entry_id, None)
+                seconden = round((min(terug, now) - om).total_seconds())
+                _LOGGER.info("de integratie %s meldt %s s na het herladen weer iets", entry.domain, seconden)
+                geleerd.append((entry.domain, "reload", seconden))
+            elif now - om >= INTEGRATIE_OPSTART:
+                self._herladen_om.pop(entry_id, None)
+                geleerd.append((entry.domain, "reload", None))
+
+        if not self._opstart_gemeten:
+            start = self._opstart
+            for entry_id, ids in per_entry.items():
+                entry = self.hass.config_entries.async_get_entry(entry_id)
+                if entry is None or entry.domain == DOMAIN:
+                    continue
+                rij = self._opstart_entries.setdefault(entry_id, {"bron": entry.domain, "s": None})
+                if rij["s"] is None:
+                    terug = self._terug_sinds(ids, start)
+                    if terug is not None:
+                        rij["s"] = round((min(terug, now) - start).total_seconds())
+            if self._zon_voorspeller and self._opstart_zon is None and not self._zon_geschat:
+                self._opstart_zon = round((now - start).total_seconds())
+            zon_open = bool(self._zon_voorspeller) and self._opstart_zon is None
+            open_ = zon_open or any(r["s"] is None for r in self._opstart_entries.values())
+            if not open_ or now - start >= INTEGRATIE_OPSTART:
+                self._opstart_gemeten = True
+                per_bron: dict[str, float | None] = {}
+                for rij in self._opstart_entries.values():
+                    # Twee entries van dezelfde integratie: de traagste telt.
+                    bron, s = rij["bron"], rij["s"]
+                    if bron in per_bron:
+                        oud = per_bron[bron]
+                        s = None if oud is None or s is None else max(oud, s)
+                    per_bron[bron] = s
+                if self._zon_voorspeller:
+                    per_bron["zon:" + "+".join(sorted(set(self._zon_voorspeller)))] = self._opstart_zon
+                delen = [
+                    f"{bron} na {s} s" if s is not None else f"{bron} niet binnen {round(INTEGRATIE_OPSTART.total_seconds() / 60)} min"
+                    for bron, s in sorted(per_bron.items())
+                ]
+                if delen:
+                    (_LOGGER.warning if None in per_bron.values() else _LOGGER.info)(
+                        "na de opstart: %s", ", ".join(delen))
+                geleerd.extend((bron, "startup", s) for bron, s in per_bron.items())
+        return geleerd
+
+    async def _async_opstart_leren(self, settings: dict[str, Any], geleerd: list[tuple[str, str, float | None]]) -> None:
+        """Wat `_async_opstart_meten` zag in de instellingen (`startup_learned`), per integratie de laatste
+        `OPSTART_LEREN` keer na een opstart en na een herladen. None is: niet binnen `INTEGRATIE_OPSTART`."""
+        rijen = {
+            str(r.get("source")): dict(r) for r in (settings.get("startup_learned") or [])
+            if isinstance(r, dict) and r.get("source")
+        }
+        for bron, soort, seconden in geleerd:
+            rij = rijen.setdefault(bron, {"source": bron})
+            rij[soort] = [*(rij.get(soort) or []), seconden][-OPSTART_LEREN:]
+        settings["startup_learned"] = list(rijen.values())
+        try:
+            saved = await async_get_store(self.hass).async_save({"startup_learned": settings["startup_learned"]})
+        except Exception:  # noqa: BLE001 - een gemiste meting is geen reden om te stoppen
+            _LOGGER.exception("kon niet bewaren hoe lang de integraties na de opstart nodig hadden")
+            return
+        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
 
     async def _async_stil_herladen(
         self, settings: dict[str, Any], entry: Any, entry_id: str, naam: str, entity_ids: list[str], now: datetime
@@ -3830,6 +3976,7 @@ class ChargerCoach:
             "unavailable%s; de coach herlaadt hem", naam, entry.domain, sinds.isoformat(timespec="minutes"),
             ", al sinds de opstart" if opstart else "",
         )
+        self._herladen_om[entry_id] = now
         try:
             async with asyncio.timeout(INTEGRATIE_WACHT.total_seconds()):
                 await self.hass.config_entries.async_reload(entry_id)
@@ -5123,6 +5270,7 @@ class ChargerCoach:
         await self._async_vriezerwacht(settings, moment)
         await self._async_altijd_aan(settings, moment, level)
         await self._async_zonkromme(settings, moment)
+        await self._async_opstart_meten(settings, moment)
         self._meter_bijhouden(settings, moment)
 
         # Een Growatt die een laadschema kan krijgen (v0.150.0) gaat door dezelfde
@@ -9778,6 +9926,9 @@ class ChargerCoach:
         if heeft is None or not heeft(GROWATT_DOMEIN, "read_ac_charge_times"):
             if heeft is not None and heeft(GROWATT_DOMEIN, "read_time_segments"):
                 info["soort"] = "min"
+            elif self._na_opstart(now):
+                # Vlak na een opstart kan de integratie haar acties nog niet hebben (v0.217.0).
+                info["over"] = OPSTART_OPNIEUW
             self._growatt_klaar_met_wachten(info)
             return info["soort"]
         apparaat = self._growatt_apparaat(device)
@@ -9799,6 +9950,10 @@ class ChargerCoach:
         elif heeft(GROWATT_DOMEIN, "read_time_segments"):
             info["soort"] = "min"
         return info["soort"]
+
+    def _na_opstart(self, now: datetime) -> bool:
+        """Of dit de eerste minuten na de start van de coach zijn (`INTEGRATIE_OPSTART`, v0.217.0)."""
+        return self._opstart is not None and now - self._opstart < INTEGRATIE_OPSTART
 
     def _growatt_klaar(self, device: dict[str, Any]) -> bool:
         """Of de Growatt-integratie er is: de accustand heeft een waarde (v0.162.0)."""
@@ -12000,7 +12155,9 @@ class ChargerCoach:
                 if cache.get(sleutel):
                     continue
                 vorige = self._nordpool_gevraagd.get((entity_id, sleutel))
-                if vorige is not None and now - vorige < NORDPOOL_OPNIEUW:
+                # De dag van morgen komt pas rond 13:00, en daarvoor is leeg gewoon nog niet; vandaag
+                # is er altijd, dus daar is leeg een dienst die er nog niet is (v0.217.0).
+                if vorige is not None and now < _ververs_om(vorige, dag != vandaag, NORDPOOL_OPNIEUW):
                     continue
                 self._nordpool_gevraagd[(entity_id, sleutel)] = now
                 rijen = await self._async_nordpool_vraag(entry_id, gebied, munt, sleutel)
@@ -12412,7 +12569,7 @@ class ChargerCoach:
         if self._jaarsaldo_tot is not None and now < self._jaarsaldo_tot:
             return
         self._jaarsaldo_tot = now + JAARSALDO_VERVERSEN
-        self._jaarsaldo = None
+        vorige, self._jaarsaldo = self._jaarsaldo, None
         contract = settings.get("contract") or {}
         vandaag = now.date()
         if not contract.get("netting") or vandaag >= NETTING_ENDS:
@@ -12450,7 +12607,11 @@ class ChargerCoach:
                     ) or {}
                 )
         except Exception as fout:  # noqa: BLE001 - zonder recorder geen balans
+            # Na een opstart is de recorder er soms nog niet: wat er was blijft, en over een minuut
+            # opnieuw (v0.217.0), niet pas morgen.
             _LOGGER.debug("kon de statistiek van de meter niet lezen: %s", fout)
+            self._jaarsaldo = vorige
+            self._jaarsaldo_tot = _ververs_om(now, False, JAARSALDO_VERVERSEN)
             return
 
         def som(deel: dict, lijst: list[str]) -> float:
@@ -12681,7 +12842,7 @@ class ChargerCoach:
         if self._schaal_tot is not None and now < self._schaal_tot:
             return
         self._schaal_tot = now + JAARSALDO_VERVERSEN
-        self._schaal = None
+        vorige, self._schaal = self._schaal, None
         contract = settings.get("contract") or {}
         velden = (contract.get("dynamic") if contract.get("type") == "dynamic" else contract.get("fixed")) or {}
         if velden.get("feed_in_costs_mode") != "schalen" or not velden.get("feed_in_scales"):
@@ -12689,7 +12850,10 @@ class ChargerCoach:
         try:
             s = (await self.async_afrekening(settings, now.date(), now.date() + timedelta(days=1), now)).get("schaal")
         except Exception:  # noqa: BLE001 - zonder schaal rekent hij gewoon door
+            # Wat er was blijft, en over een minuut opnieuw (v0.217.0).
             _LOGGER.exception("kon de schaal van de terugleverkosten niet uitrekenen")
+            self._schaal = vorige
+            self._schaal_tot = _ververs_om(now, False, JAARSALDO_VERVERSEN)
             return
         if not s or not s.get("compleet"):
             return
@@ -12819,7 +12983,9 @@ class ChargerCoach:
                 wanted, einde - HUIS_VENSTER, einde
             )
         except Exception:  # noqa: BLE001 - zonder geschiedenis rekent hij gewoon zonder
+            # Over een minuut opnieuw, niet pas over een uur (v0.217.0).
             _LOGGER.exception("kon de eigen geschiedenis niet lezen voor het huisverbruik")
+            self._huis_tot = _ververs_om(now, False, HUIS_VERVERSEN)
             return
 
         def kwartieren(entity_id: str | None) -> dict[int, float]:
@@ -12890,12 +13056,26 @@ class ChargerCoach:
         moment wérkelijk meet. Dat is precies wat hij deed voordat dit bestond.
         """
         if self._zon_tot is not None and now < self._zon_tot:
+            # Rekent hij met een schatting terwijl er een voorspeller is, dan vraagt hij die elke
+            # minuut opnieuw (v0.217.0): na een opstart antwoordt hij vaak een paar seconden na de
+            # coach. Zonder voorspeller verandert er niets, en de schatting uit de eigen opwek (een
+            # databaselezing) blijft eens per half uur.
+            if not self._zon_geschat or not self._zon_voorspeller:
+                return
+            if self._zon_opnieuw is not None and now < self._zon_opnieuw:
+                return
+            self._zon_opnieuw = now + OPSTART_OPNIEUW
+            kromme = await self._async_zon_voorspeld(settings)
+            if kromme:
+                self._zon_kwh, self._zon_geschat = kromme, False
+                self._zon_tot = now + ZON_VERVERSEN
+                _LOGGER.debug("zonverwachting van de voorspeller na een schatting")
             return
         self._zon_tot = now + ZON_VERVERSEN
+        self._zon_opnieuw = now + OPSTART_OPNIEUW
+        self._zon_voorspeller = await self._async_voorspeller(settings)
 
-        kromme = await self._async_zon_uit_dashboard()
-        if not kromme:
-            kromme = await self._async_zon_uit_integratie(settings)
+        kromme = await self._async_zon_voorspeld(settings)
         if kromme:
             self._zon_kwh, self._zon_geschat = kromme, False
             return
@@ -12910,6 +13090,38 @@ class ChargerCoach:
             if eigen:
                 sensoren = {**eigen, **sensoren}
         self._zon_kwh, self._zon_geschat = sensoren, True
+
+    async def _async_zon_voorspeld(self, settings: dict[str, Any]) -> dict[datetime, float]:
+        """De uurkromme van de voorspeller: uit het energiedashboard, anders via de zonsensoren."""
+        kromme = await self._async_zon_uit_dashboard()
+        if not kromme:
+            kromme = await self._async_zon_uit_integratie(settings)
+        return kromme
+
+    async def _async_voorspeller(self, settings: dict[str, Any]) -> list[str]:
+        """De integraties van de voorspellers die deze woning een uurkromme kunnen geven (v0.217.0).
+
+        In het energiedashboard, of achter de ingevulde zonsensoren. Ook als die integratie nog niet
+        geladen is: dat is na een opstart precies het geval waar het om gaat. Leeg zonder voorspeller.
+        """
+        entries: list[str] = []
+        try:
+            entries = await self._async_dashboard_voorspellers()
+        except Exception:  # noqa: BLE001 - zonder energiedashboard de sensoren
+            _LOGGER.debug("geen energiedashboard voor de zonverwachting", exc_info=True)
+        if not entries:
+            try:
+                entries = self._integratie_voorspellers(settings)
+            except Exception:  # noqa: BLE001 - zonder registratie geen voorspeller
+                return []
+        uit = []
+        for entry_id in dict.fromkeys(entries):
+            try:
+                entry = self.hass.config_entries.async_get_entry(entry_id)
+            except Exception:  # noqa: BLE001 - dan de entry zelf als naam
+                entry = None
+            uit.append(str(getattr(entry, "domain", None) or entry_id))
+        return uit
 
     async def _async_zon_uit_opwek(self, settings: dict[str, Any], now: datetime) -> dict[datetime, float]:
         """De zonverwachting uit de eigen opwek en het weer, zonder paneelgegevens (v0.151.0).
@@ -13010,19 +13222,22 @@ class ChargerCoach:
         vallen. Een zonverwachting is nuttig, niet noodzakelijk.
         """
         try:
-            from homeassistant.components.energy.data import async_get_manager
-
-            manager = await async_get_manager(self.hass)
-            entries = [
-                entry_id
-                for bron in (manager.data or {}).get("energy_sources") or []
-                if bron.get("type") == "solar"
-                for entry_id in bron.get("config_entry_solar_forecast") or []
-            ]
-            return await self._async_kromme_van(entries)
+            return await self._async_kromme_van(await self._async_dashboard_voorspellers())
         except Exception:  # noqa: BLE001 - een voorspelling is nuttig, niet noodzakelijk
             _LOGGER.debug("geen uurkromme uit het energiedashboard", exc_info=True)
             return {}
+
+    async def _async_dashboard_voorspellers(self) -> list[str]:
+        """De config entries van de zonvoorspellers in het energiedashboard."""
+        from homeassistant.components.energy.data import async_get_manager
+
+        manager = await async_get_manager(self.hass)
+        return [
+            entry_id
+            for bron in (manager.data or {}).get("energy_sources") or []
+            if bron.get("type") == "solar"
+            for entry_id in bron.get("config_entry_solar_forecast") or []
+        ]
 
     async def _async_zon_uit_integratie(self, settings: dict[str, Any]) -> dict[datetime, float]:
         """Dezelfde uurkromme, via de integratie achter de ingevulde zonsensoren.
@@ -13041,19 +13256,24 @@ class ChargerCoach:
         een integratie zonder energieplatform), dan blijft `_zon_uit_sensoren`.
         """
         try:
-            from homeassistant.helpers import entity_registry as er
-
-            register = er.async_get(self.hass)
-            bron = (settings.get("sources") or {}).get("solar_forecast") or {}
-            entries = []
-            for entity_id in bron.values():
-                rij = register.async_get(entity_id) if isinstance(entity_id, str) and entity_id else None
-                if rij is not None and rij.config_entry_id:
-                    entries.append(rij.config_entry_id)
+            entries = self._integratie_voorspellers(settings)
             return await self._async_kromme_van(entries) if entries else {}
         except Exception:  # noqa: BLE001 - een voorspelling is nuttig, niet noodzakelijk
             _LOGGER.debug("geen uurkromme via de zonsensoren", exc_info=True)
             return {}
+
+    def _integratie_voorspellers(self, settings: dict[str, Any]) -> list[str]:
+        """De config entries achter de ingevulde zonsensoren."""
+        from homeassistant.helpers import entity_registry as er
+
+        register = er.async_get(self.hass)
+        bron = (settings.get("sources") or {}).get("solar_forecast") or {}
+        entries = []
+        for entity_id in bron.values():
+            rij = register.async_get(entity_id) if isinstance(entity_id, str) and entity_id else None
+            if rij is not None and rij.config_entry_id:
+                entries.append(rij.config_entry_id)
+        return entries
 
     async def _async_kromme_van(self, entry_ids: list[str]) -> dict[datetime, float]:
         """De uurkromme van deze voorspellers samen, elk één keer, elk goed uitgelijnd.

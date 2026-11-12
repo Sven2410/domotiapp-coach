@@ -1945,7 +1945,8 @@ for naam, vl in V.items():
     # De zon die de verwachting niet zag (v0.194.0): zonder gemeten dagen, of met een reeks die te hoog zat, laadt
     # hij 's nachts van het net voor een zon die toch komt, en dan maakt de batterij de dag duurder (€ 1,59 tegen
     # € 1,45). Dat is precies wat die twee scenario's laten zien; met de gemeten dagen wordt het € 1,34.
-    zon_fout = naam in ("growatt-zon-onzeker-zonder", "growatt-zon-te-hoog")
+    # En een zonvoorspeller die na een herstart niet terugkomt (v0.217.0): dan de schatting uit een donkere week.
+    zon_fout = naam in ("growatt-zon-onzeker-zonder", "growatt-zon-te-hoog", "growatt-opstart-nooit")
     if bat.wekelijks_vol_dag is None and not nalopen and not zon_fout:
         controle(f"{naam}: de batterij maakt de dag niet duurder",
                  vl.bat_kosten_met <= vl.bat_kosten_zonder + 0.02,
@@ -1989,7 +1990,8 @@ for naam, vl in V.items():
               f"zonder batterij €{vl.bat_kosten_zonder:.2f}")
         # Een batterij met een vast verlies (v0.142.0) kent de optimizer niet: die rekent
         # met de wortel van `rte` per richting, en dan is zijn uitkomst geen optimum.
-        if bat.wekelijks_vol_dag is None and not bat.vast_ontladen_w:
+        # Een voorspeller die niet terugkomt (v0.217.0) laat zien wat de schatting kost; die kent de optimizer niet.
+        if bat.wekelijks_vol_dag is None and not bat.vast_ontladen_w and naam != "growatt-opstart-nooit":
             controle(f"{naam}: niet verder dan € 0,75 boven de optimizer",
                      vl.bat_kosten_met <= vl.bat_optimizer + 0.75,
                      f"coach {vl.bat_kosten_met:.2f}, optimizer {vl.bat_optimizer:.2f}")
@@ -2760,6 +2762,19 @@ if (vr := v("growatt-vreemd")) and (gz := v("growatt-zon")):
                  for w, aan in zip(vr.gw_schrijf, [x[1] for x in vr.gw_schrijf])), f"{schrijf_vr}")
     controle("growatt-vreemd: de accu laadt niet meer van het net dan zonder dat vak",
              abs(vr.bat_afname_kwh - gz.bat_afname_kwh) < 0.05, f"{vr.bat_afname_kwh:.2f} tegen {gz.bat_afname_kwh:.2f}")
+
+# Eerst herstellen, dan sturen (v0.217.0): na een herstart om 23:00 is de zonvoorspeller er een minuut later.
+# Bij de bouw: 5,95 kWh van het net in de accu en € 1,10, net als zonder herstart; komt hij niet terug,
+# dan rekent de coach met de schatting uit een donkere week: 14,88 kWh en € 2,52.
+if (vo := v("growatt-opstart")) and (vn := v("growatt-opstart-nooit")):
+    voor5 = [w for w in vo.gw_schrijf if w[0] < bat_moment(vo, "05:00")]
+    print(f"  growatt-opstart: {vo.bat_afname_kwh:.2f} kWh €{vo.bat_kosten_met:.2f}, nooit terug: "
+          f"{vn.bat_afname_kwh:.2f} kWh €{vn.bat_kosten_met:.2f}; {[(f'{w[0]:%a %H:%M}', w[2], w[3]) for w in voor5]}")
+    controle("growatt-opstart: de voorspeller een minuut later terug, dus voor het vak van 05:00 het plan met zijn zon",
+             voor5 and voor5[-1][3] == 32 and voor5[-1][4] == [("07:00", "09:00")], f"{voor5[-1:]}")
+    controle("growatt-opstart: veel minder van het net dan met alleen de schatting",
+             vo.bat_afname_kwh < vn.bat_afname_kwh - 5 and vo.bat_kosten_met < vn.bat_kosten_met - 1,
+             f"{vo.bat_afname_kwh:.2f} tegen {vn.bat_afname_kwh:.2f}")
 
 if (vl := v("growatt-zon")):
     print(f"  growatt-zon: {[(f'{t:%a %H:%M}', aan, pct, stop, vak) for t, aan, pct, stop, vak in vl.gw_schrijf]}")

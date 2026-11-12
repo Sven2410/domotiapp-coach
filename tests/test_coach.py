@@ -17713,6 +17713,332 @@ i258z, h258z, c258z, b258z = bouw248(paal={**LAADPAAL, "cars": [AUTO248z]})
 z258 = nacht248(i258z, c258z, VAN258, TOT258, {**LAADPAAL, "cars": [AUTO248z]})
 controle("zonder die velden: te laat zoals altijd", "dev-laadpaal" in c258z._te_laat, "")
 
+print("=== 259. eerst herstellen, dan sturen: een reserve niet vasthouden als de bron er weer is (v0.217.0) ===")
+# In een klantwoning op 12-11-2026 was de zonvoorspeller na een herstart een paar seconden na de coach
+# terug. De coach rekende een half uur met de schatting uit de eigen opwek (6,3 kWh in plaats van 31,2)
+# en zette een vak met laden van het net in de Growatt. De eigenaar: "laat dit dan ook alle andere fouten
+# oplossen". Dus elke bron die de coach ververst.
+T259 = dt.datetime(2026, 11, 12, 11, 22)
+FS259 = {"2026-11-12T13:00:00+00:00": 5610, "2026-11-12T14:00:00+00:00": 5130}
+
+
+def zon259(met_voorspeller, klaar_na):
+    """Een coach met een voorspeller in het energiedashboard die pas na `klaar_na` minuten een kromme geeft."""
+    inst = instellingen()
+    hass, _, coach = bouw(huis(), inst)
+    krommes = {"fs-1": {}}
+    bronnen = [{"type": "solar", "config_entry_solar_forecast": ["fs-1"]}] if met_voorspeller else []
+    mods, ingang, plat = nep111(krommes, {}, zonne_bronnen=bronnen)
+    hass.config_entries = types.SimpleNamespace(async_get_entry=lambda eid: ingang.get(eid))
+    opwek = []
+
+    async def uit_opwek(settings, now):
+        opwek.append(now)
+        return {now.replace(minute=0) + dt.timedelta(hours=h): 0.4 for h in range(2, 8)}
+
+    coach._async_zon_uit_opwek = uit_opwek
+    voorspeld = coach._async_zon_voorspeld
+    gevraagd = []
+
+    async def tel_voorspeld(settings):
+        gevraagd.append(1)
+        return await voorspeld(settings)
+
+    coach._async_zon_voorspeld = tel_voorspeld
+    stappen = []
+    sys.modules.update(mods)
+    try:
+        for m in range(0, 32):
+            if m == klaar_na:
+                krommes["fs-1"] = FS259
+            asyncio.run(coach._async_zonkromme(inst, T259 + dt.timedelta(minutes=m)))
+            stappen.append(coach._zon_geschat)
+            if m == 0:
+                # Een ronde tussendoor (een kabel wekt de coach): niet nog eens vragen.
+                asyncio.run(coach._async_zonkromme(inst, T259 + dt.timedelta(seconds=20)))
+        coach.gevraagd259 = len(gevraagd)
+    finally:
+        for k, v in oud111.items():
+            if v is None:
+                sys.modules.pop(k, None)
+            else:
+                sys.modules[k] = v
+    return coach, stappen, plat.gevraagd, opwek
+
+
+c259, stap259, vraag259, opwek259 = zon259(True, 2)
+print(f"  geschat per minuut: {stap259[:5]}, de voorspeller gevraagd: {len(vraag259)} keer, de opwek: {len(opwek259)} keer")
+controle("de voorspeller twee minuten later terug: na die twee minuten geen schatting meer",
+         stap259[:2] == [True, True] and stap259[2] is False and c259._zon_voorspeller == ["forecast_solar"], f"{stap259[:4]}")
+controle("met de kromme van de voorspeller, niet die uit de opwek",
+         abs(c259._zon_kwh.get(dt.datetime(2026, 11, 12, 12), 0) - 5.61) < 1e-9, f"{c259._zon_kwh}")
+controle("de schatting uit de opwek één keer gelezen, niet elke minuut", len(opwek259) == 1, f"{opwek259}")
+controle("met een kromme vraagt hij de voorspeller weer pas na een half uur, gerekend vanaf die kromme",
+         len(vraag259) == 3 and c259.gevraagd259 == 3 and stap259[-1] is False, f"{len(vraag259)} {c259.gevraagd259}")
+c259b, stap259b, vraag259b, opwek259b = zon259(False, 2)
+controle("zonder voorspeller: de schatting, en de opwek en de bronnen eens per half uur zoals altijd",
+         all(stap259b) and [o - T259 for o in opwek259b] == [dt.timedelta(0), dt.timedelta(minutes=30)]
+         and c259b._zon_voorspeller == [] and c259b.gevraagd259 == 2, f"{opwek259b} {c259b.gevraagd259}")
+c259c, stap259c, vraag259c, opwek259c = zon259(True, 99)
+controle("een voorspeller die niet terugkomt: elke minuut gevraagd, de schatting blijft, de opwek eens per half uur",
+         all(stap259c) and len(vraag259c) == 32 and len(opwek259c) == 2, f"{len(vraag259c)} {len(opwek259c)}")
+
+# Het huisverbruik: een leesfout houdt hem niet een uur leeg.
+inst259h = instellingen()
+_, _, c259h = bouw(huis(), inst259h)
+lees259 = {"n": 0}
+
+
+class Archief259:
+    async def async_lees(self, ids, start, einde):
+        lees259["n"] += 1
+        if lees259["n"] == 1:
+            raise RuntimeError("nog niet klaar")
+        return {e: kwartier(800.0) for e in ids}
+
+
+oud259a = coachmod.async_get_archive
+coachmod.async_get_archive = lambda hass: Archief259()
+try:
+    asyncio.run(c259h._async_huisverbruik(inst259h, T259))
+    tot259 = c259h._huis_tot
+    asyncio.run(c259h._async_huisverbruik(inst259h, T259 + dt.timedelta(seconds=30)))
+    asyncio.run(c259h._async_huisverbruik(inst259h, T259 + dt.timedelta(minutes=1)))
+finally:
+    coachmod.async_get_archive = oud259a
+controle("het huisverbruik: na een leesfout over een minuut opnieuw, en dan een verwachting",
+         tot259 == T259 + dt.timedelta(minutes=1) and lees259["n"] == 2 and c259h._huis_kwh
+         and c259h._huis_tot == T259 + dt.timedelta(minutes=1) + coachmod.HUIS_VERVERSEN, f"{tot259} {lees259} {c259h._huis_kwh}")
+
+# Het jaarsaldo: zonder recorder blijft wat er was, en over een minuut opnieuw in plaats van morgen.
+oud259r = {k: sys.modules.get(k) for k in ("homeassistant.components.recorder", "homeassistant.components.recorder.statistics")}
+try:
+    statistiek175((350.0, 170.0), (1300.0, 150.0))
+    coach175._jaarsaldo_tot = None
+    asyncio.run(coach175._async_jaarsaldo(inst175, NU175))
+    goed259 = coach175._jaarsaldo
+    stuk259 = types.ModuleType("homeassistant.components.recorder")
+
+    def geen_recorder(hass):
+        raise RuntimeError("de recorder is er nog niet")
+
+    stuk259.get_instance = geen_recorder
+    sys.modules["homeassistant.components.recorder"] = stuk259
+    coach175._jaarsaldo_tot = None
+    asyncio.run(coach175._async_jaarsaldo(inst175, NU175))
+    controle("het jaarsaldo: zonder recorder blijft het vorige, en over een minuut opnieuw",
+             coach175._jaarsaldo == goed259 and goed259 is not None
+             and coach175._jaarsaldo_tot == NU175 + dt.timedelta(minutes=1), f"{coach175._jaarsaldo} {coach175._jaarsaldo_tot}")
+    statistiek175((360.0, 170.0), (1300.0, 150.0))
+    asyncio.run(coach175._async_jaarsaldo(inst175, NU175 + dt.timedelta(minutes=1)))
+    controle("en lukt het dan, dan het nieuwe saldo voor een dag",
+             coach175._jaarsaldo["afname"] == 360.0
+             and coach175._jaarsaldo_tot == NU175 + dt.timedelta(minutes=1) + coachmod.JAARSALDO_VERVERSEN,
+             f"{coach175._jaarsaldo}")
+finally:
+    for k, v in oud259r.items():
+        if v is None:
+            sys.modules.pop(k, None)
+        else:
+            sys.modules[k] = v
+
+# De schaal van de terugleverkosten: hetzelfde.
+coach178._schaal_tot = None
+coach178.async_afrekening = afrekening178(450.0, 100.0)
+asyncio.run(coach178._async_schaal(inst178, NU178))
+schaal259 = coach178._schaal
+
+
+async def afrekening_stuk259(settings, van, tot, now=None):
+    raise RuntimeError("de recorder is er nog niet")
+
+
+coach178._schaal_tot = None
+coach178.async_afrekening = afrekening_stuk259
+asyncio.run(coach178._async_schaal(inst178, NU178))
+controle("de schaal: bij een fout blijft de vorige, en over een minuut opnieuw",
+         coach178._schaal == schaal259 and schaal259 is not None
+         and coach178._schaal_tot == NU178 + dt.timedelta(minutes=1), f"{coach178._schaal_tot}")
+
+# Nord Pool: vandaag leeg is een dienst die er nog niet is, morgen leeg is gewoon nog niet.
+leeg259 = {"vandaag": True}
+gevraagd259 = []
+
+
+async def dienst259(domein, dienst, data, blocking=False, return_response=False):
+    if (domein, dienst) == ("nordpool", "get_prices_for_date"):
+        gevraagd259.append(data["date"])
+        if data["date"] > NU115.date().isoformat() or leeg259["vandaag"]:
+            return {data["areas"][0]: []}
+        return {data["areas"][0]: nordpool_dienst115(data["date"])}
+    return None
+
+
+hass115.services.async_call = dienst259
+hass115.states.zet("sensor.frank_prijs", "unavailable")
+coach115._nordpool.clear()
+coach115._nordpool_gevraagd.clear()
+OCHTEND259 = dt.datetime.combine(NU115.date(), dt.time(9, 0))
+sys.modules["homeassistant.helpers.entity_registry"] = er115
+try:
+    asyncio.run(coach115._async_nordpool(inst115, OCHTEND259))
+    asyncio.run(coach115._async_nordpool(inst115, OCHTEND259 + dt.timedelta(seconds=30)))
+    na30_259 = list(gevraagd259)
+    leeg259["vandaag"] = False
+    asyncio.run(coach115._async_nordpool(inst115, OCHTEND259 + dt.timedelta(minutes=1)))
+    controle("Nord Pool: vandaag leeg, dan na een minuut opnieuw, en dan de prijzen",
+             len(na30_259) == 1 and len(gevraagd259) == 2
+             and bool(coach115._nordpool.get("sensor.np_prijs", {}).get(NU115.date().isoformat())), f"{gevraagd259}")
+    MIDDAG259 = dt.datetime.combine(NU115.date(), dt.time(14, 0))
+    gevraagd259.clear()
+    for m in (0, 1, 5, 10):
+        asyncio.run(coach115._async_nordpool(inst115, MIDDAG259 + dt.timedelta(minutes=m)))
+    controle("morgen nog leeg: elke tien minuten, zoals altijd", len(gevraagd259) == 2, f"{gevraagd259}")
+finally:
+    if oud115 is None:
+        sys.modules.pop("homeassistant.helpers.entity_registry", None)
+    else:
+        sys.modules["homeassistant.helpers.entity_registry"] = oud115
+
+# Het soort Growatt: vlak na de opstart heeft de integratie haar acties soms nog niet.
+_, _, c259g = bouw(huis(), instellingen())
+acties259 = {"er": False}
+c259g.hass.services.has_service = lambda domein, dienst: acties259["er"] and dienst == "read_ac_charge_times"
+GW259 = {"id": "dev-gw", "name": "Growatt", "entities": {}}
+c259g._opstart = T259
+asyncio.run(c259g._async_growatt_soort(GW259, T259))
+over259 = c259g._growatt["dev-gw"].get("over")
+c259g._growatt_apparaat = lambda device: "gw-1"
+
+
+async def lees259g(device):
+    return {"periods": []}
+
+
+c259g._async_growatt_lees = lees259g
+acties259["er"] = True
+soort259 = asyncio.run(c259g._async_growatt_soort(GW259, T259 + dt.timedelta(minutes=1)))
+controle("de Growatt zonder acties vlak na de opstart: over een minuut opnieuw, en dan stuurbaar",
+         over259 == dt.timedelta(minutes=1) and soort259 == "sph", f"{over259} {soort259}")
+_, _, c259g2 = bouw(huis(), instellingen())
+c259g2.hass.services.has_service = lambda domein, dienst: False
+c259g2._opstart = T259
+asyncio.run(c259g2._async_growatt_soort(GW259, T259 + dt.timedelta(minutes=20)))
+controle("en ruim na de opstart zonder acties: een uur, zoals een Growatt die het niet kan",
+         c259g2._growatt["dev-gw"].get("over") == coachmod.GROWATT_OPNIEUW, f"{c259g2._growatt}")
+
+print("  -- hoe lang elke integratie na de opstart nodig heeft --")
+# Twee accounts van hetzelfde merk: het tweede is er meteen, en dan telt het traagste.
+inst259m = instellingen(devices=[LAADPAAL, {"id": "dev-bat", "type": "battery", "name": "Batterij",
+                                            "entities": {"soc": "sensor.bat_soc", "power": "sensor.bat_w"}}])
+bij259 = {LAADPAAL["entities"]["status"]: "e-paal", "sensor.bat_soc": "e-bat", "sensor.bat_w": "e-bat2"}
+entries259 = {"e-paal": types.SimpleNamespace(domain="paalmerk"), "e-bat": types.SimpleNamespace(domain="accumerk"),
+              "e-bat2": types.SimpleNamespace(domain="accumerk")}
+er259 = types.ModuleType("homeassistant.helpers.entity_registry")
+er259.async_get = lambda hass: types.SimpleNamespace(
+    async_get=lambda eid: types.SimpleNamespace(config_entry_id=bij259[eid]) if eid in bij259 else None)
+
+
+def meet259(hass, coach, inst, van, tot, terug=None, zon_na=None):
+    """Elke minuut een meting; de accu komt `terug` seconden na `van` terug, de zon na `zon_na` minuten."""
+    oud = sys.modules.get("homeassistant.helpers.entity_registry")
+    sys.modules["homeassistant.helpers.entity_registry"] = er259
+    try:
+        for m in range(van, tot):
+            nu = T259 + dt.timedelta(minutes=m)
+            if terug is not None and nu >= T259 + dt.timedelta(seconds=terug):
+                hass.states.zet("sensor.bat_soc", "50", last_updated=(T259 + dt.timedelta(seconds=terug)).replace(tzinfo=dt.timezone.utc))
+            if zon_na is not None:
+                coach._zon_geschat = m < zon_na
+            asyncio.run(coach._async_opstart_meten(inst, nu))
+    finally:
+        if oud is None:
+            sys.modules.pop("homeassistant.helpers.entity_registry", None)
+        else:
+            sys.modules["homeassistant.helpers.entity_registry"] = oud
+
+
+def bouw259(inst):
+    waarden = {**huis(), "sensor.bat_soc": "unavailable"}
+    hass, store, coach = bouw(waarden, inst)
+    for entiteit, waarde in ((LAADPAAL["entities"]["status"], "disconnected"), ("sensor.bat_w", "0")):
+        hass.states.zet(entiteit, waarde, last_updated=(T259 - dt.timedelta(hours=3)).replace(tzinfo=dt.timezone.utc))
+    hass.config_entries = types.SimpleNamespace(async_get_entry=lambda eid: entries259.get(eid))
+    coach._opstart = T259
+    coach._zon_voorspeller = ["forecast_solar"]
+    coach._zon_geschat = True
+    return hass, store, coach
+
+
+class Log259(logging.Handler):
+    def __init__(self):
+        super().__init__(logging.INFO)
+        self.regels = []
+
+    def emit(self, record):
+        if "opstart" in record.getMessage() or "herladen" in record.getMessage():
+            self.regels.append((record.levelname, record.getMessage()))
+
+
+log259 = Log259()
+coachmod._LOGGER.addHandler(log259)
+oudniveau259 = coachmod._LOGGER.level
+coachmod._LOGGER.setLevel(logging.INFO)
+logging.disable(logging.NOTSET)  # het harnas zet het log uit
+try:
+    h259m, s259m, c259m = bouw259(inst259m)
+    meet259(h259m, c259m, inst259m, 0, 6, terug=150, zon_na=2)
+    print(f"  {log259.regels}")
+    geleerd259 = {r["source"]: r for r in s259m.instellingen.get("startup_learned") or []}
+    controle("de paal was er al (0 s), de accu na 150 s, de zonvoorspeller na 2 minuten",
+             geleerd259.get("paalmerk", {}).get("startup") == [0] and geleerd259.get("accumerk", {}).get("startup") == [150]
+             and geleerd259.get("zon:forecast_solar", {}).get("startup") == [120], f"{geleerd259}")
+    controle("zodra alles er is één regel in het log, als info",
+             log259.regels == [("INFO", "na de opstart: accumerk na 150 s, paalmerk na 0 s, zon:forecast_solar na 120 s")],
+             f"{log259.regels}")
+    meet259(h259m, c259m, inst259m, 6, 20, terug=150, zon_na=2)
+    controle("daarna meet hij niet nog eens", len(log259.regels) == 1
+             and geleerd259["accumerk"]["startup"] == [150], f"{log259.regels}")
+
+    # Na een herladen door de coach: vanaf het herladen.
+    h259m.states.zet("sensor.bat_soc", "unavailable")
+    c259m._herladen_om["e-bat"] = T259 + dt.timedelta(minutes=20)
+    meet259(h259m, c259m, inst259m, 20, 22)
+    meet259(h259m, c259m, inst259m, 22, 23, terug=20 * 60 + 40)
+    geleerd259 = {r["source"]: r for r in s259m.instellingen.get("startup_learned") or []}
+    controle("na een herladen: na 40 s weer iets, apart bewaard", geleerd259["accumerk"].get("reload") == [40]
+             and not c259m._herladen_om and ("INFO", "de integratie accumerk meldt 40 s na het herladen weer iets") in log259.regels,
+             f"{geleerd259['accumerk']} {log259.regels[-1:]}")
+
+    # Een herstart: een nieuwe coach met dezelfde opslag, en een accu die niet binnen het kwartier komt.
+    log259.regels.clear()
+    hass259n = NepHass({**huis(), "sensor.bat_soc": "unavailable"})
+    hass259n.data["domotiapp_coach"] = {"store": s259m}
+    for entiteit, waarde in ((LAADPAAL["entities"]["status"], "disconnected"), ("sensor.bat_w", "0")):
+        hass259n.states.zet(entiteit, waarde, last_updated=(T259 - dt.timedelta(hours=3)).replace(tzinfo=dt.timezone.utc))
+    hass259n.config_entries = h259m.config_entries
+    c259n = coachmod.ChargerCoach(hass259n)
+    c259n._opstart = T259
+    meet259(hass259n, c259n, s259m.instellingen, 0, 16)
+    geleerd259 = {r["source"]: r for r in s259m.instellingen.get("startup_learned") or []}
+    controle("na een herstart erbij, en een accu die niet binnen het kwartier kwam als niet gekomen, met een waarschuwing",
+             geleerd259["accumerk"]["startup"] == [150, None] and geleerd259["paalmerk"]["startup"] == [0, 0]
+             and geleerd259["accumerk"].get("reload") == [40]
+             and log259.regels == [("WARNING", "na de opstart: accumerk niet binnen 15 min, paalmerk na 0 s")],
+             f"{geleerd259} {log259.regels}")
+    controle("zonder voorspeller geen regel voor de zon", "zon:forecast_solar" in geleerd259
+             and len(geleerd259["zon:forecast_solar"]["startup"]) == 1, f"{geleerd259}")
+    for keer in range(5):
+        c259n._opstart_gemeten = False
+        c259n._opstart_entries.clear()
+        meet259(hass259n, c259n, s259m.instellingen, 16, 17)
+    geleerd259 = {r["source"]: r for r in s259m.instellingen.get("startup_learned") or []}
+    controle("de laatste vijf per integratie", len(geleerd259["paalmerk"]["startup"]) == 5, f"{geleerd259['paalmerk']}")
+finally:
+    coachmod._LOGGER.removeHandler(log259)
+    coachmod._LOGGER.setLevel(oudniveau259)
+    logging.disable(logging.WARNING)
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

@@ -770,6 +770,10 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
     # Wat een auto per dag verbruikte, in procent van de accu (v0.212.0): {device, car, days: {datum: procent}},
     # over de laatste acht weken. Voor de slimme herinnering om hem aan te sluiten; zie `_async_autoverbruik`.
     "car_usage": [],
+    # Hoe lang elke integratie na een opstart en na een herladen nodig had, in seconden (v0.217.0):
+    # {source, startup: [...], reload: [...]}, de laatste vijf; None is niet binnen een kwartier.
+    # Zie `_async_opstart_meten`.
+    "startup_learned": [],
     # Wat de coach bij een echte beurt mat van een programma-apparaat: per
     # apparaat en per programma de duur, het verbruik, de piek en het verloop
     # (watt per vijf minuten vanaf de start), als lopend gemiddelde over de
