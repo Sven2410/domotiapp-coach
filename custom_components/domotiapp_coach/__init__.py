@@ -20,7 +20,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.loader import async_get_integration
 
-from . import report, taal, websocket
+from . import bijlagen, report, taal, websocket
 from .archive import async_get_archive
 from .coach import async_get_coach
 from .monitor import LoadMonitor
@@ -57,6 +57,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     _async_register_websocket(hass)
     report.async_register(hass)
+    bijlagen.async_register(hass)
     await _async_register_static_path(hass, version)
     await _async_register_panel(hass, version)
     await _async_start_monitor(hass)

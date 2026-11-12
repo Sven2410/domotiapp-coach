@@ -15,6 +15,7 @@ het paneel, plus de zekeringmelding van monitor.py:
   besluit    elk besluit van de coach; standaard uit, want dat zijn er veel
   belasting  de aansluiting wordt te zwaar belast
   herinnering  de auto hangt niet aan de paal en heeft te weinig (v0.212.0)
+  tickets    DomotiTech antwoordde op een vraag aan de bot (v0.220.0)
 
 Een soort die er bij een persoon nog niet staat, telt zoals bij een nieuwe
 persoon (`STANDAARD_SOORTEN`). Zo krijgt wie er al stond de herinnering ook,
@@ -35,7 +36,7 @@ import copy
 import secrets
 from typing import Any
 
-SOORTEN: tuple[str, ...] = ("kritiek", "melding", "besluit", "belasting", "herinnering")
+SOORTEN: tuple[str, ...] = ("kritiek", "melding", "besluit", "belasting", "herinnering", "tickets")
 
 # Wat een nieuwe persoon krijgt. Besluiten staan uit: dat is wat de coach elke
 # paar minuten doet, en niemand wil daar 's nachts een telefoon van horen.
@@ -45,6 +46,7 @@ STANDAARD_SOORTEN: dict[str, bool] = {
     "besluit": False,
     "belasting": True,
     "herinnering": True,
+    "tickets": True,
 }
 
 

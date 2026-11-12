@@ -268,6 +268,19 @@ class DacHeader extends DacElement {
     this.$("#berichten").setAttribute("aria-label", this.ongelezen_ ? t("Berichten, {n} ongelezen", { n: this.ongelezen_ }) : t("Berichten"));
   }
 
+  /** Hoeveel tickets een antwoord hebben dat je nog niet las (v0.220.0). */
+  set botOngelezen(aantal) {
+    this.botOngelezen_ = Number(aantal) || 0;
+    this.paintBot_();
+  }
+
+  paintBot_() {
+    const teller = this.rendered_ ? this.$("#bot-teller") : null;
+    if (!teller) return;
+    teller.hidden = !this.botOngelezen_;
+    teller.textContent = this.botOngelezen_ > 9 ? "9+" : String(this.botOngelezen_ || "");
+  }
+
   /** Rebuild the bar when the user's rights become known. */
   set isAdmin(value) {
     const next = value !== false;
@@ -308,6 +321,10 @@ class DacHeader extends DacElement {
         <div class="actions">
           <!-- De berichtenbox (v0.130.0). Het getal is een <i> en geen <span>:
                op een smal scherm verdwijnt de tekst van een knop hier. -->
+          <!-- De DomotiTech Bot (v0.220.0), met een stip zolang er een antwoord is dat je nog niet las. -->
+          <button class="ghost bel" type="button" id="bot" title="${t("Vraag het de DomotiTech Bot")}" aria-label="${t("Vraag het de DomotiTech Bot")}">
+            ${icons.chat}<span>${t("Vraag het de bot")}</span><i class="teller" id="bot-teller" hidden></i>
+          </button>
           <button class="ghost bel" type="button" id="berichten" title="${t("Berichten")}" aria-label="${t("Berichten")}">
             ${icons.bell}<span>${t("Berichten")}</span><i class="teller" id="teller" hidden></i>
           </button>
@@ -322,7 +339,9 @@ class DacHeader extends DacElement {
   afterRender() {
     this.$("#home").addEventListener("click", () => this.fire("dac-home"));
     this.$("#berichten").addEventListener("click", () => this.fire("dac-berichten"));
+    this.$("#bot").addEventListener("click", () => this.fire("dac-bot"));
     this.paintTeller_();
+    this.paintBot_();
 
     for (const pill of this.$$("button.pill")) {
       pill.addEventListener("click", () =>

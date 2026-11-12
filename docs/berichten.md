@@ -59,3 +59,43 @@ bovenaan, met "Gelezen" per bericht en "Alles gelezen" bij twee of meer
 `meterstand_volgende` in berichten.py en `volgendeMeterstand` in views/notifications.js (de
 "volgende keer" onder het veld). Proeven: proef 170 in test_coach.py en "de berichtenbox" in
 test_rapport.mjs, met dezelfde gevallen.
+
+## Vraag het de DomotiTech Bot: het gesprek, tickets en foto's (v0.220.0)
+
+De eigenaar op 12-11-2026: "Kunnen we niet een soort ticket systeem maken dat klanten aanvraag kunnen doen en ook
+gewoon normale vragen kunnen stellen [...] Ik wil het centraal houden dus het moet in een popup komen zoals Vraag het de
+DomotiTech Bot snap je? Alles in HA". En: "Lovelace moet een eigen kaart hebben en dat moet hetzelfde zijn in de
+coach". Op 13-11-2026, nog voor de uitgave: "Gewoon een vraag stellen over de installatie en echt een ticket aan maken
+zijn aparte dingen", met de vragen als één doorlopende chat en een ticket met een soort en een foto.
+
+- **De knop** Vraag het de bot staat in de kop van het paneel, naast Berichten, met een stip zolang er een antwoord
+  is dat je nog niet las, in het gesprek en de tickets samen (`ongelezenTickets` in tickets-sheet.js). Het venster
+  heeft twee tabbladen: **Vragen**, het gesprek met onderaan het veld, en **Tickets**, de lijst (nieuwste eerst,
+  met nummer, soort, stand en tijd), een gesprek per ticket, en Nieuw ticket: Storing of Aanvraag, tekst, en tot vier
+  foto's. Tekst is altijd tekst.
+- **Het gesprek** is één doorlopende chat per huis, met de vorm van een ticket: `id` 0, soort `vraag`, zonder stand
+  of onderwerp. Het bestaat altijd. Een vraag is `reply` op 0, een antwoord `answer` op 0; hoogstens 60 berichten per
+  uur per gebruiker. `list` en `subscribe` geven het apart, als `gesprek`, met de laatste 100 berichten.
+- **Een ticket** is een storing of een aanvraag, met een nummer per huis dat nooit terugkomt, een onderwerp uit de
+  eerste regel (80 tekens), 1 tot 4000 tekens (leeg mag met een foto), hoogstens 20 nieuwe per uur per gebruiker; een
+  reactie op een ticket dat klaar was zet het terug op nieuw.
+- **Foto's** gaan over HTTP (bijlagen.py): `POST /api/domotiapp_coach/tickets/bijlage` (ingelogd, veld `bestand`,
+  jpeg, png of webp, gekeurd op de eerste bytes, hoogstens 10 MB) en `GET .../bijlage/<id>`. Het paneel verkleint vooraf
+  tot een JPEG van hoogstens 2000 px en bekijkt ze met een ondertekend pad (`auth/sign_path`). Ze staan in
+  `.storage/domotiapp_coach_bijlagen/`, dus ze overleven een herstart en zitten in de back-up; wat na een uur nog aan
+  geen bericht hangt gaat weg. Alleen bij tickets, niet in het gesprek.
+- **De opslag**: `TicketsStore` in storage.py (`domotiapp_coach.tickets`), na elke wijziging weggeschreven, één
+  wijziging tegelijk. Wat een wijziging is staat in tickets.py, dat Home Assistant niet kent.
+- **De websocket**, `domotiapp_coach/tickets/`: `list`, `subscribe`, `new`, `reply`, `read` voor elke gebruiker
+  (`new` en `reply` niet voor een systeemgebruiker), `answer` en `set_state` alleen voor een beheerder. `subscribe`
+  stuurt eerst het gesprek en de tickets met het contract als event, daarna elk ticket dat verandert (het gesprek met
+  `id` 0). Een fout komt met een code en een zin in de taal van de installatie.
+- **De gebeurtenis** `domotiapp_coach_ticket` bij een vraag, een nieuw ticket, een reactie en een antwoord, met
+  `ticket_id`, `bericht_id`, `van`, `soort`, `stand` (leeg bij het gesprek) en `bijlagen` (het aantal foto's).
+- **Na een antwoord** een pushmelding naar wie de soort Antwoorden van DomotiTech aan heeft (`tickets` in
+  ontvangers.py, standaard aan): "DomotiTech heeft je vraag beantwoord" in het gesprek, "DomotiTech heeft geantwoord op
+  je vraag #12" bij een ticket. Tikken opent het dashboard.
+- **Het contract** met de kaart van DomotiApp Lovelace is `CONTRACT` in tickets.py (1): toevoegen mag, hernoemen of
+  weghalen alleen met een hoger getal. De standen zijn `nieuw`, `in_behandeling`, `bij_beheerder` en `klaar`.
+
+Proef 264 en 265 in test_coach.py; de stip, de lijst, het gesprek en de foto in test_rapport.mjs.

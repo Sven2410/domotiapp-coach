@@ -20,7 +20,7 @@ import { DacElement, define } from "./src/base.js";
 import { StateFeed } from "./src/state-feed.js";
 import { setLight } from "./src/theme.js";
 import { zetHuisZone } from "./src/format.js";
-import { kiesTaal, taal } from "./src/i18n.js";
+import { kiesTaal, t, taal } from "./src/i18n.js";
 
 // De taal van de vorige keer (v0.139.0), zodat het eerste beeld al in de goede taal staat
 // en niet eerst Nederlands en dan Engels. Zonder opslag in de browser: automatisch.
@@ -36,6 +36,7 @@ import { volgCoach } from "./src/data-source.js";
 import { navItemsFor } from "./src/header.js";
 import "./src/header.js";
 import { ongelezen } from "./src/berichten-sheet.js";
+import { ongelezenTickets } from "./src/tickets-sheet.js";
 import "./src/views/overview.js";
 import "./src/views/history.js";
 import "./src/views/notifications.js";
@@ -171,10 +172,69 @@ class DomotiAppCoachPanel extends DacElement {
 
     // De berichtenbox (v0.130.0): een keer ophalen, dan volgen.
     this.laadBerichten_();
+    if (!this.ticketsOff_) this.volgTickets_();
     try {
       this.berichtenOff_ = await volgCoach(this.hass_, "berichten", (data) => this.zetBerichten_(data?.items));
     } catch (error) {
       // Een coach van voor v0.130.0 kent dit niet; dan blijft het belletje stil.
+    }
+  }
+
+  /** De tickets voor de DomotiTech Bot (v0.220.0): eerst de lijst, daarna elk ticket dat verandert. */
+  async volgTickets_() {
+    try {
+      this.ticketsOff_ = await this.hass_.connection.subscribeMessage((data) => {
+        if (Array.isArray(data?.tickets)) {
+          this.tickets_ = data.tickets;
+          this.gesprek_ = data.gesprek ?? null;
+        } else if (data?.ticket) this.zetTicket_(data.ticket);
+        this.zetTickets_();
+      }, { type: "domotiapp_coach/tickets/subscribe" });
+    } catch (error) {
+      // Een coach van voor v0.220.0 kent dit niet; dan blijft de knop zonder stip.
+    }
+  }
+
+  /** Eén ticket of het gesprek (id 0) dat veranderde. */
+  zetTicket_(ticket) {
+    if (ticket?.id === 0) this.gesprek_ = ticket;
+    else if (ticket?.id != null) this.tickets_ = [ticket, ...(this.tickets_ ?? []).filter((tk) => tk.id !== ticket.id)];
+  }
+
+  zetTickets_() {
+    if (!this.rendered_ || !this.tickets_) return;
+    const wie = this.hass_?.user?.id ?? "";
+    this.$("dac-header").botOngelezen = ongelezenTickets(this.tickets_, wie, this.gesprek_);
+    const sheet = this.$("dac-tickets-sheet");
+    sheet.userId = wie;
+    sheet.uploader = (blob) => this.fotoUploaden_(blob);
+    sheet.fotoAdres = async (id) => (await this.hass_.callWS({
+      type: "auth/sign_path", path: `/api/domotiapp_coach/tickets/bijlage/${id}`, expires: 3600,
+    })).path;
+    sheet.tickets = this.tickets_;
+    sheet.gesprek = this.gesprek_;
+  }
+
+  /** Een foto naar de coach (v0.220.0); het antwoord is wat een ticket in `bijlagen` meeneemt. */
+  async fotoUploaden_(blob) {
+    const formulier = new FormData();
+    formulier.append("bestand", blob, "foto.jpg");
+    const antwoord = await this.hass_.fetchWithAuth("/api/domotiapp_coach/tickets/bijlage", { method: "POST", body: formulier });
+    const uit = await antwoord.json().catch(() => ({}));
+    if (!antwoord.ok) throw new Error(uit?.message || t("De foto kon niet mee."));
+    return uit;
+  }
+
+  async ticket_(soort, data) {
+    try {
+      const uit = await this.hass_.callWS({ type: `domotiapp_coach/tickets/${soort}`, ...data });
+      if (uit?.id != null) {
+        this.zetTicket_(uit);
+        this.zetTickets_();
+      }
+    } catch (error) {
+      // De zin van de coach, in de taal van de installatie (tickets.py).
+      this.$("dac-tickets-sheet").fout = error?.message || t("Versturen lukte niet.");
     }
   }
 
@@ -236,6 +296,8 @@ class DomotiAppCoachPanel extends DacElement {
     this.verbindKop_(kop);
     this.$("dac-berichten-sheet").replaceWith(document.createElement("dac-berichten-sheet"));
     if (this.berichten_) this.zetBerichten_(this.berichten_);
+    this.$("dac-tickets-sheet").replaceWith(document.createElement("dac-tickets-sheet"));
+    this.zetTickets_();
     this.syncRoute_();
   }
 
@@ -248,6 +310,7 @@ class DomotiAppCoachPanel extends DacElement {
         <dac-header></dac-header>
         <main id="main"></main>
         <dac-berichten-sheet></dac-berichten-sheet>
+        <dac-tickets-sheet></dac-tickets-sheet>
       </div>
     `;
   }
@@ -259,6 +322,7 @@ class DomotiAppCoachPanel extends DacElement {
     header.active = this.active_;
     header.addEventListener("dac-home", () => this.goHome_());
     header.addEventListener("dac-berichten", () => this.$("dac-berichten-sheet").open());
+    header.addEventListener("dac-bot", () => this.$("dac-tickets-sheet").open());
   }
 
   afterRender() {
@@ -267,7 +331,15 @@ class DomotiAppCoachPanel extends DacElement {
     // sends the same event, and it has to be routed the same way.
     this.addEventListener("dac-navigate", (ev) => this.navigate_(ev.detail.id));
     this.addEventListener("dac-bericht-gelezen", (ev) => this.berichtGelezen_(ev.detail?.id ?? null));
+    this.addEventListener("dac-ticket-nieuw", (ev) => this.ticket_("new", {
+      soort: ev.detail.soort, tekst: ev.detail.tekst, bijlagen: ev.detail.bijlagen ?? [],
+    }));
+    this.addEventListener("dac-ticket-reageer", (ev) => this.ticket_("reply", {
+      ticket_id: ev.detail.id, tekst: ev.detail.tekst, bijlagen: ev.detail.bijlagen ?? [],
+    }));
+    this.addEventListener("dac-ticket-gelezen", (ev) => this.ticket_("read", { ticket_id: ev.detail.id }));
     if (this.berichten_) this.zetBerichten_(this.berichten_);
+    this.zetTickets_();
     // Deliberately no button that opens Home Assistant's sidebar. Customers run
     // Kiosk Mode precisely so they cannot get to the rest of the system, and a
     // hamburger in our own header handed it back to them.

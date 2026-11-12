@@ -46,6 +46,13 @@ ZON_VERSION: Final = 1
 ZON_BEWAAR_DAGEN: Final = 30
 BERICHTEN_MAX: Final = 200
 EVENT_BERICHTEN: Final = f"{DOMAIN}_berichten"
+# De tickets voor de DomotiTech Bot (v0.220.0, `TicketsStore`, tickets.py). `EVENT_TICKET` is de afspraak met wie
+# de vragen beantwoordt (bij een nieuw ticket, een reactie en een antwoord); `EVENT_TICKET_BIJGEWERKT` draagt het
+# hele ticket bij elke wijziging, voor `tickets/subscribe`.
+TICKETS_KEY: Final = f"{DOMAIN}.tickets"
+TICKETS_VERSION: Final = 1
+EVENT_TICKET: Final = f"{DOMAIN}_ticket"
+EVENT_TICKET_BIJGEWERKT: Final = f"{DOMAIN}_ticket_updated"
 
 # Wat de coach onthoudt over een herstart heen (v0.172.0, `GeheugenStore`): per sleutel
 # een klein stuk van een lopende sessie. Een sleutel die langer dan `GEHEUGEN_MAX` niet

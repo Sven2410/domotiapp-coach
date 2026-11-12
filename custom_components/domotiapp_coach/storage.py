@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+import asyncio
 import copy
 from typing import Any
 
@@ -42,6 +43,8 @@ from .const import (
     MELDINGEN_VERSION,
     STORAGE_KEY,
     STORAGE_VERSION,
+    TICKETS_KEY,
+    TICKETS_VERSION,
 )
 from .taal import t
 
@@ -511,6 +514,44 @@ class BerichtenStore:
         return [dict(item) for item in items]
 
 
+class TicketsStore:
+    """De tickets voor de DomotiTech Bot (v0.220.0), na elke wijziging meteen weggeschreven.
+
+    Een herstart van Home Assistant verliest geen ticket en geen bericht. Wat een wijziging is staat in tickets.py;
+    hier alleen het laden, één wijziging tegelijk (`async_wijzig`), en het wegschrijven.
+    """
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._store: Store[dict[str, Any]] = Store(hass, TICKETS_VERSION, TICKETS_KEY)
+        self._data: dict[str, Any] | None = None
+        self._slot = asyncio.Lock()
+
+    async def _async_laden(self) -> dict[str, Any]:
+        if self._data is None:
+            from .tickets import heel, leeg
+
+            data = await self._store.async_load()
+            self._data = heel(data) if isinstance(data, dict) and isinstance(data.get("tickets"), list) else leeg()
+        return self._data
+
+    async def async_data(self) -> dict[str, Any]:
+        """Een kopie van alles, om te lezen."""
+        return copy.deepcopy(await self._async_laden())
+
+    async def async_wijzig(self, wijziging: Any) -> Any:
+        """`wijziging(data)` op het echte geheel, en dan meteen wegschrijven; wat hij teruggeeft, als kopie.
+
+        Gaat de wijziging mis (een `TicketFout`), dan blijft alles zoals het was.
+        """
+        async with self._slot:
+            data = await self._async_laden()
+            proef = copy.deepcopy(data)
+            uitkomst = wijziging(proef)
+            await self._store.async_save(proef)
+            self._data = proef
+            return copy.deepcopy(uitkomst)
+
+
 class BeurtenStore:
     """Elke laadbeurt, met wat hij kostte en wat hij bespaarde.
 
@@ -597,6 +638,14 @@ def async_get_berichten(hass: HomeAssistant) -> BerichtenStore:
     if "berichten" not in data:
         data["berichten"] = BerichtenStore(hass)
     return data["berichten"]
+
+
+def async_get_tickets(hass: HomeAssistant) -> TicketsStore:
+    """De ene opslag van tickets van deze installatie (v0.220.0)."""
+    data = hass.data.setdefault(DOMAIN, {})
+    if "tickets" not in data:
+        data["tickets"] = TicketsStore(hass)
+    return data["tickets"]
 
 
 def async_get_meldingen(hass: HomeAssistant) -> MeldingenStore:

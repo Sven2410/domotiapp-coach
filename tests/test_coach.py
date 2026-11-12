@@ -2817,7 +2817,7 @@ controle("en de rest van de instellingen blijft", eigen["devices"] == inst55["de
 nieuw55 = ontv.zet_eigen_soorten(inst55, "u-partner", {"melding": True, "besluit": True, "name": "hack"})
 controle("hij zet zijn eigen soorten, en niets anders",
          nieuw55[1]["kinds"] == {"kritiek": True, "melding": True, "besluit": True, "belasting": False,
-                                 "herinnering": True}
+                                 "herinnering": True, "tickets": True}
          and nieuw55[1]["name"] == "Partner" and nieuw55[0]["kinds"]["melding"] is True, f"{nieuw55}")
 controle("zonder gekoppelde persoon valt er niets te zetten",
          ontv.zet_eigen_soorten(inst55, "u-onbekend", {"melding": True}) is None, "")
@@ -2833,7 +2833,7 @@ controle("de oude ontvanger wordt een persoon met een leesbare naam",
          and mensen55[0]["name"] == "Iphone van de keuken" and mensen55[0]["id"].startswith("p-"), f"{mensen55}")
 controle("met alles aan behalve de besluiten",
          mensen55[0]["kinds"] == {"kritiek": True, "melding": True, "besluit": False, "belasting": True,
-                                  "herinnering": True}, "")
+                                  "herinnering": True, "tickets": True}, "")
 controle("en de drempel gaat mee, zonder de ontvangers",
          mig["notifications"]["load_alert"] == {"enabled": True, "threshold_percent": 85.0,
                                                  "min_interval_minutes": 30, "min_duration_seconds": 60}, "")
@@ -7714,10 +7714,13 @@ _ws139.ActiveConnection = object
 _ws139.event_message = lambda i, data: {"id": i, "type": "event", "event": data}
 _rep139 = _types.ModuleType("domotiapp_coach.report")
 _rep139.__getattr__ = lambda naam: _Huls()
+_bij139 = _types.ModuleType("domotiapp_coach.bijlagen")
+_bij139.__getattr__ = lambda naam: _Huls()
 _comp139 = sys.modules.get("homeassistant.components") or _types.ModuleType("homeassistant.components")
 _comp139.websocket_api = _ws139
 for _naam, _mod in (("voluptuous", _vol139), ("homeassistant.components", _comp139),
-                    ("homeassistant.components.websocket_api", _ws139), ("domotiapp_coach.report", _rep139)):
+                    ("homeassistant.components.websocket_api", _ws139), ("domotiapp_coach.report", _rep139),
+                    ("domotiapp_coach.bijlagen", _bij139)):
     sys.modules.setdefault(_naam, _mod)
 import domotiapp_coach as _pakket139  # noqa: E402
 
@@ -18256,6 +18259,321 @@ controle("vasthouden: het eerste blok zegt van het net op niets, op dezelfde acc
          and eerste263[1] == uren263[1], f"{eerste263[0]}")
 controle("en is het besluit wat het plan zegt, dan blijft het plan", coachmod.ChargerCoach._uren_met_besluit(
     Besluit263(NUL263, reason="", rule="nul", uren=uren263), b_accu263, NU263) == uren263, "")
+
+
+print("=== 264. Vraag het de DomotiTech Bot: het gesprek, tickets, foto's, websocket en pushmelding (v0.220.0) ===")
+# De eigenaar op 12-11-2026: vragen, aanvragen en storingen in Home Assistant zelf; op 13-11-2026: "Gewoon een vraag
+# stellen over de installatie en echt een ticket aan maken zijn aparte dingen." Een doorlopend gesprek (id 0) en
+# tickets (storing of aanvraag) met een foto. De afspraak met de kaart is `CONTRACT` in tickets.py.
+import domotiapp_coach.tickets as tk264  # noqa: E402
+from domotiapp_coach import storage as opslag264  # noqa: E402
+
+T264 = dt.datetime(2026, 11, 13, 9, 0, tzinfo=dt.timezone(dt.timedelta(hours=1)))
+d264 = tk264.leeg()
+een264, _ = tk264.nieuw(d264, "storing", "  De paal laadt niet\nSinds vanochtend  ", "u-1", "Bewoner", T264)
+controle("een ticket: nummer 1, onderwerp de eerste regel, stand nieuw, het bericht van de klant met zijn id",
+         een264["id"] == 1 and een264["onderwerp"] == "De paal laadt niet" and een264["stand"] == "nieuw"
+         and een264["berichten"][0]["van"] == "klant" and een264["berichten"][0]["user_id"] == "u-1"
+         and een264["gelezen"] == {"u-1": 1}, f"{een264}")
+controle("het onderwerp hoogstens 80 tekens", len(tk264.onderwerp("x" * 200)) == 80, "")
+d264["tickets"] = [t for t in d264["tickets"] if t["id"] != 1]
+twee264, _ = tk264.nieuw(d264, "aanvraag", "Een tweede paal", "u-1", "Bewoner", T264)
+controle("een nummer wordt nooit hergebruikt, ook niet als het ticket weg is", twee264["id"] == 2, f"{twee264['id']}")
+fouten264 = []
+for soort, tekst in (("vraag", "x"), ("klacht", "x"), ("storing", "   "), ("storing", "x" * 4001)):
+    try:
+        tk264.nieuw(d264, soort, tekst, "u-1", "Bewoner", T264)
+    except tk264.TicketFout as fout:
+        fouten264.append(fout.code)
+controle("een vraag is geen ticket, en een onbekende soort, een lege en een te lange tekst: een nette fout",
+         fouten264 == ["soort", "soort", "leeg", "te_lang"], f"{fouten264}")
+_, antw264 = tk264.antwoord(d264, 2, "We kijken ernaar.", T264)
+controle("een antwoord zet de stand op in behandeling", d264["tickets"][-1]["stand"] == "in_behandeling"
+         and antw264["van"] == "domotitech", f"{d264['tickets'][-1]['stand']}")
+tk264.zet_stand(d264, 2, "klaar", T264)
+tk264.reageer(d264, 2, "Hij doet het weer niet", "u-1", "Bewoner", T264)
+controle("een reactie op een ticket dat klaar was: terug naar nieuw", d264["tickets"][-1]["stand"] == "nieuw", "")
+d264b = tk264.leeg()
+for i in range(20):
+    tk264.nieuw(d264b, "storing", f"storing {i}", "u-1", "Bewoner", T264 + dt.timedelta(minutes=i))
+try:
+    tk264.nieuw(d264b, "storing", "de 21e", "u-1", "Bewoner", T264 + dt.timedelta(minutes=30))
+    teveel264 = None
+except tk264.TicketFout as fout:
+    teveel264 = fout.code
+anders264, _ = tk264.nieuw(d264b, "storing", "van iemand anders", "u-2", "Ander", T264 + dt.timedelta(minutes=30))
+later264, _ = tk264.nieuw(d264b, "storing", "een uur later", "u-1", "Bewoner", T264 + dt.timedelta(minutes=61))
+controle("de 21e binnen een uur van dezelfde gebruiker: een nette fout; een ander, of een uur later, wel",
+         teveel264 == "te_veel" and anders264["id"] == 21 and later264["id"] == 22, f"{teveel264}")
+
+# Het gesprek: altijd daar, een vraag is reply op 0, een antwoord heeft geen stand, 60 per uur.
+d264c = tk264.leeg()
+vraag264, _ = tk264.reageer(d264c, 0, "Hoe vol is mijn accu?", "u-1", "Bewoner", T264)
+tk264.antwoord(d264c, 0, "Hij staat op 64%.", T264, stand="klaar")
+controle("het gesprek: id 0, soort vraag, zonder stand, ook na een antwoord met een stand",
+         vraag264["id"] == 0 and vraag264["soort"] == "vraag" and "stand" not in d264c["gesprek"]
+         and len(d264c["gesprek"]["berichten"]) == 2 and not d264c["tickets"], f"{d264c['gesprek']}")
+try:
+    tk264.zet_stand(d264c, 0, "klaar", T264)
+    stand264 = None
+except tk264.TicketFout as fout:
+    stand264 = fout.code
+controle("set_state op het gesprek: een fout", stand264 == "stand", f"{stand264}")
+for i in range(59):
+    tk264.reageer(d264c, 0, f"vraag {i}", "u-1", "Bewoner", T264 + dt.timedelta(seconds=i))
+try:
+    tk264.reageer(d264c, 0, "de 61e", "u-1", "Bewoner", T264 + dt.timedelta(minutes=5))
+    veel264 = None
+except tk264.TicketFout as fout:
+    veel264 = fout.code
+controle("hoogstens 60 vragen per uur per gebruiker in het gesprek", veel264 == "te_veel", f"{veel264}")
+overzicht264 = tk264.overzicht(d264c)
+controle("list geeft het gesprek apart, met de laatste 100 berichten, en de tickets zonder het gesprek",
+         overzicht264["contract"] == 1 and overzicht264["gesprek"]["id"] == 0 and overzicht264["tickets"] == []
+         and len(overzicht264["gesprek"]["berichten"]) == 61, f"{len(overzicht264['gesprek']['berichten'])}")
+for i in range(50):
+    tk264.antwoord(d264c, 0, f"antwoord {i}", T264)
+controle("en van een lang gesprek alleen de laatste 100", len(tk264.overzicht(d264c)["gesprek"]["berichten"]) == 100
+         and len(d264c["gesprek"]["berichten"]) == 111, "")
+
+# Foto's: de soort op de eerste bytes, vastmaken bij een bericht, niet in het gesprek, en los na een uur weg.
+JPG264 = b"\xff\xd8\xff\xe0" + b"\0" * 20
+controle("de soort van een foto op de eerste bytes", tk264.soort_van(JPG264) == "image/jpeg"
+         and tk264.soort_van(b"\x89PNG\r\n\x1a\n....") == "image/png"
+         and tk264.soort_van(b"RIFF\0\0\0\0WEBPVP8 ") == "image/webp" and tk264.soort_van(b"<html>") is None, "")
+d264d = tk264.leeg()
+for i, bid in enumerate(("a" * 32, "b" * 32, "c" * 32)):
+    tk264.bijlage_erbij(d264d, bid, "image/jpeg", 1000 + i, T264)
+foto264, fotob264 = tk264.nieuw(d264d, "storing", "", "u-1", "Bewoner", T264, bijlagen=["a" * 32])
+controle("een ticket met alleen een foto: mag, met de foto aan het bericht",
+         fotob264["bijlagen"] == [{"id": "a" * 32, "type": "image/jpeg", "grootte": 1000}]
+         and d264d["bijlagen"]["a" * 32]["ticket"] == foto264["id"], f"{fotob264}")
+fouten264b = []
+for ticket_id, ids in ((0, ["b" * 32]), (foto264["id"], ["a" * 32]), (foto264["id"], ["d" * 32]),
+                       (foto264["id"], ["b" * 32] * 1 + ["c" * 32, "e" * 32, "f" * 32, "g" * 32])):
+    try:
+        tk264.reageer(d264d, ticket_id, "x", "u-1", "Bewoner", T264, bijlagen=ids)
+    except tk264.TicketFout as fout:
+        fouten264b.append(fout.code)
+controle("geen foto in het gesprek, niet twee keer dezelfde, geen onbekende, hoogstens vier",
+         fouten264b == ["bijlage_gesprek", "bijlage_onbekend", "bijlage_onbekend", "bijlage_te_veel"], f"{fouten264b}")
+weg264 = tk264.opruimen(d264d, T264 + dt.timedelta(minutes=59))
+weg264b = tk264.opruimen(d264d, T264 + dt.timedelta(minutes=61))
+controle("een foto die nergens aan hangt gaat na een uur weg, een vastgemaakte blijft",
+         weg264 == [] and sorted(weg264b) == ["b" * 32, "c" * 32] and "a" * 32 in d264d["bijlagen"], f"{weg264b}")
+
+
+class _Bus264:
+    def __init__(self):
+        self.luisteraars, self.gebeurtenissen = {}, []
+
+    def async_listen(self, soort, f):
+        self.luisteraars.setdefault(soort, []).append(f)
+        return lambda: self.luisteraars[soort].remove(f)
+
+    def async_fire(self, soort, data):
+        self.gebeurtenissen.append((soort, data))
+        for f in list(self.luisteraars.get(soort, [])):
+            f(_types.SimpleNamespace(data=data))
+
+
+class _Verbinding264:
+    def __init__(self, uid, naam, admin=False, systeem=False):
+        self.user = _types.SimpleNamespace(id=uid, name=naam, is_admin=admin, system_generated=systeem)
+        self.subscriptions, self.berichten, self.resultaten, self.fouten = {}, [], [], []
+
+    def send_message(self, bericht):
+        self.berichten.append(bericht)
+
+    def send_result(self, i, resultaat=None):
+        self.resultaten.append((i, resultaat))
+
+    def send_error(self, i, code, tekst):
+        self.fouten.append((i, code))
+
+
+inst264 = instellingen()
+inst264["notifications"]["people"] = [
+    {"id": "p-1", "name": "Bewoner", "target": "mobile_app_bewoner", "user_id": "u-1", "kinds": {}},
+    {"id": "p-2", "name": "Gast", "target": "mobile_app_gast", "user_id": "", "kinds": {"tickets": False}},
+]
+hass264, _, _ = bouw(huis(), inst264)
+hass264.bus = _Bus264()
+bewoner264 = _Verbinding264("u-1", "Bewoner")
+beheer264 = _Verbinding264("u-9", "Beheer", admin=True)
+systeem264 = _Verbinding264("u-s", "Supervisor", systeem=True)
+
+
+def ws264(functie, verbinding, **velden):
+    asyncio.run(functie(hass264, verbinding, {"id": 40, **velden}))
+    return (verbinding.resultaten[-1][1] if verbinding.resultaten else None)
+
+
+def gebeurd264():
+    return [d for soort, d in hass264.bus.gebeurtenissen if soort == "domotiapp_coach_ticket"]
+
+
+ws264(ws139.async_tickets_subscribe, bewoner264, type="domotiapp_coach/tickets/subscribe")
+eerst264 = bewoner264.berichten[-1]["event"] if bewoner264.berichten else {}
+controle("subscribe: eerst het gesprek en de tickets met het contract, als event", eerst264.get("contract") == 1
+         and eerst264.get("tickets") == [] and eerst264.get("gesprek", {}).get("id") == 0, f"{eerst264}")
+vraag264b = ws264(ws139.async_tickets_reply, bewoner264, ticket_id=0, tekst="Hoe vol is mijn accu?")
+controle("een vraag is reply op 0, met de gebeurtenis zonder stand", vraag264b["id"] == 0
+         and gebeurd264() == [{"ticket_id": 0, "bericht_id": 1, "van": "klant", "soort": "vraag", "stand": None,
+                               "bijlagen": 0}], f"{gebeurd264()}")
+nieuw264 = ws264(ws139.async_tickets_new, bewoner264, soort="storing", tekst="De paal laadt niet")
+controle("new: het ticket terug, met de naam van de gebruiker, en de gebeurtenis", nieuw264["id"] == 1
+         and nieuw264["door"] == {"user_id": "u-1", "naam": "Bewoner"}
+         and gebeurd264()[-1] == {"ticket_id": 1, "bericht_id": 1, "van": "klant", "soort": "storing", "stand": "nieuw",
+                                  "bijlagen": 0}, f"{nieuw264} {gebeurd264()}")
+controle("subscribe krijgt het nieuwe ticket", bewoner264.berichten[-1]["event"].get("ticket", {}).get("id") == 1, "")
+ws264(ws139.async_tickets_new, systeem264, soort="storing", tekst="x")
+controle("een systeemgebruiker stelt geen vragen", systeem264.fouten == [(40, "geen_systeem")], f"{systeem264.fouten}")
+ws264(ws139.async_tickets_answer, bewoner264, ticket_id=1, tekst="ik antwoord zelf")
+ws264(ws139.async_tickets_set_state, bewoner264, ticket_id=1, stand="klaar")
+controle("answer en set_state door een gebruiker die geen beheerder is: geweigerd",
+         [c for _, c in bewoner264.fouten] == ["unauthorized", "unauthorized"], f"{bewoner264.fouten}")
+hass264.services.verstuurd.clear()
+antw264b = ws264(ws139.async_tickets_answer, beheer264, ticket_id=1, tekst="We komen langs.")
+ws264(ws139.async_tickets_answer, beheer264, ticket_id=0, tekst="Hij staat op 64%.")
+push264 = [(dienst, d.get("message")) for dom, dienst, d in hass264.services.verstuurd if dom == "notify"]
+print(f"  antwoord: stand {antw264b['stand']}, push {push264}")
+controle("answer door de beheerder: in behandeling, met de gebeurtenis", antw264b["stand"] == "in_behandeling"
+         and gebeurd264()[-2]["van"] == "domotitech", "")
+controle("en een pushmelding, alleen naar wie de soort tickets aan heeft, met of zonder nummer",
+         push264 == [("mobile_app_bewoner", "DomotiTech heeft geantwoord op je vraag #1"),
+                     ("mobile_app_bewoner", "DomotiTech heeft je vraag beantwoord")], f"{push264}")
+ws264(ws139.async_tickets_read, bewoner264, ticket_id=1)
+ws264(ws139.async_tickets_read, bewoner264, ticket_id=0)
+lijst264 = ws264(ws139.async_tickets_list, bewoner264, type="domotiapp_coach/tickets/list")
+controle("read zet gelezen voor deze gebruiker, ook in het gesprek; list met het contract", lijst264["contract"] == 1
+         and lijst264["tickets"][0]["gelezen"]["u-1"] == 2 and lijst264["gesprek"]["gelezen"]["u-1"] == 2, f"{lijst264}")
+ws264(ws139.async_tickets_set_state, beheer264, ticket_id=1, stand="klaar")
+ws264(ws139.async_tickets_reply, bewoner264, ticket_id=1, tekst="Nog een vraag")
+controle("reply op een ticket dat klaar is: terug naar nieuw, met de gebeurtenis",
+         ws264(ws139.async_tickets_list, bewoner264)["tickets"][0]["stand"] == "nieuw"
+         and gebeurd264()[-1]["bericht_id"] == 3, "")
+ws264(ws139.async_tickets_reply, bewoner264, ticket_id=99, tekst="x")
+controle("een ticket dat niet bestaat: een nette fout", bewoner264.fouten[-1][1] == "niet_gevonden", f"{bewoner264.fouten}")
+asyncio.run(opslag264.async_get_tickets(hass264).async_wijzig(
+    lambda d: tk264.bijlage_erbij(d, "f" * 32, "image/png", 2048, dt.datetime.now(dt.timezone.utc))))
+met264 = ws264(ws139.async_tickets_reply, bewoner264, ticket_id=1, tekst="", bijlagen=["f" * 32])
+controle("een reactie met alleen een foto, en de gebeurtenis telt hem", met264["berichten"][-1]["bijlagen"][0]["id"] == "f" * 32
+         and gebeurd264()[-1]["bijlagen"] == 1, f"{gebeurd264()[-1]}")
+
+# Een herstart van Home Assistant: een nieuwe opslag op dezelfde gegevens, en alles is er nog.
+oud264 = opslag264.async_get_tickets(hass264)
+hass264.data["domotiapp_coach"].pop("tickets")
+nieuwe264 = opslag264.async_get_tickets(hass264)
+nieuwe264._store._data = oud264._store._data
+na264 = ws264(ws139.async_tickets_list, bewoner264)
+controle("na een herstart: het ticket met zijn berichten en het gesprek", len(na264["tickets"]) == 1
+         and len(na264["tickets"][0]["berichten"]) == 4 and len(na264["gesprek"]["berichten"]) == 2, f"{na264}")
+volgend264 = ws264(ws139.async_tickets_new, bewoner264, soort="aanvraag", tekst="Een tweede paal")
+controle("en het volgende nummer loopt door", volgend264["id"] == 2, f"{volgend264}")
+controle("een opslag van voor het gesprek krijgt het erbij", tk264.heel({"volgende": 3, "tickets": []})["gesprek"]["id"] == 0, "")
+
+
+print("=== 265. de foto's van de DomotiTech Bot: uploaden en bekijken over HTTP (v0.220.0) ===")
+# Een foto past niet over de websocket. Uploaden keurt op de eerste bytes en de grootte; bekijken alleen wat de
+# opslag kent. Hier met een nagemaakte aiohttp en een nagemaakte HomeAssistantView.
+import importlib.util as _ilu265  # noqa: E402
+import tempfile as _tmp265  # noqa: E402
+
+
+class _Antwoord265:
+    def __init__(self, status=200, body=None, content_type=None, headers=None, text=None):
+        self.status, self.body, self.content_type, self.headers = status, body, content_type, headers or {}
+
+
+_aio265 = _types.ModuleType("aiohttp")
+_aio265.web = _types.SimpleNamespace(Response=_Antwoord265, Request=object)
+_http265 = _types.ModuleType("homeassistant.components.http")
+
+
+class _View265:
+    def json(self, data, status=200):
+        return _Antwoord265(status, data)
+
+    def json_message(self, tekst, status=200):
+        return _Antwoord265(status, {"message": tekst})
+
+
+_http265.HomeAssistantView = _View265
+_http265.KEY_HASS = "hass"
+_oud265 = {n: sys.modules.get(n) for n in ("aiohttp", "homeassistant.components.http")}
+sys.modules["aiohttp"], sys.modules["homeassistant.components.http"] = _aio265, _http265
+try:
+    _spec265 = _ilu265.spec_from_file_location(
+        "domotiapp_coach._bijlagen265",
+        pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach" / "bijlagen.py")
+    bij265 = _ilu265.module_from_spec(_spec265)
+    bij265.__package__ = "domotiapp_coach"
+    _spec265.loader.exec_module(bij265)
+finally:
+    for _n, _m in _oud265.items():
+        if _m is None:
+            sys.modules.pop(_n, None)
+        else:
+            sys.modules[_n] = _m
+
+map265 = _tmp265.mkdtemp()
+hass265, _, _ = bouw(huis(), instellingen())
+hass265.config.path = lambda *delen: str(pathlib.Path(map265, *delen))
+
+
+class _Veld265:
+    def __init__(self, naam, inhoud):
+        self.name, self._rest = naam, inhoud
+
+    async def read_chunk(self, n):
+        stuk, self._rest = self._rest[:n], self._rest[n:]
+        return stuk
+
+
+class _Lezer265:
+    def __init__(self, velden):
+        self._velden = list(velden)
+
+    async def next(self):
+        return self._velden.pop(0) if self._velden else None
+
+
+class _Vraag265:
+    def __init__(self, velden):
+        self.app = {"hass": hass265}
+        self._velden = velden
+
+    async def multipart(self):
+        return _Lezer265(self._velden)
+
+
+def upload265(*velden):
+    return asyncio.run(bij265.BijlageUploadView().post(_Vraag265(list(velden))))
+
+
+goed265 = upload265(_Veld265("anders", b"x"), _Veld265("bestand", b"\xff\xd8\xff\xe0" + b"\1" * 70000))
+print(f"  upload: {goed265.status} {goed265.body}")
+bid265 = (goed265.body or {}).get("id", "")
+controle("een jpeg: 200, met een id van 32 tekens, de soort en de grootte, en het bestand op schijf",
+         goed265.status == 200 and len(bid265) == 32 and goed265.body["type"] == "image/jpeg"
+         and goed265.body["grootte"] == 70004 and pathlib.Path(map265, ".storage", bij265.MAP, bid265).exists(), "")
+controle("een bestand dat geen foto is: 415, ook als de browser zegt dat het er een is",
+         upload265(_Veld265("bestand", b"<svg onload=x>")).status == 415, "")
+controle("groter dan 10 MB: 413", upload265(_Veld265("bestand", b"\xff\xd8\xff" + b"\0" * (10 * 1024 * 1024))).status == 413, "")
+controle("zonder veld bestand: 400", upload265(_Veld265("anders", b"x")).status == 400, "")
+bekijk265 = asyncio.run(bij265.BijlageView().get(_Vraag265([]), bid265))
+controle("bekijken: de foto met zijn soort", bekijk265.status == 200 and bekijk265.content_type == "image/jpeg"
+         and len(bekijk265.body) == 70004, f"{bekijk265.status}")
+controle("een onbekende of rare id: 404", asyncio.run(bij265.BijlageView().get(_Vraag265([]), "0" * 32)).status == 404
+         and asyncio.run(bij265.BijlageView().get(_Vraag265([]), "../../geheim")).status == 404, "")
+# Na een uur zonder bericht is hij weg, van de schijf en uit de opslag.
+asyncio.run(opslag264.async_get_tickets(hass265).async_wijzig(
+    lambda d: d["bijlagen"][bid265].update(at="2026-01-01T00:00:00+00:00")))
+asyncio.run(bij265.async_opruimen(hass265))
+controle("een losse foto van een uur oud gaat weg, van de schijf en uit de opslag",
+         not pathlib.Path(map265, ".storage", bij265.MAP, bid265).exists()
+         and bid265 not in asyncio.run(opslag264.async_get_tickets(hass265).async_data())["bijlagen"], "")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
