@@ -2199,7 +2199,7 @@ class ChargerCoach:
         # er al herinnerd is (`herinnering:<paal>`), en het maximum van de paal uit de laatste ronde.
         self._autoverbruik: dict[str, dict[str, Any]] = {}
         self._herinnerd: dict[str, str] = {}
-        self._paal_max: dict[str, float] = {}
+        self._paal_ampere: dict[str, float] = {}
         # Palen die deze beurt al klaar meldden (v0.209.0), met wat de bewoner toen gekozen had (de auto en de
         # opgegeven accustand). In het geheugen als `paal-klaar:<paal>`.
         self._klaar_beurt: dict[str, str] = {}
@@ -3183,7 +3183,7 @@ class ChargerCoach:
         nodig = None
         if soc is not None:
             amps = min(
-                (a for a in (float(profiel.get("max_amps") or 0), self._paal_max.get(device_id, 0.0)) if a > 0),
+                (a for a in (float(profiel.get("max_amps") or 0), self._paal_ampere.get(device_id, 0.0)) if a > 0),
                 default=16.0,
             )
             auto = Car(
@@ -3827,7 +3827,7 @@ class ChargerCoach:
         for entry_id, om in list(self._herladen_om.items()):
             entry = self.hass.config_entries.async_get_entry(entry_id)
             terug = self._terug_sinds(per_entry.get(entry_id) or [], om)
-            if entry is None:
+            if entry is None or getattr(entry, "disabled_by", None):
                 self._herladen_om.pop(entry_id, None)
             elif terug is not None:
                 self._herladen_om.pop(entry_id, None)
@@ -3842,7 +3842,11 @@ class ChargerCoach:
             start = self._opstart
             for entry_id, ids in per_entry.items():
                 entry = self.hass.config_entries.async_get_entry(entry_id)
-                if entry is None or entry.domain == DOMAIN:
+                # Een integratie die iemand uitzette komt niet (v0.217.1), zoals bij `_async_online_herladen`. Thuis
+                # bij de eigenaar op 12-11-2026 gaf dat na elke opstart een waarschuwing "niet binnen 15 min".
+                # Een die niet laadt zonder dat iemand hem uitzette (`setup_retry`) telt wel: die hoort in die regel.
+                if entry is None or entry.domain == DOMAIN or getattr(entry, "disabled_by", None):
+                    self._opstart_entries.pop(entry_id, None)
                     continue
                 rij = self._opstart_entries.setdefault(entry_id, {"bron": entry.domain, "s": None})
                 if rij["s"] is None:
@@ -13847,8 +13851,11 @@ class ChargerCoach:
             if vorige is None or vorige.charge:
                 charger.started_at = self._since.setdefault(device_id, now)
         self._laadde[device_id] = charger.charging
+        # Het gemeten maximum in een eigen woordenboek (v0.217.1): `_paal_max` is de entiteit van het maximum
+        # (v0.197.1), en tot v0.217.1 schreef deze regel er een getal overheen. Bij een klant viel daarna het
+        # nakijken van een vreemde limiet om, want `_number` kreeg 16.0 in plaats van een entiteit.
         if charger.max_amps:
-            self._paal_max[device_id] = float(charger.max_amps)
+            self._paal_ampere[device_id] = float(charger.max_amps)
 
         # Eén fasemeting per ronde; `_fasetip` en `_car` lezen allebei deze.
         if charger.charging:

@@ -6122,7 +6122,7 @@ class Anker112(Diensten):
         return asyncio.sleep(0)
 
     async def async_call(self, domein, dienst, data, blocking=False):
-        staat = self.hass.states.get(data.get("entity_id"))
+        staat = self.hass.states.get(data.get("entity_id") or "")
         if staat is not None and staat.state == "unavailable":
             return
         await super().async_call(domein, dienst, data, blocking)
@@ -18038,6 +18038,63 @@ finally:
     coachmod._LOGGER.removeHandler(log259)
     coachmod._LOGGER.setLevel(oudniveau259)
     logging.disable(logging.WARNING)
+
+
+print("=== 260. het maximum van de paal blijft een entiteit na een ronde (v0.217.1) ===")
+# Bij een klant op 12-11-2026: na een ronde stond het gemeten maximum (16.0) waar de entiteit van het maximum
+# hoorde, en het nakijken van een vreemde limiet viel om. Een limiet op het maximum is geen andere sturing.
+hass260, inst260, coach260 = bouw239()
+asyncio.run(coach260._async_geheugen_laden())
+hass260.states.zet("sensor.laadpaal_max", "16")
+ronde239(coach260, inst260, T237, ander=None)
+controle("na een ronde: de entiteit van het maximum, en het gemeten maximum apart",
+         coach260._paal_max == {"dev-laadpaal": "sensor.laadpaal_max"}
+         and coach260._paal_ampere.get("dev-laadpaal") == 16.0, f"{coach260._paal_max} {coach260._paal_ampere}")
+coach260._geschreven["dev-laadpaal"] = [9.0]
+coach260._vreemde_limiet.clear()
+try:
+    coach260._async_state_changed(Wissel237("sensor.laadpaal_dyn", "9", "16"))
+    fout260 = None
+except Exception as e:  # noqa: BLE001
+    fout260 = e
+controle("een wissel naar het maximum valt niet om en is geen andere sturing",
+         fout260 is None and "dev-laadpaal" not in coach260._vreemde_limiet, f"{fout260!r} {coach260._vreemde_limiet}")
+coach260._async_state_changed(Wissel237("sensor.laadpaal_dyn", "16", "6"))
+controle("een 6 die de coach niet schreef wel", "dev-laadpaal" in coach260._vreemde_limiet, "")
+
+
+print("=== 261. een integratie die iemand uitzette telt niet mee na de opstart (v0.217.1) ===")
+# Thuis bij de eigenaar op 12-11-2026: de integratie van de auto staat bewust uit, het autoprofiel noemt nog een
+# sensor ervan, en na elke opstart kwam er een waarschuwing "niet binnen 15 min" en een alarm.
+bij259["sensor.bat_w"] = "e-uit"
+entries259["e-uit"] = types.SimpleNamespace(domain="uitmerk", disabled_by="user")
+entries259["e-bat"] = types.SimpleNamespace(domain="accumerk", state="setup_retry", disabled_by=None)
+log261 = Log259()
+coachmod._LOGGER.addHandler(log261)
+coachmod._LOGGER.setLevel(logging.INFO)
+logging.disable(logging.NOTSET)
+try:
+    inst261 = instellingen(devices=inst259m["devices"])
+    h261, s261, c261 = bouw259(inst261)
+    h261.states.zet("sensor.bat_w", "unavailable")
+    c261._zon_voorspeller = []
+    c261._herladen_om["e-uit"] = T259
+    meet259(h261, c261, inst261, 0, 16)
+    geleerd261 = {r["source"]: r for r in s261.instellingen.get("startup_learned") or []}
+    controle("de uitgezette integratie niet in de regel en niet in wat hij leert, ook niet na een herladen",
+             "uitmerk" not in geleerd261 and not c261._herladen_om
+             and not any("uitmerk" in r[1] for r in log261.regels), f"{geleerd261} {log261.regels}")
+    controle("een accu die niet opkomt zonder dat iemand hem uitzette wel, met een waarschuwing",
+             geleerd261.get("accumerk", {}).get("startup") == [None]
+             and log261.regels == [("WARNING", "na de opstart: accumerk niet binnen 15 min, paalmerk na 0 s")],
+             f"{geleerd261} {log261.regels}")
+finally:
+    coachmod._LOGGER.removeHandler(log261)
+    coachmod._LOGGER.setLevel(oudniveau259)
+    logging.disable(logging.WARNING)
+    bij259["sensor.bat_w"] = "e-bat2"
+    entries259.pop("e-uit", None)
+    entries259["e-bat"] = types.SimpleNamespace(domain="accumerk")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
