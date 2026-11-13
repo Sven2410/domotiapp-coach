@@ -18575,6 +18575,90 @@ controle("een losse foto van een uur oud gaat weg, van de schijf en uit de opsla
          not pathlib.Path(map265, ".storage", bij265.MAP, bid265).exists()
          and bid265 not in asyncio.run(opslag264.async_get_tickets(hass265).async_data())["bijlagen"], "")
 
+print("=== 266. de zekering: één meting telt niet, ook met te weinig punten voor een mediaan (v0.221.0) ===")
+# In een klantwoning in de nacht van 12 op 13-11-2026: een meter van hele ampères, elke 10 s, en een fase die al
+# minuten op 17 A stond. Een last van één meting zette hem op 26 A, en de coach zette de paal twaalf keer van 16 naar
+# 9 A: met maar één punt in het venster telde de rauwe meting. De bus kwam op 91% in plaats van vol.
+NU266 = coachmod._moment()
+
+
+def glad266(reeks, tempos, meter=("sensor.l1", "sensor.l2", "sensor.l3")):
+    _, _, c = bouw(huis(), instellingen())
+    c._fase_historie["sensor.l3"] = [(NU266 - dt.timedelta(seconds=sec), float(w)) for sec, w in reeks]
+    c._fase_tempo.update({k: float(v) for k, v in tempos.items()})
+    c._fase_meter = {s: set(meter) for s in meter}
+    return c._gladde_fase("sensor.l3", float(reeks[-1][1]), NU266)
+
+
+een266 = glad266([(600, 17), (1, 26)], {"sensor.l1": 10})
+staat266 = glad266([(600, 17), (16, 26)], {"sensor.l1": 10})
+kort266 = glad266([(600, 17), (9, 26)], {"sensor.l1": 10})
+twee266 = glad266([(600, 17), (11, 25), (1, 26)], {"sensor.l1": 10})
+print(f"  17 A al tien minuten, dan 26: na 1 s {een266} A, na 9 s {kort266} A, na 16 s {staat266} A; twee metingen {twee266} A")
+controle("één meting van 26 A na een stand van 17 telt niet, ook met maar één punt in het venster",
+         een266 == 17.0 and kort266 == 17.0, f"{een266} {kort266}")
+controle("een stand die anderhalf tempo van de meter blijft staan telt, net als twee metingen",
+         staat266 == 26.0 and twee266 == 25.0, f"{staat266} {twee266}")
+controle("het tempo komt van een andere fase van dezelfde meter, de rustige fase kent het niet",
+         glad266([(600, 17), (16, 26)], {"sensor.l1": 10, "sensor.l3": 80}) == 26.0, "")
+controle("een fase van een andere meter geeft zijn tempo niet door: dan telt de meting zelf, zoals voor v0.221.0",
+         glad266([(600, 17), (1, 26)], {"sensor.l1": 10}, meter=("sensor.l3",)) == 26.0, "")
+controle("zonder iets van daarvoor telt de meting zelf", glad266([(1, 26)], {"sensor.l1": 10}) == 26.0, "")
+# Omlaag blijft meteen: wat het huis minder trekt telt bij de eerste meting.
+controle("een fase die zakt telt meteen", glad266([(600, 24), (1, 12)], {"sensor.l1": 10}) == 12.0, "")
+
+# `_watch_phases` legt de meters vast: de drie van de hoofdaansluiting samen, een groep apart.
+inst266 = instellingen()
+inst266["installation"]["circuits"] = [{"id": "garage", "fuse_amps": 16, "phases": 3, "sensors": {
+    k: {"current": f"sensor.garage_{k}"} for k in ("l1", "l2", "l3")}}]
+_, _, c266 = bouw(huis(), inst266)
+c266._watch_phases(inst266, True)
+hoofd266 = {(inst266["sources"]["phases"][k] or {}).get("current") for k in ("l1", "l2", "l3")}
+print(f"  meters: {sorted(c266._fase_meter.get('sensor.l3', set()))} en {sorted(c266._fase_meter.get('sensor.garage_l1', set()))}")
+controle("de fasen van de hoofdaansluiting delen een meter, de groep heeft zijn eigen",
+         c266._fase_meter.get("sensor.l3") == hoofd266
+         and c266._fase_meter.get("sensor.garage_l1") == {f"sensor.garage_{k}" for k in ("l1", "l2", "l3")}, "")
+c266._fase_tempo["sensor.l1"] = 10.0
+klok266 = []
+oud_later266 = coachmod.async_call_later
+coachmod.async_call_later = lambda hass, wacht, actie: klok266.append(wacht) or (lambda: None)
+try:
+    c266._fase_klok_zetten("sensor.l3")
+finally:
+    coachmod.async_call_later = oud_later266
+controle("de klok van een rustige fase loopt op het tempo van de meter", klok266 == [16.0], f"{klok266}")
+
+# De hele keten, met een herstart halverwege: een paal die op 16 A laadt, een fase die al lang op 17 staat, en één
+# meting van 26 A. De paal blijft staan; blijft de meting staan, dan gaat hij omlaag. Na een herstart is er niets
+# van daarvoor, en dan telt de meting zelf.
+inst266k = instellingen()
+inst266k["strategy"]["schedules"][0]["window"]["done_by"] = "07:00"
+inst266k["car_soc"] = [{"device": "dev-laadpaal", "car": "car-1", "percent": 40.0, "at": coachmod._moment().isoformat()}]
+hass266, _, coach266 = bouw(huis(status="ready_to_charge", teruglevering=0.0, afname=1800.0), inst266k)
+asyncio.run(ronde(coach266, inst266k, nu=coachmod._moment()))
+coach266.async_mode("dev-laadpaal", "snel")
+hass266.states.zet("sensor.laadpaal_status", "charging")
+hass266.states.zet("sensor.laadpaal_stroom", "12")
+hass266.states.zet("sensor.laadpaal_vermogen", "8200")
+hass266.states.zet("sensor.l3", "17")
+coach266._fase_historie["sensor.l3"] = [(coachmod._moment() - dt.timedelta(minutes=10), 17.0)]
+coach266._fase_tempo["sensor.l1"] = 10.0
+voor266, _ = asyncio.run(ronde(coach266, inst266k, nu=coachmod._moment()))
+coach266._async_phase_changed(Meting("sensor.l3", "26"))
+hass266.states.zet("sensor.l3", "26")
+een266k, _ = asyncio.run(ronde(coach266, inst266k, nu=coachmod._moment()))
+coach266._fase_historie["sensor.l3"][-1] = (coachmod._moment() - dt.timedelta(seconds=16), 26.0)
+staat266k, _ = asyncio.run(ronde(coach266, inst266k, nu=coachmod._moment()))
+print(f"  paal: voor {voor266['amps']} A, na één meting van 26 A {een266k['amps']} A, als hij blijft staan {staat266k['amps']} A")
+controle("één meting van 26 A: de paal blijft staan", voor266["amps"] >= 6 and een266k["amps"] == voor266["amps"],
+         f"{voor266['amps']} {een266k['amps']}")
+controle("blijft hij staan, dan gaat de paal omlaag", staat266k["amps"] < voor266["amps"],
+         f"{voor266['amps']} {staat266k['amps']}")
+_, _, c266h = bouw(huis(), inst266k)
+c266h._watch_phases(inst266k, True)
+controle("na een herstart (geen historie, geen tempo) telt de meting zelf: voorzichtig",
+         c266h._gladde_fase("sensor.l3", 26.0, NU266) == 26.0, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

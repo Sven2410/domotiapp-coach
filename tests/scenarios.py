@@ -1329,6 +1329,29 @@ zekering_sprong_hele = replace(
     uitleg="zoals zekering-sprong, met een meter van hele ampères die elke 5 s meet",
     fase_hele_amps=True, stap_seconden=5,
 )
+# Een klantwoning in de nacht van 12 op 13-11-2026: een meter van hele ampères die elke 10 s meet, en een last op de
+# derde fase die om het half uur één meting lang 9 A trekt; de batterij hangt op de eerste. De bus laadt met haast op 3x25 A, de batterij laadt
+# ernaast van het net. Twaalf keer ging de paal op die ene meting van 16 naar 9 A: de mediaan had minder dan drie
+# punten, want een stand die blijft staan komt niet opnieuw binnen, en dan telde de rauwe meting. De bus kwam op
+# 91% in plaats van vol, want hij klom na elke stap omlaag pas tien minuten later weer op (v0.221.0).
+uitschieter_hele = Scenario(
+    "uitschieter-hele-amps",
+    "nacht, dynamisch, 3x25 A; de bus van 65 kWh om 00:40 op 20%, klaar om 07:00; de batterij laadt van het net; de batterij op de eerste fase; om het half uur één meting van 9 A erbij op de derde; herstart om 03:00",
+    contract="dynamisch", zon=Zon(wolken="geen"), voorspeller="geen",
+    huis=Huis(basis_w=400.0, verdeling=(0.3, 0.1, 0.6), puls=(3500.0, 8.0, 30.0)),
+    auto=Auto(naam="Bus", capaciteit_kwh=65.0, soc=20.0, fasen=3, max_amps=16.0, bijkomen_min=10, bijkomen_na_min=1),
+    batterij=Batterij(soc=5.0, fase=0), zekering=25.0, aansluiting_fasen=3, fase_hele_amps=True,
+    begin="2026-09-07 23:55", kabel_erin="00:40", klaar_om="07:00", duur_uren=12, stap_seconden=10,
+    prijzen=Prijzen(per_dag={
+        "2026-09-07": [0.30] * 17 + [0.40] * 7,
+        "2026-09-08": [0.30] * 7 + [0.45] * 4 + [0.30] * 13,
+    }),
+    gebeurtenissen=[("03:00", "herstart", None)],
+)
+uitschieter_hele_zonder = uitschieter_hele.kopie(
+    naam="uitschieter-hele-amps-zonder", uitleg="dezelfde nacht zonder de last van één meting: zo hoort het te gaan",
+    huis=Huis(basis_w=400.0, verdeling=(0.3, 0.1, 0.6)),
+)
 # Dezelfde dag om 13:39:54: de auto is klaar, de laatste meterwaarde is van een
 # paar seconden eerder en zegt nog de afname van de auto. De regelaar zette de
 # batterij daarop in dezelfde seconde op ontladen op vol vermogen (v0.102.2: de
@@ -2055,7 +2078,7 @@ ALLE = [
     vast_geen_klaar_tijd, vast_krap, vast_onhaalbaar,
     dyn_zonnig, dyn_bewolkt, dyn_geen_zon, dyn_markt, dyn_salderen, dyn_avond, dyn_grote_auto,
     dyn_negatief, dyn_kwartier_later, dyn_geen_klaar_tijd,
-    meter_teken, meter_teken_om, een_fase_krap, ford_geen_ruimte, eigen_marge, teller_achter, oven, puls_snelladen, auto_neemt_minder, zekering_sprong, zekering_sprong_hele, lastbewaker, warmtepomp, ford_bijkomen, ford_oude_opslag, warmtepomp_uit,
+    meter_teken, meter_teken_om, een_fase_krap, ford_geen_ruimte, eigen_marge, teller_achter, oven, puls_snelladen, auto_neemt_minder, zekering_sprong, zekering_sprong_hele, uitschieter_hele, uitschieter_hele_zonder, lastbewaker, warmtepomp, ford_bijkomen, ford_oude_opslag, warmtepomp_uit,
     geen_soc, soc_opgegeven, soc_traag, laadgrens, laadgrens_ingesteld,
     doel_onder_auto, soc_stappen, bijna_vol, auto_slaapt,
     pauze, pauze_vergeten, snelladen, kabel_eruit, oude_tijden,

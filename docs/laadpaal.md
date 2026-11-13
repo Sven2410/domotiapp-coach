@@ -737,6 +737,36 @@ staat korter onterecht op 0 A, meet meer ruimte over, en begint om 23:05 op het 
 22:06 (€ 10,20 tegen € 10,30, 52 wissels tegen 58, vol om 05:43). Het virtuele huis heeft daarvoor een echte klok
 voor `async_call_later` gekregen. Proef 262 in test_coach.py.
 
+**Eén meting is geen sprong, ook niet met te weinig punten** (v0.221.0). In een klantwoning in de nacht van 12 op
+13-11-2026 laadde de bus met haast (klaar om 07:00, aangesloten om 00:38 op 20%). De meter meldde elke 10 s hele
+ampères, en fase 3 stond minuten achter elkaar op 16 à 17 A. Om het half uur trok een last in huis één meting lang
+ongeveer 9 A extra op die fase: 26 A om 03:03:23, 17 A om 03:03:33. Twee seconden na die ene meting zette de coach de
+paal van 16 op 9 à 11 A, twaalf keer die nacht (01:10, 01:35, 02:02, 03:03, 03:34, 04:04, 04:34, 05:05, 05:36, 06:28
+en daarna). Na twee minuten ging hij terug naar 16, maar de Ford klom pas tien minuten later weer op naar 9 kW. Om
+07:00 stond de bus op 91%.
+
+De oorzaak: met minder dan drie metingen in het venster telde `_gladde_fase` wat de meter nu zegt, rauw. Een fase
+die blijft staan komt niet opnieuw binnen, dus een rustige fase had er maar één: de uitschieter zelf. Daar ging
+v0.218.0 dus langs. De werkbon dacht eerst aan de batterij, die ernaast van het net laadde. Die hing op L1 en week
+voor de paal zoals bedoeld (`_batterij_wijkt`); tussen de dips stond de paal gewoon op 16 A.
+
+Nu:
+- **de stand van daarvoor telt mee als de vorige meting.** Die stond er tot de uitschieter, dus omlaag gaat het pas
+  na twee metingen of een stand die blijft staan, net als met de mediaan. Zonder iets van daarvoor (na een herstart)
+  telt de meting zelf: voorzichtig.
+- **het tempo is dat van de meter, niet van één fase** (`_meter_tempo`, de meters uit `_watch_phases`: de drie van de
+  hoofdaansluiting samen, elke groep apart). Een rustige fase leert anders geen tempo, of een te traag: de tijd tussen
+  twee wissels. Kent geen fase van de meter een tempo, dan telt de meting zelf, zoals voorheen.
+- **een stand telt na anderhalf tempo** (`FASE_STAAT` van 2 naar 1,5). Staat een meting een tempo lang zonder wissel,
+  dan was de volgende meting er al en zei die hetzelfde; de halve tussentijd is speling. De uitschieters stonden 9 à
+  10 s bij een meter van 10 s, onder de 15 s.
+
+In het virtuele huis (`uitschieter-hele-amps`, deze nacht nagebouwd met een herstart om 03:00 en een auto die na een
+verlaging pas na tien minuten terugkomt): elf keer omlaag werd één keer, bij de herstart, en de bus is om 05:55 vol in
+plaats van om 06:20 (zonder uitschieters 05:59). Een echte sprong met hele ampères (`zekering-sprong-hele-amps`) staat
+nu hoogstens 15 s boven de zekering in plaats van 5: de eerste meting telt niet meer alleen, en het huis rekent in
+stappen van 5 s; in het echt is het anderhalf tempo plus een seconde. Proef 266 in test_coach.py.
+
 **Waarom hij minder vraagt dan hij kan** (v0.102.2). Diezelfde middag stond er
 tien minuten "Snelladen staat aan, dus hij laadt op 14 A, ongeacht de prijs" bij
 een paal van 16 A. Wat hem op 14 hield was de rail van `ceiling_amps`: de paal
