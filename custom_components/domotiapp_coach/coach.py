@@ -658,8 +658,10 @@ FASE_VENSTER = timedelta(seconds=90)
 # meter met hele ampères meldt een stand die blijft staan niet opnieuw, want Home Assistant geeft
 # alleen een wissel door. De enkele uitschieter van 30-08 stond één tussentijd en telt zo niet.
 # Omhoog blijft de hoogste meting van het venster gelden (`_fase_piek`, `ruimten_nu`).
+# Sinds v0.221.0 anderhalf tempo in plaats van twee: staat een meting een tempo lang zonder wissel, dan was de
+# volgende er al en zei hij hetzelfde; de halve tussentijd is speling. Het tempo is dat van de meter (`_meter_tempo`).
 FASE_BEVESTIGD = 2
-FASE_STAAT = 2
+FASE_STAAT = 1.5
 
 # Vanaf welke stroom de fasemeting van een laadpunt iets betekent, en hoe vers
 # de twee sensoren van elkaar moeten zijn. Zie `_measured_phases`.
@@ -1870,6 +1872,9 @@ class ChargerCoach:
         # Het gewone tempo van elke fasemeter in seconden, en de klok die bij een eerste meting boven
         # de grens nog eens kijkt als die blijft staan (v0.218.0). Zie `FASE_STAAT`.
         self._fase_tempo: dict[str, float] = {}
+        # Welke fasen bij dezelfde meter horen (v0.221.0): de drie van de hoofdaansluiting, en die van elke
+        # groep. Zie `_meter_tempo`.
+        self._fase_meter: dict[str, set[str]] = {}
         self._fase_klok: Any = None
         # Wat elke paal in de vorige ronde trok, en wanneer er voor het laatst
         # een paal een stap omlaag deed. Zie `_gladde_fase`.
@@ -4981,6 +4986,7 @@ class ChargerCoach:
         installation = settings.get("installation") or {}
 
         entities: set[str] = set()
+        meters: list[set[str]] = []
         if steerable and sources.get("phases_enabled"):
             for key in ("l1", "l2", "l3"):
                 phase = (sources.get("phases") or {}).get(key) or {}
@@ -4989,6 +4995,7 @@ class ChargerCoach:
                 # een melding die tien keer per seconde langskomt.
                 if phase.get("current"):
                     entities.add(phase["current"])
+            meters.append(set(entities))
 
         # En de stroomsensoren van elke groep, elk met de grens van zijn eigen
         # zekering: een garage van 16 A zit vol bij 14 A, lang voordat de
@@ -5003,12 +5010,20 @@ class ChargerCoach:
                     continue
                 grens_groep = float(groep.get("fuse_amps") or 16)
                 grens_groep -= fuse_margin_van(grens_groep, FUSE_MARGIN_AMPS)
+                meter: set[str] = set()
                 for key in ("l1", "l2", "l3"):
                     sensor = ((groep.get("sensors") or {}).get(key) or {}).get("current")
                     if sensor:
                         entities.add(sensor)
+                        meter.add(sensor)
                         grenzen[sensor] = min(grenzen.get(sensor, grens_groep), grens_groep)
+                meters.append(meter)
 
+        fase_meter: dict[str, set[str]] = {}
+        for meter in meters:
+            for sensor in meter:
+                fase_meter.setdefault(sensor, set()).update(meter)
+        self._fase_meter = fase_meter
         self._watched_phases = entities
         self._urgent_above = grenzen or None
 
@@ -5131,7 +5146,7 @@ class ChargerCoach:
         Een meter die alleen een wissel doorgeeft meldt een stand die blijft niet opnieuw; zonder deze klok
         zou de coach dan tot de volgende ronde wachten. Zie `FASE_STAAT`.
         """
-        tempo = self._fase_tempo.get(entity_id)
+        tempo = self._meter_tempo(entity_id)
         if tempo is None or self._fase_klok is not None:
             return
         wacht = min(FASE_STAAT * tempo, FASE_VENSTER.total_seconds()) + 1
@@ -13578,8 +13593,31 @@ class ChargerCoach:
             grens = self._daling
         waarden = sorted(waarde for stempel, waarde in historie if stempel >= grens)
         if len(waarden) < 3:
-            return amps
+            # Te weinig voor een mediaan (v0.221.0). Een meter van hele ampères geeft een stand die blijft
+            # staan niet opnieuw door, en dan staat er op een rustige fase maar één punt in het venster. In
+            # een klantwoning in de nacht van 12 op 13-11-2026 ging de paal zo twaalf keer op één meting van
+            # 16 naar 9 A, en de auto kwam daarna steeds pas na tien minuten terug. De stand van daarvoor
+            # staat er nog tot de volgende meting, dus die telt mee als de vorige: omlaag gaat het pas na
+            # twee metingen of een stand die blijft staan, net als met de mediaan (`_fase_volgehouden`).
+            # Zonder iets van daarvoor (vlak na een herstart) telt wat de sensor nu zegt.
+            punten = [waarde for stempel, waarde in historie if stempel < grens][-1:] + [
+                waarde for stempel, waarde in historie if stempel >= grens]
+            # En alleen met een bekend tempo van de meter: anders weet de klok niet wanneer een stand
+            # blijft staan, en zou een echte sprong pas tellen als hij uit het venster valt.
+            if len(punten) < FASE_BEVESTIGD or self._meter_tempo(entity_id) is None:
+                return amps
+            return max(min(punten[-FASE_BEVESTIGD:]), self._fase_volgehouden(entity_id, grens, now))
         return max(waarden[len(waarden) // 2], self._fase_volgehouden(entity_id, grens, now))
+
+    def _meter_tempo(self, entity_id: str | None) -> float | None:
+        """Het gewone tempo van de meter van deze fase, in seconden (v0.221.0): het snelste van zijn fasen.
+
+        Een meter van hele ampères geeft een stand die blijft staan niet opnieuw door. Een rustige fase leert zo
+        geen tempo, of een te traag (de tijd tussen twee wissels), terwijl een andere fase van dezelfde meter
+        het wel laat zien. None als geen enkele fase van die meter het al weet.
+        """
+        sensoren = self._fase_meter.get(entity_id or "") or {entity_id or ""}
+        return min((self._fase_tempo[s] for s in sensoren | {entity_id or ""} if s in self._fase_tempo), default=None)
 
     def _fase_volgehouden(self, entity_id: str | None, vanaf: datetime, now: datetime) -> float:
         """Wat deze fase volhoudt (v0.218.0): het laagste van de laatste `FASE_BEVESTIGD` metingen, of de laatste
@@ -13590,7 +13628,7 @@ class ChargerCoach:
         """
         binnen = [waarde for stempel, waarde in (self._fase_historie.get(entity_id or "") or []) if stempel >= vanaf]
         volgehouden = [min(binnen[-FASE_BEVESTIGD:])] if len(binnen) >= FASE_BEVESTIGD else []
-        tempo = self._fase_tempo.get(entity_id or "")
+        tempo = self._meter_tempo(entity_id)
         laatste = (self._fase_historie.get(entity_id or "") or [None])[-1]
         if binnen and tempo and laatste is not None and laatste[0] >= vanaf:
             if (now - laatste[0]).total_seconds() >= FASE_STAAT * tempo:

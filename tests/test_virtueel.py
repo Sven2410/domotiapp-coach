@@ -192,7 +192,12 @@ for naam, vl in V.items():
     # negenenveertig keer 22 A op één fase, en elke keer volgt de auto de
     # lagere limiet met zijn eigen aanloop van een halve minuut.
     over = [r for r in vl.regels if max(r.fase_amps) > s.zekering]
-    sprongen = max(1, sum(1 for g in s.gebeurtenissen if g[1] == "oven"))
+    sprongen = sum(1 for g in s.gebeurtenissen if g[1] == "oven")
+    # Een last die hooguit eens per tien minuten kort aangaat telt net zo (v0.221.0, `uitschieter-hele-amps`): die
+    # eerste meting staat er al voor de coach hem ziet. Een puls van om de paar seconden niet, die is één last.
+    if s.huis.puls is not None and s.huis.puls[2] >= 10:
+        sprongen += int(s.duur_uren * 60 // s.huis.puls[2])
+    sprongen = max(1, sprongen)
     controle(f"{naam}: de zekering wordt hooguit een minuut per sprong overschreden",
              len(over) * vl.stap_uur * 60 <= 1.0 * sprongen, f"{len(over) * vl.stap_uur * 60:.1f} minuten boven "
              f"{s.zekering} A, hoogste {vl.hoogste_fase:.1f} A, {sprongen} sprongen")
@@ -1948,6 +1953,10 @@ for naam, vl in V.items():
     # € 1,45). Dat is precies wat die twee scenario's laten zien; met de gemeten dagen wordt het € 1,34.
     # En een zonvoorspeller die na een herstart niet terugkomt (v0.217.0): dan de schatting uit een donkere week.
     zon_fout = naam in ("growatt-zon-onzeker-zonder", "growatt-zon-te-hoog", "growatt-opstart-nooit")
+    # `uitschieter-hele-amps` (v0.221.0) gaat over de paal. Met de puls van 3,5 kW om het half uur laadt de batterij
+    # 's nachts tot 76% voor een ochtend die maar 400 W vraagt (€ 21,90 tegen € 19,64; met de code van voor v0.221.0
+    # € 21,77): elke puls wekt een ronde die hem ziet. Dat staat open; zonder de puls klopt het (€ 19,49 tegen 19,56).
+    zon_fout = zon_fout or naam == "uitschieter-hele-amps"
     if bat.wekelijks_vol_dag is None and not nalopen and not zon_fout:
         controle(f"{naam}: de batterij maakt de dag niet duurder",
                  vl.bat_kosten_met <= vl.bat_kosten_zonder + 0.02,
@@ -2690,8 +2699,11 @@ if (vl := v("auto-neemt-minder")):
 
 # De zekering: omlaag snel (v0.218.0). In een klantwoning op 05-11-2026 stond fase 3 bijna een minuut boven de grens;
 # de meter meldde elke 14 s, en de mediaan over anderhalve minuut had pas na de helft van het venster de meerderheid.
-# Voor v0.218.0 hier 70 s per sprong; nu twee metingen.
-for naam, per_sprong in (("zekering-sprong", 28), ("zekering-sprong-hele-amps", 10)):
+# Voor v0.218.0 hier 70 s per sprong; nu twee metingen. Met hele ampères sinds v0.221.0 hoogstens 15 s: de eerste
+# meting telt niet meer zonder een tweede of een stand die anderhalf tempo van de meter (5 s) blijft staan, en het
+# huis rekent in stappen van 5 s. Tot dan telde de eerste meting rauw, en dat zette de paal ook op een uitschieter
+# omlaag (`uitschieter-hele-amps`).
+for naam, per_sprong in (("zekering-sprong", 28), ("zekering-sprong-hele-amps", 15)):
     if (vl := v(naam)):
         boven = [r.tijd for r in vl.regels if max(r.fase_amps) > vl.scenario.zekering]
         blokken = []
@@ -2703,6 +2715,21 @@ for naam, per_sprong in (("zekering-sprong", 28), ("zekering-sprong-hele-amps", 
         print(f"  {naam}: boven de zekering per sprong {duur} s")
         controle(f"{naam}: per sprong hoogstens {per_sprong} s boven de zekering, en het laden gaat door",
                  len(duur) == 2 and max(duur) <= per_sprong and vl.geladen_kwh > 5, f"{duur} {vl.geladen_kwh:.1f} kWh")
+
+# Eén meting is geen sprong (v0.221.0). In een klantwoning in de nacht van 12 op 13-11-2026 ging de paal twaalf keer op
+# één meting van 16 naar 9 A, en de bus klom daarna steeds pas na tien minuten weer op: om 07:00 op 91%. Alleen bij
+# de herstart van 03:00 mag de eerste meting nog tellen, want dan weet de coach niets van daarvoor.
+if (vl := v("uitschieter-hele-amps")) and (zonder := v("uitschieter-hele-amps-zonder")):
+    lim = [(t, d.get("current")) for t, dienst, d in vl.opdrachten if dienst == "set_charger_dynamic_limit"]
+    # Elke stap omlaag in de minuut na een uitschieter (om het hele en het halve uur), behalve bij de herstart.
+    omlaag = [f"{t:%H:%M:%S}" for (t, a), (_, b) in zip(lim[1:], lim)
+              if a is not None and b is not None and 0 < a < b and b >= 14 and t.minute % 30 == 0
+              and f"{t:%H:%M}" != "03:00"]
+    print(f"  uitschieter: omlaag {omlaag}, vol om {vl.klaar_op:%H:%M:%S} (zonder uitschieter {zonder.klaar_op:%H:%M:%S})")
+    controle("uitschieter: de paal gaat niet omlaag op één meting, behalve vlak na de herstart",
+             not omlaag, f"{omlaag}")
+    controle("uitschieter: de bus is een uur voor de klaar-tijd vol, zoals zonder de uitschieters (eis 2)",
+             gehaald(vl) and vl.klaar_op is not None and f"{vl.klaar_op:%H:%M}" <= "06:00", f"{vl.klaar_op}")
 
 # De voorzichtige zon (v0.219.0) neemt alleen laden weg dat er voor de zon van straks was. Op de ochtend van 11-11
 # laadt de Anker hier in het goedkope uur voor 06:00 voor de avond; dat blijft, met en zonder gemeten dagen.
