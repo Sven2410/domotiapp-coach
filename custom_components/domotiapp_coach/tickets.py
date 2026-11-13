@@ -260,9 +260,9 @@ def reageer(
 
 def antwoord(
     data: dict[str, Any], ticket_id: Any, tekst: Any, at: datetime, stand: str | None = None,
-    naam: str = "DomotiTech",
+    naam: str = "Coach Assist",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Een antwoord van DomotiTech; bij een ticket wordt de stand `stand`, of `in_behandeling`. Het gesprek heeft
+    """Een antwoord van Coach Assist (tot v0.223.0 met de naam DomotiTech); bij een ticket wordt de stand `stand`, of `in_behandeling`. Het gesprek heeft
     geen stand."""
     ticket = zoek(data, ticket_id)
     if ticket_id != GESPREK:

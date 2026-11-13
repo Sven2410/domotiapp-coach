@@ -132,8 +132,7 @@ function schrijfHoofd(pdf, vel, gegevens, logo) {
   }
   const links = MARGE + (logo ? (logo.w / logo.h) * 30 + 12 : 0);
 
-  pdf.text(links, boven + 13, "DomotiApp", { size: 14, bold: true, color: KLEUR.inkt });
-  pdf.text(links + textWidth("DomotiApp ", 14, true), boven + 13, "Coach", {
+  pdf.text(links, boven + 13, "COACH", {
     size: 14,
     bold: true,
     color: KLEUR.merk,

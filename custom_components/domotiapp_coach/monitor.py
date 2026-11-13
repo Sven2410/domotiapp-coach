@@ -444,7 +444,7 @@ class LoadMonitor:
                 await self.hass.services.async_call(
                     "notify",
                     target,
-                    {"title": "DomotiApp Coach", "message": message},
+                    {"title": "COACH", "message": message},
                     blocking=False,
                 )
             except Exception:  # noqa: BLE001 - one bad target must not stop the rest

@@ -60,6 +60,9 @@ def apparaat_info(device: dict[str, Any]) -> DeviceInfo:
     return DeviceInfo(
         identifiers={(DOMAIN, str(device.get("id") or ""))},
         name=device.get("name") or MODELLEN.get(soort, "Apparaat"),
+        # Het systeem heet sinds v0.223.0 COACH, maar de fabrikant blijft zo: de kaarten van DomotiApp Lovelace
+        # zoeken de apparaten van de coach op deze naam (`COACH_FABRIKANT`). Omzetten pas als elke klant een
+        # lovelace heeft die beide namen kent; de uitrol installeert de twee los van elkaar.
         manufacturer="DomotiApp Coach",
         model=MODELLEN.get(soort, "Apparaat"),
     )

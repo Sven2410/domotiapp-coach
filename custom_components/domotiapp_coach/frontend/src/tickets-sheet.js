@@ -1,5 +1,5 @@
 /**
- * Vraag het de DomotiTech Bot (v0.220.0): een doorlopend gesprek met de bot, en tickets van het huis.
+ * Vraag het Coach Assist (v0.220.0, tot v0.223.0 de DomotiTech Bot): een doorlopend gesprek, en tickets van het huis.
  *
  * De eigenaar op 12-11-2026: "Ik wil het centraal houden dus het moet in een popup komen zoals Vraag het de
  * DomotiTech Bot snap je? Alles in HA". En op 13-11-2026: "Gewoon een vraag stellen over de installatie en echt een
@@ -14,7 +14,7 @@
 import { DacElement, define, openSheet } from "./base.js";
 import { icons } from "./icons.js";
 import { huisNu } from "./format.js";
-import { sheetCss } from "./theme.js";
+import { LOGO_URL, sheetCss } from "./theme.js";
 import { nt, t } from "./i18n.js";
 import { wanneerTekst } from "./berichten-sheet.js";
 
@@ -55,6 +55,13 @@ export function ticketsHtml(tickets, userId, nu = huisNu()) {
     </button>`).join("");
 }
 
+/**
+ * Wie een bericht schreef. Een antwoord heet sinds v0.223.0 Coach Assist; wat er tot dan in de opslag kwam, staat er met
+ * de naam DomotiTech, en dat is hetzelfde.
+ */
+export const afzender = (b) =>
+  b?.van === "domotitech" && (!b.naam || b.naam === "DomotiTech") ? "Coach Assist" : String(b?.naam ?? "");
+
 /** De berichten als html; een foto als plaatje met `data-foto`, het adres zet het paneel erin. */
 export function gesprekHtml(ticket, nu = huisNu()) {
   const berichten = ticket?.berichten ?? [];
@@ -63,7 +70,7 @@ export function gesprekHtml(ticket, nu = huisNu()) {
   }
   return berichten.map((b) => `
     <div class="bericht ${b.van === "domotitech" ? "zij" : "wij"}">
-      <div class="b-kop"><strong>${esc(b.naam || (b.van === "domotitech" ? "DomotiTech" : ""))}</strong><span>${esc(wanneerTekst(b.at, nu))}</span></div>
+      <div class="b-kop"><strong>${esc(afzender(b))}</strong><span>${esc(wanneerTekst(b.at, nu))}</span></div>
       ${b.tekst ? `<p>${esc(b.tekst)}</p>` : ""}
       ${(b.bijlagen ?? []).length ? `<div class="fotos">${b.bijlagen.map((f) => `<img alt="${t("Foto")}" data-foto="${esc(f.id)}">`).join("")}</div>` : ""}
     </div>`).join("");
@@ -86,7 +93,8 @@ async function verklein(bestand) {
 
 const css = /* css */ `
   ${sheetCss}
-  .tabs { display: flex; gap: 6px; margin: 0 0 12px; }
+  .sheet-head .logo { width: 38px; height: 38px; flex: 0 0 auto; object-fit: contain; }
+  .tabs { display: flex; gap: 6px; margin: 14px 0 12px; }
   .tabs button[aria-selected="true"] { border-color: rgba(25,143,217,0.55); background: var(--dac-accent-soft); }
   .lijst, .gesprek { display: grid; gap: 8px; }
   .gesprek { max-height: 52vh; overflow-y: auto; overscroll-behavior: contain; }
@@ -153,9 +161,10 @@ export class DacTicketsSheet extends DacElement {
     return /* html */ `
       <dialog class="sheet" tabindex="-1" aria-labelledby="bot-titel">
         <div class="sheet-head">
+          <img class="logo" src="${LOGO_URL}" alt="" draggable="false">
           <div>
-            <div class="eyebrow">DomotiTech</div>
-            <h3 id="bot-titel">${t("Vraag het de DomotiTech Bot")}</h3>
+            <div class="eyebrow">DomotiApp</div>
+            <h3 id="bot-titel">${t("Vraag het Coach Assist")}</h3>
           </div>
           <button class="sheet-close" type="button" id="bot-dicht" aria-label="${t("Sluiten")}">${icons.close}</button>
         </div>

@@ -290,6 +290,9 @@ export const baseCss = /* css */ `
  * on the overview and the delete confirmation under Apparaten -- and a panel
  * where two dialogs look different is a panel that looks unfinished.
  */
+/** Het logo van COACH (v0.223.0; daarvoor het merkteken van DomotiTech): de kop, Coach Assist en het rapport. */
+export const LOGO_URL = new URL("../img/coach.png", import.meta.url).href;
+
 export const sheetCss = /* css */ `
   dialog.sheet {
     width: min(430px, calc(100vw - 24px));

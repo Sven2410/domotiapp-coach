@@ -1,9 +1,13 @@
-# DomotiApp Coach
+<img src="custom_components/domotiapp_coach/brand/icon@2x.png" alt="" width="96">
+
+# COACH
+
+De integratie `domotiapp_coach` (tot v0.223.0 DomotiApp Coach).
 
 Een energiedashboard voor Home Assistant dat niet alleen laat zien wat er
 gebeurt, maar je apparaten ook op het gunstigste moment laat draaien.
 
-Het standaard energiedashboard laat zien *wat er gebeurd is*. DomotiApp Coach
+Het standaard energiedashboard laat zien *wat er gebeurd is*. COACH
 laat zien wat er **nu** gebeurt, rekent uit wanneer stroom het goedkoopst is, en
 schakelt zelf: de laadpaal, de thuisbatterij, de vaatwasser en de boiler.
 
@@ -46,12 +50,12 @@ dat, in plaats van het gat te vullen met iets plausibels.
 
 1. HACS, menu rechtsboven, **Custom repositories**
 2. Repository: `https://github.com/Sven2410/domotiapp-coach`, type: **Integration**
-3. Zoek **DomotiApp Coach** in HACS en download hem
+3. Zoek **COACH** in HACS en download hem
 4. Home Assistant herstarten
-5. **Instellingen, Apparaten & diensten, Integratie toevoegen, DomotiApp Coach**
+5. **Instellingen, Apparaten & diensten, Integratie toevoegen, COACH**
 
 Het toevoegen vraagt niets: alles stel je daarna in het paneel zelf in. Na het
-toevoegen verschijnt **DomotiApp Coach** in de zijbalk.
+toevoegen verschijnt **COACH** in de zijbalk.
 
 ### Handmatig
 
@@ -307,7 +311,7 @@ Wie het dashboard draait met de HACS-integratie
 [Kiosk Mode](https://github.com/NemesisRE/kiosk-mode) verbergt de header en de
 zijbalk van Home Assistant. Daar is in het ontwerp rekening mee gehouden:
 
-- De header van DomotiApp Coach hoort **bij het paneel zelf** en blijft dus
+- De header van COACH hoort **bij het paneel zelf** en blijft dus
   zichtbaar.
 - De **Home**-knop rechtsboven brengt je terug naar het eigen dashboard.
 
@@ -315,7 +319,7 @@ Voeg op dat eigen dashboard een knop toe die de andere kant op gaat:
 
 ```yaml
 type: button
-name: DomotiApp Coach
+name: COACH
 icon: mdi:home-lightning-bolt
 tap_action:
   action: navigate
@@ -375,7 +379,7 @@ custom_components/domotiapp_coach/
 ├── monitor.py             bewaakt de belasting en stuurt de melding
 ├── ontvangers.py          wie welke melding krijgt
 ├── report.py              het pdf-rapport
-├── brand/                 icon.png, logo.png
+├── brand/                 icon.png, logo.png en @2x: het logo van COACH
 └── frontend/
     ├── domotiapp-coach-panel.js   entry point, routing, rechten
     └── src/

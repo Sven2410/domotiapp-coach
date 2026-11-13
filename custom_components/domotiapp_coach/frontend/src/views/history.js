@@ -18,12 +18,12 @@
 
 import { DacElement, define } from "../base.js";
 import { icons } from "../icons.js";
+import { LOGO_URL } from "../theme.js";
 import { energy, euro, geldBedrag, huisNu, percent, signedPower } from "../format.js";
 import { deviceLabel, deviceLabelMap } from "../devices.js";
 import { datum, getal, locale, nt, t, tijd, tn } from "../i18n.js";
 
 /** Het merkteken op het rapport. */
-const LOGO_URL = new URL("../../img/domotitech-mark.png", import.meta.url).href;
 import { accuRendement, allInPrijzen, contractAt, laadCoachPrijzen, tariff, volgCoach } from "../data-source.js";
 import { ZOOM_MAX, balkSoort, legenda, metHerkomst, netReeks, stippen, tekenTijdlijn, tekenUitleg, tijdlijn, zoomStap } from "../tijdlijn.js";
 import { afleveren, base64Van } from "../pdf.js";
@@ -2130,7 +2130,7 @@ class DacViewHistory extends DacElement {
 
     try {
       const blob = await reportPdf(gegevens);
-      const naam = `DomotiApp Coach ${gegevens.periode}${beknopt ? ` (${t("beknopt")})` : ""}.pdf`.replace(/[\\/:*?"<>|]/g, "-");
+      const naam = `COACH ${gegevens.periode}${beknopt ? ` (${t("beknopt")})` : ""}.pdf`.replace(/[\\/:*?"<>|]/g, "-");
       const uitkomst = await this.bezorg_(blob, naam);
       if (label && uitkomst === "mislukt") label.textContent = t("Niet gelukt");
       else if (label) label.textContent = oud;
@@ -2242,7 +2242,7 @@ class DacViewHistory extends DacElement {
         piek: t("Piek").toLowerCase(),
       });
       const blob = new Blob([csvTekst(kop, rijen, opmaak)], { type: "text/csv;charset=utf-8" });
-      const naam = `DomotiApp Coach ${periodLabel(this.period_, start)} ${t(korrel.kop).toLowerCase()}.csv`.replace(/[\\/:*?"<>|]/g, "-");
+      const naam = `COACH ${periodLabel(this.period_, start)} ${t(korrel.kop).toLowerCase()}.csv`.replace(/[\\/:*?"<>|]/g, "-");
       const uitkomst = await this.bezorg_(blob, naam, "csv");
       label.textContent = uitkomst === "mislukt" ? t("Niet gelukt") : oud;
     } catch (fout) {

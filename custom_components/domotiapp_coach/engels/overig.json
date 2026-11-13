@@ -118,7 +118,7 @@
   "Hij laadt van het net tot {soc}%, tot {eind}, tegen {prijs}.": "It charges from the grid to {soc}%, until {eind}, at {prijs}.",
   "In de goedkope uren houdt hij de batterij vast op {soc}% ({vakken}); het huis haalt dan van het net.": "In the cheap hours it holds the battery at {soc}% ({vakken}); the home then runs on the grid.",
   "In de goedkope uren laadt hij {kwh} van het net bij ({vakken}), tot {soc}%.": "In the cheap hours it tops up {kwh} from the grid ({vakken}), to {soc}%.",
-  "DomotiTech heeft geantwoord op je vraag #{nr}": "DomotiTech replied to your question #{nr}",
+  "Coach Assist heeft geantwoord op ticket #{nr}": "Coach Assist replied to ticket #{nr}",
   "De tekst is leeg.": "The text is empty.",
   "De tekst is langer dan {n} tekens.": "The text is longer than {n} characters.",
   "Onbekende soort: {soort}.": "Unknown type: {soort}.",
@@ -137,5 +137,5 @@
   "Hoogstens {n} foto's per bericht.": "At most {n} photos per message.",
   "Het gesprek heeft geen stand.": "The conversation has no state.",
   "Foto": "Photo",
-  "DomotiTech heeft je vraag beantwoord": "DomotiTech answered your question"
+  "Coach Assist heeft je vraag beantwoord": "Coach Assist answered your question"
 }
