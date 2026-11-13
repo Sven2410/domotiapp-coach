@@ -3948,6 +3948,10 @@ class ChargerCoach:
         (`INTEGRATIE_OPSTART`): dan kon hij bij het starten zijn server niet vinden, en dat komt niet
         vanzelf goed. Een herladen van een vorige start telt dan niet; elke start mag één keer, en de
         melding blijft één keer.
+
+        Sinds v0.223.1 alleen als er na de start nog niets van kwam. Thuis bij de eigenaar op 13-11-2026 gaf de
+        stekker van de vaatwasser na de start van 11:45 een kwartier lang waarden, viel om 12:00:31 een halve
+        minuut weg, en de eerste controle herlaadde hem midden in een programma, met een waarschuwing in het log.
         """
         staten = [s for s in (self.hass.states.get(e) for e in entity_ids) if s is not None]
         if not staten:
@@ -3974,7 +3978,10 @@ class ChargerCoach:
         }
         sinds = max(dt_util.as_local(s.last_changed).replace(tzinfo=None) for s in staten)
         start = self._integratie_start
-        opstart = start is not None and abs(sinds - start) <= INTEGRATIE_OPSTART
+        # Stil sinds de opstart is alleen wat na de start nog niets gaf (v0.223.1). Kwam hij na de start terug
+        # (`_opstart_entries`, v0.217.0) en viel hij daarna even weg, dan is dat een hapering, en die krijgt het uur.
+        gezien = (self._opstart_entries.get(entry_id) or {}).get("s") is not None
+        opstart = start is not None and not gezien and abs(sinds - start) <= INTEGRATIE_OPSTART
         herladen = self._integratie_stil.get(entry_id)
         if herladen is not None and opstart and herladen < start:
             self._integratie_stil.pop(entry_id, None)

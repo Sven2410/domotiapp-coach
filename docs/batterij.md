@@ -2162,12 +2162,18 @@ probeert dat niet opnieuw.
   stroomstoring één keer herladen. De kritieke melding als het niet helpt blijft één keer, tot hij terugkomt.
 - **Een herstart halverwege:** het kwartier telt opnieuw vanaf de nieuwe start. De start zelf staat niet in de
   opslag, want hij hoort bij deze start.
-- Wat de coach niet bijhoudt: of een entiteit in het eerste kwartier even een waarde had. Valt hij binnen dat
-  kwartier opnieuw stil, dan telt het als stil sinds de opstart.
+- **Na de start terug en dan even weg** (sinds v0.223.1): geen opstartstilte maar een hapering, en die krijgt het
+  uur. Of er na de start iets van de integratie terugkwam, staat al in de meting van v0.217.0 (`_opstart_entries`,
+  zie `docs/herstart.md`). Tot v0.223.1 telde alleen het kwartier rond de start. Thuis bij de eigenaar op 13-11-2026
+  kwam de stekker van de vaatwasser na de start van 11:45 meteen terug, gaf een kwartier lang waarden, en viel om
+  12:00:31 een halve minuut weg. De eerste controle herlaadde de Shelly-integratie midden in een programma, met een
+  waarschuwing in het log en dus een alarm. Een stekker op wifi doet dat een paar keer per uur.
 
 Proef 235 in test_coach.py: de start van 16:03 (herladen om 16:18 in plaats van 17:18), een tweede stroomstoring,
 een herstart halverwege, een coach die na de integratie start, een paal die na de start nog iets meldde (het uur),
-en een omvormer die 's nachts opstart. Proef 228 begint nu met een coach die al draaide.
+en een omvormer die 's nachts opstart. Proef 228 begint nu met een coach die al draaide. Sinds v0.223.1 ook met de meting erbij:
+na de start terug en om 11:59:50 even weg (niet herladen, en na een uur stil om 13:00 wel), en wat na de start nooit
+iets gaf (nog steeds om 16:18).
 
 ## Een batterij die de coach niet volgt (v0.167.0)
 
