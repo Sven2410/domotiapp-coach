@@ -14574,6 +14574,45 @@ try:
     controle("eerst wel een waarde en daarna stil: herladen na het uur (17:48), niet eerder",
              herladen235(hass235d) == ["17:48"], f"{hass235d.herladen}")
 
+    # Een hapering vlak na de start (v0.223.1). Thuis bij de eigenaar op 13-11-2026: de stekker van de vaatwasser
+    # kwam na de start van 11:45 terug, gaf een kwartier waarden, viel om 12:00:31 een halve minuut weg, en de eerste
+    # controle herlaadde hem midden in een programma. Hier met de meting van v0.217.0 erbij, zoals in een echte ronde.
+    def loop235m(hass, coach, van, tot, gemeld):
+        async def tell(bericht, kritiek=False, telefoon=True):
+            gemeld.append((bericht, kritiek, telefoon))
+
+        coach._async_tell = tell
+        if coach._opstart is None:
+            coach._opstart = van
+        t = van
+        while t < tot:
+            hass.nu235 = t
+            asyncio.run(coach._async_integraties(inst235, t))
+            asyncio.run(coach._async_opstart_meten(inst235, t))
+            t += dt.timedelta(minutes=1)
+
+    hass235h, coach235h = huis235(D235.replace(hour=11, minute=44, second=8))
+    loop235m(hass235h, coach235h, D235.replace(hour=11, minute=45), D235.replace(hour=11, minute=46), [])
+    paal235(hass235h, D235.replace(hour=11, minute=45, second=50), "disconnected")
+    # De coach startte hier om 11:45:00 en niet om 11:45:30, dus de hapering valt om 11:59:50, net als in het echt
+    # binnen het kwartier rond de start.
+    loop235m(hass235h, coach235h, D235.replace(hour=11, minute=46), D235.replace(hour=12), [])
+    paal235(hass235h, D235.replace(hour=11, minute=59, second=50))
+    gemeld235h = []
+    loop235m(hass235h, coach235h, D235.replace(hour=12), D235.replace(hour=12, minute=59), gemeld235h)
+    print(f"  na de start terug, om 11:59:50 weer stil: herladen {herladen235(hass235h)}, "
+          f"gemeten {coach235h._opstart_entries.get('e-paal')}")
+    controle("na de start terug en daarna even weg: niet herladen bij de eerste controle (12:00) of de tweede",
+             herladen235(hass235h) == [], f"{hass235h.herladen}")
+    loop235m(hass235h, coach235h, D235.replace(hour=12, minute=59), D235.replace(hour=13, minute=30), gemeld235h)
+    controle("blijft hij stil, dan het uur van v0.188.0: herladen om 13:00, het eerste kwartier na een uur stil",
+             herladen235(hass235h) == ["13:00"], f"{hass235h.herladen}")
+    # Met dezelfde meting erbij: wat na de start nooit iets gaf, herlaadt nog steeds bij de eerste controle.
+    hass235i, coach235i = huis235(D235.replace(hour=16, minute=3, second=15))
+    loop235m(hass235i, coach235i, D235.replace(hour=16, minute=3), D235.replace(hour=16, minute=24), [])
+    controle("en wat na de start nooit iets gaf, met de meting erbij: nog steeds bij de eerste controle (16:18)",
+             herladen235(hass235i) == ["16:18"], f"{hass235i.herladen} {coach235i._opstart_entries}")
+
     # Een omvormer die 's nachts opstart: niet herladen, en overdag pas een uur nadat de zon op tien graden kwam.
     hass235e, coach235e = huis235(D235.replace(hour=16, minute=3), omv=D235.replace(hour=2, minute=1), zon=-20.0)
     paal235(hass235e, D235.replace(hour=2, minute=1), "disconnected")
