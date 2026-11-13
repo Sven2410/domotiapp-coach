@@ -11,7 +11,7 @@
  * markeren (`dac-bericht-gelezen`).
  */
 
-import { DacElement, define } from "./base.js";
+import { DacElement, define, openSheet } from "./base.js";
 import { icons } from "./icons.js";
 import { huisNu, huisTijd } from "./format.js";
 import { sheetCss } from "./theme.js";
@@ -132,7 +132,7 @@ export class DacBerichtenSheet extends DacElement {
   open() {
     this.paint_();
     const dialog = this.$("dialog");
-    if (dialog && !dialog.open) dialog.showModal();
+    openSheet(dialog);
   }
 
   paint_() {

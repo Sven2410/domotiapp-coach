@@ -604,3 +604,21 @@ een element daarom als weg bij `hidden` of display none, en kijkt in de bron of 
 weg gaat een `[hidden]`-regel heeft. Het waterveld in Meldingen is een `.veld` met `display: grid`, en
 kreeg die regel erbij.
 
+
+## Een venster open: de pagina erachter staat stil (v0.222.0)
+
+De eigenaar op 13-11-2026, met de DomotiTech Bot open op zijn iPhone: "ik kan de achtergrond scrollen als de bot
+geopend is, dat moet ook niet". Een `<dialog>` met `showModal` maakt de pagina erachter onbruikbaar, maar niet stil:
+op iOS scrolt hij gewoon mee.
+
+Elk venster opent daarom met `openSheet` uit base.js, niet meer met `showModal` zelf. Die zet alles wat de pagina
+kan laten scrollen op `overflow: hidden`: de houders die scrollen tussen het venster en het document, ook door de
+schaduw van Home Assistant heen, en het document zelf. Gaat het laatste open venster dicht, of verdwijnt het element
+met een open venster van de pagina, dan krijgt elke houder zijn eigen waarde terug. In het venster zelf stopt scrollen
+aan de rand (`overscroll-behavior: contain` in `sheetCss`). De proef in test_rapport.mjs bouwt zo'n keten na, en
+controleert dat er nergens anders nog `showModal` staat.
+
+Dezelfde dag, over de bot: "dat oranje vind ik niet mooi, moet de kleuren zijn van onze huisstijl". Het oranje was
+`--warn`, de kleur voor een waarschuwing. De gekozen tab en soort, de hoofdknop, een ticket met een nieuw antwoord en
+een bericht van DomotiTech hebben nu het accent, zoals de knoppen in Instellen (`--dac-accent-soft`, de rand in het
+blauw van `--dac-accent-hi`). De kaart van DomotiApp Lovelace krijgt hetzelfde, zodat ze gelijk blijven.

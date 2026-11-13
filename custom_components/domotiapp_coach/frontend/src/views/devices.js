@@ -8,7 +8,7 @@
  * a row in a table.
  */
 
-import { define } from "../base.js";
+import { define, openSheet } from "../base.js";
 import { icons } from "../icons.js";
 import {
   CAR_BRANDS,
@@ -2106,7 +2106,7 @@ class DacViewDevices extends DacEditorElement {
     )
       ? t("Dit apparaat verdwijnt uit de lijst, met alles wat je eraan gekoppeld hebt en met zijn schema. Verwijderen gaat meteen door en is niet terug te draaien.")
       : t("Dit apparaat is nog niet opgeslagen, dus het verdwijnt gewoon weer uit de lijst.");
-    this.$("#confirm").showModal();
+    openSheet(this.$("#confirm"));
   }
 
   /** The devices as Home Assistant has them, without anything unsaved. */

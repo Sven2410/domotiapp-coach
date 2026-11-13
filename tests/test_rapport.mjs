@@ -7104,6 +7104,75 @@ proef("alleen wat van toepassing is: per installatievorm welke blokken er staan 
   assert.ok(lees("schedule-sheet.js").includes("[hidden] { display: none !important; }"), "Instellen: elke rij met hidden is weg");
 });
 
+proef("een venster open: de pagina erachter staat stil, en dicht weer zoals hij was (v0.222.0)", async () => {
+  const { openSheet, scrollers, DacElement } = await import("../custom_components/domotiapp_coach/frontend/src/base.js");
+  const el = (overflowY = "visible", inline = "") => ({ nodeType: 1, style: { overflow: inline }, cs: { overflowY, overflow: overflowY } });
+  const html = el("visible"), body = el("visible", "");
+  const houder = el("auto", "auto");            // wat in Home Assistant scrolt
+  const vak = el("visible");                     // een gewoon blok ertussen
+  const gast = el("visible");                    // het venster van de coach zelf
+  html.parentNode = null; body.parentNode = html;
+  houder.parentNode = body;
+  const schaduwHA = { nodeType: 11, host: houder };
+  vak.parentNode = schaduwHA;
+  gast.parentNode = vak;
+  const schaduw = { nodeType: 11, host: gast };
+  const venster = () => {
+    const luisteraars = [];
+    return {
+      nodeType: 1, open: false, parentNode: schaduw, style: {},
+      getRootNode: () => schaduw,
+      showModal() { if (this.open) throw new Error("al open"); this.open = true; },
+      addEventListener: (soort, fn) => luisteraars.push(fn),
+      close() { this.open = false; luisteraars.splice(0).forEach((fn) => fn()); },
+    };
+  };
+  const oudDoc = globalThis.document, oudCs = globalThis.getComputedStyle;
+  globalThis.document = { ...oudDoc, documentElement: html, body };
+  globalThis.getComputedStyle = (x) => x.cs;
+  try {
+    const a = venster(), b = venster();
+    assert.deepEqual(scrollers(a), [houder, html, body], "wat scrolt, door de schaduw heen, en het document");
+    openSheet(a);
+    assert.ok(a.open);
+    assert.equal(houder.style.overflow, "hidden");
+    assert.equal(html.style.overflow, "hidden");
+    assert.equal(body.style.overflow, "hidden");
+    assert.equal(vak.style.overflow, "", "een blok dat niet scrolt blijft van de coach af");
+    openSheet(a);                                // nog eens: geen fout, niets dubbel
+    openSheet(b);
+    a.close();
+    assert.equal(houder.style.overflow, "hidden", "het tweede venster is nog open");
+    b.close();
+    assert.equal(houder.style.overflow, "auto", "dicht: zijn eigen waarde terug");
+    assert.equal(html.style.overflow, "");
+    assert.equal(body.style.overflow, "");
+
+    // Gaat het element weg terwijl het venster nog open is, dan komt de pagina ook weer los.
+    const c = venster();
+    openSheet(c);
+    assert.equal(body.style.overflow, "hidden");
+    const sheet = Object.create(DacElement.prototype);
+    Object.defineProperty(sheet, "shadowRoot", { value: schaduw });
+    sheet.disconnectedCallback();
+    assert.equal(body.style.overflow, "");
+    assert.equal(houder.style.overflow, "auto");
+  } finally {
+    globalThis.document = oudDoc;
+    globalThis.getComputedStyle = oudCs;
+  }
+
+  // Elk venster opent zo, en de bot heeft de kleuren van de huisstijl.
+  const bron = (pad) => readFileSync(new URL(`../custom_components/domotiapp_coach/frontend/src/${pad}`, import.meta.url), "utf8");
+  for (const pad of ["accu-doel-sheet.js", "berichten-sheet.js", "tickets-sheet.js", "schedule-sheet.js",
+    "plan-ahead-sheet.js", "views/devices.js", "views/overview.js", "views/editor-base.js", "header.js"]) {
+    assert.ok(!bron(pad).includes("showModal"), `${pad} opent een venster met openSheet`);
+  }
+  assert.ok(!/250,\s*178,\s*25/.test(bron("tickets-sheet.js")), "geen waarschuwingsoranje in de bot");
+  assert.ok(bron("tickets-sheet.js").includes("var(--dac-accent-soft)"));
+  assert.ok(bron("theme.js").includes("overscroll-behavior: contain;"));
+});
+
 for (const [naam, fn] of proeven) {
   try {
     await fn();

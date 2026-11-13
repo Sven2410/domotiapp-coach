@@ -303,6 +303,9 @@ export const sheetCss = /* css */ `
     background: var(--dac-bg-raise);
     color: var(--dac-ink);
     box-shadow: 0 30px 70px rgba(0,0,0,0.55);
+    /* Scrolling inside a sheet stops at its edge instead of carrying on into
+       the page behind it; openSheet in base.js holds that page still. */
+    overscroll-behavior: contain;
   }
   dialog.sheet::backdrop { background: rgba(0,0,0,0.58); }
   /* A dialog hands focus to the first thing in it, which is the close button,
