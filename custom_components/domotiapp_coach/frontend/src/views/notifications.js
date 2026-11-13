@@ -20,7 +20,7 @@
  *   besluit    elk besluit van de coach; standaard uit, want dat zijn er veel
  *   belasting  je aansluiting wordt te zwaar belast
  *   herinnering  de auto hangt niet aan de paal en heeft te weinig (v0.212.0)
- *   tickets      DomotiTech antwoordde op een vraag aan de bot (v0.220.0)
+ *   tickets      Coach Assist antwoordde op een vraag of ticket (v0.220.0)
  * Een soort die er bij een persoon nog niet staat, staat zoals bij een nieuwe
  * persoon (`STANDAARD_SOORTEN`), net als in ontvangers.py.
  * De eigenaar op 05-09-2026: "dat je op normale en kritieke meldingen kan filteren
@@ -94,8 +94,8 @@ export const SOORTEN_INFO = [
   },
   {
     id: "tickets",
-    label: nt("Antwoorden van DomotiTech"),
-    uitleg: nt("Als DomotiTech antwoordt op een vraag die je de DomotiTech Bot stelde."),
+    label: nt("Antwoorden van Coach Assist"),
+    uitleg: nt("Als Coach Assist antwoordt op je vraag of ticket."),
   },
   {
     id: "belasting",

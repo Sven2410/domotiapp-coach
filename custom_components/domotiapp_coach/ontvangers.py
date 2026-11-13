@@ -15,7 +15,7 @@ het paneel, plus de zekeringmelding van monitor.py:
   besluit    elk besluit van de coach; standaard uit, want dat zijn er veel
   belasting  de aansluiting wordt te zwaar belast
   herinnering  de auto hangt niet aan de paal en heeft te weinig (v0.212.0)
-  tickets    DomotiTech antwoordde op een vraag aan de bot (v0.220.0)
+  tickets    Coach Assist antwoordde op een vraag of ticket (v0.220.0)
 
 Een soort die er bij een persoon nog niet staat, telt zoals bij een nieuwe
 persoon (`STANDAARD_SOORTEN`). Zo krijgt wie er al stond de herinnering ook,

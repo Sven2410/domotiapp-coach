@@ -7953,7 +7953,7 @@ controle("drie knoppen en een vrijgave, alleen voor de vaatwasser",
          and [b._attr_translation_key for b in binair143] == ["vrijgegeven"]
          and all(e.unique_id.startswith("dev-vw_") for e in knoppen143 + binair143), "")
 apparaat143 = knoppen143[0]._attr_device_info
-controle("ze horen bij een eigen apparaat: fabrikant DomotiApp Coach, model Vaatwasser",
+controle("ze horen bij een eigen apparaat: fabrikant DomotiApp Coach (de kaarten zoeken erop, ook na COACH), model Vaatwasser",
          apparaat143["identifiers"] == {("domotiapp_coach", "dev-vw")} and apparaat143["manufacturer"] == "DomotiApp Coach"
          and apparaat143["model"] == "Vaatwasser" and sensor143[0]._attr_device_info == apparaat143, f"{apparaat143}")
 a143 = sensor143[0].extra_state_attributes
@@ -18437,12 +18437,14 @@ hass264.services.verstuurd.clear()
 antw264b = ws264(ws139.async_tickets_answer, beheer264, ticket_id=1, tekst="We komen langs.")
 ws264(ws139.async_tickets_answer, beheer264, ticket_id=0, tekst="Hij staat op 64%.")
 push264 = [(dienst, d.get("message")) for dom, dienst, d in hass264.services.verstuurd if dom == "notify"]
+titels264 = {d.get("title") for dom, dienst, d in hass264.services.verstuurd if dom == "notify"}
 print(f"  antwoord: stand {antw264b['stand']}, push {push264}")
 controle("answer door de beheerder: in behandeling, met de gebeurtenis", antw264b["stand"] == "in_behandeling"
          and gebeurd264()[-2]["van"] == "domotitech", "")
 controle("en een pushmelding, alleen naar wie de soort tickets aan heeft, met of zonder nummer",
-         push264 == [("mobile_app_bewoner", "DomotiTech heeft geantwoord op je vraag #1"),
-                     ("mobile_app_bewoner", "DomotiTech heeft je vraag beantwoord")], f"{push264}")
+         push264 == [("mobile_app_bewoner", "Coach Assist heeft geantwoord op ticket #1"),
+                     ("mobile_app_bewoner", "Coach Assist heeft je vraag beantwoord")], f"{push264}")
+controle("met de titel Coach Assist (v0.223.0; daarvoor DomotiTech)", titels264 == {"Coach Assist"}, f"{titels264}")
 ws264(ws139.async_tickets_read, bewoner264, ticket_id=1)
 ws264(ws139.async_tickets_read, bewoner264, ticket_id=0)
 lijst264 = ws264(ws139.async_tickets_list, bewoner264, type="domotiapp_coach/tickets/list")

@@ -2502,7 +2502,7 @@ class ChargerCoach:
                 await self.hass.services.async_call(
                     "notify",
                     target,
-                    {"title": "DomotiApp Coach", "message": message},
+                    {"title": "COACH", "message": message},
                     blocking=False,
                 )
             except Exception:  # noqa: BLE001 - één slechte ontvanger is niet alle

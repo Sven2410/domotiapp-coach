@@ -14,6 +14,7 @@
  */
 
 import { DacElement, define } from "./base.js";
+import { LOGO_URL } from "./theme.js";
 import { icons } from "./icons.js";
 import { nt, t } from "./i18n.js";
 
@@ -38,7 +39,6 @@ export const NAV_ITEMS = [
 export const navItemsFor = (isAdmin) =>
   NAV_ITEMS.filter((item) => isAdmin || !item.adminOnly);
 
-const LOGO_URL = new URL("../img/domotitech-mark.png", import.meta.url).href;
 
 class DacHeader extends DacElement {
   static css = /* css */ `
@@ -103,16 +103,11 @@ class DacHeader extends DacElement {
       white-space: nowrap;
       min-width: 0;
     }
-    .brand-1 {
-      font-size: 15px;
-      font-weight: 600;
-      letter-spacing: 0.01em;
-      color: var(--dac-ink);
-    }
+    /* COACH, de naam van het systeem (v0.223.0; daarvoor DomotiApp Coach, in twee kleuren). */
     .brand-2 {
       font-size: 15px;
-      font-weight: 600;
-      letter-spacing: 0.01em;
+      font-weight: 700;
+      letter-spacing: 0.06em;
       color: var(--dac-accent-hi);
     }
 
@@ -222,7 +217,7 @@ class DacHeader extends DacElement {
     @media (max-width: 640px) {
       .bar { padding: 8px max(12px, var(--dac-safe-r)) 0 max(12px, var(--dac-safe-l)); }
       .brand img { width: 30px; height: 30px; }
-      .brand-1, .brand-2 { font-size: 14px; }
+      .brand-2 { font-size: 14px; }
       button.ghost span { display: none; }
       button.ghost { padding: 9px; }
       button.pill { padding: 8px 12px; font-size: 13px; }
@@ -308,10 +303,9 @@ class DacHeader extends DacElement {
     return `
       <div class="bar">
         <div class="brand">
-          <img src="${LOGO_URL}" alt="DomotiTech" draggable="false">
+          <img src="${LOGO_URL}" alt="" draggable="false">
           <div class="brand-text">
-            <span class="brand-1">DomotiApp</span>
-            <span class="brand-2">Coach</span>
+            <span class="brand-2">COACH</span>
           </div>
         </div>
         <nav aria-label="${t("Dashboardsecties")}">
@@ -321,9 +315,9 @@ class DacHeader extends DacElement {
         <div class="actions">
           <!-- De berichtenbox (v0.130.0). Het getal is een <i> en geen <span>:
                op een smal scherm verdwijnt de tekst van een knop hier. -->
-          <!-- De DomotiTech Bot (v0.220.0), met een stip zolang er een antwoord is dat je nog niet las. -->
-          <button class="ghost bel" type="button" id="bot" title="${t("Vraag het de DomotiTech Bot")}" aria-label="${t("Vraag het de DomotiTech Bot")}">
-            ${icons.chat}<span>${t("Vraag het de bot")}</span><i class="teller" id="bot-teller" hidden></i>
+          <!-- Coach Assist (v0.220.0; de naam sinds v0.223.0), met een stip zolang er een antwoord is dat je nog niet las. -->
+          <button class="ghost bel" type="button" id="bot" title="${t("Vraag het Coach Assist")}" aria-label="${t("Vraag het Coach Assist")}">
+            ${icons.chat}<span>Coach Assist</span><i class="teller" id="bot-teller" hidden></i>
           </button>
           <button class="ghost bel" type="button" id="berichten" title="${t("Berichten")}" aria-label="${t("Berichten")}">
             ${icons.bell}<span>${t("Berichten")}</span><i class="teller" id="teller" hidden></i>

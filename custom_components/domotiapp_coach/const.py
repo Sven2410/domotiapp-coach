@@ -11,7 +11,7 @@ DOMAIN: Final = "domotiapp_coach"
 # --- Sidebar panel ---------------------------------------------------------
 PANEL_URL_PATH: Final = "domotiapp-coach"
 PANEL_COMPONENT_NAME: Final = "domotiapp-coach-panel"
-PANEL_TITLE: Final = "DomotiApp Coach"
+PANEL_TITLE: Final = "COACH"
 PANEL_ICON: Final = "mdi:home-lightning-bolt"
 
 # Public URL under which the panel assets are served.

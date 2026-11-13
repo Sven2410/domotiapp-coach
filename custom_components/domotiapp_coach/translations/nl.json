@@ -2,12 +2,12 @@
   "config": {
     "step": {
       "user": {
-        "title": "DomotiApp Coach",
-        "description": "Voegt het DomotiApp Coach dashboard toe aan de zijbalk. Sensoren, drempelwaarden en de link naar je eigen dashboard stel je in het paneel zelf in, onder Instellingen."
+        "title": "COACH",
+        "description": "Voegt het dashboard van COACH toe aan de zijbalk. Sensoren, drempelwaarden en de link naar je eigen dashboard stel je in het paneel zelf in, onder Instellingen."
       }
     },
     "abort": {
-      "already_configured": "DomotiApp Coach is al ingesteld."
+      "already_configured": "COACH is al ingesteld."
     }
   },
   "entity": {

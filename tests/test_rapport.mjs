@@ -769,7 +769,7 @@ proef("iedereen ziet alle personen (v0.114.0, was: een bewoner alleen zichzelf)"
     "een nieuwe persoon krijgt alles behalve de besluiten, net als op de server");
 });
 // De DomotiTech Bot (v0.220.0): het venster toont, de coach bewaart. Tekst is tekst, nooit html.
-const { ongelezenTickets, ticketNieuw, ticketsHtml, gesprekHtml, TICKET_SOORTEN, GESPREK } = await import(
+const { ongelezenTickets, ticketNieuw, ticketsHtml, gesprekHtml, TICKET_SOORTEN, GESPREK, afzender } = await import(
   "../custom_components/domotiapp_coach/frontend/src/tickets-sheet.js"
 );
 proef("de DomotiTech Bot: de stip, de lijst, het gesprek en de foto, en tekst als tekst (v0.220.0)", () => {
@@ -800,6 +800,51 @@ proef("de DomotiTech Bot: de stip, de lijst, het gesprek en de foto, en tekst al
   assert.ok(gesprekHtml({ id: GESPREK, berichten: [] }).includes("vraag"), "een leeg gesprek zegt wat je kunt vragen");
   assert.deepEqual(TICKET_SOORTEN.map((s) => s.id), ["storing", "aanvraag"], "een ticket is een storing of een aanvraag");
   assert.ok(ticketsHtml([], "u-1").includes("Nieuw ticket"), "zonder tickets een zin die zegt wat je kunt doen");
+});
+
+proef("de namen: COACH en Coach Assist, alleen wat een mens leest (v0.223.0)", () => {
+  // Een antwoord heet Coach Assist, ook een oud antwoord dat met de naam DomotiTech in de opslag staat.
+  assert.equal(afzender({ van: "domotitech", naam: "DomotiTech" }), "Coach Assist");
+  assert.equal(afzender({ van: "domotitech", naam: "" }), "Coach Assist");
+  assert.equal(afzender({ van: "domotitech", naam: "Coach Assist" }), "Coach Assist");
+  assert.equal(afzender({ van: "klant", naam: "Bewoner" }), "Bewoner", "een bewoner houdt zijn naam");
+  assert.equal(afzender({ van: "klant", naam: "DomotiTech" }), "DomotiTech", "alleen een antwoord wordt omgezet");
+  assert.ok(gesprekHtml({ id: 3, berichten: [{ id: 1, van: "domotitech", naam: "DomotiTech", tekst: "x", at: "" }] })
+    .includes("<strong>Coach Assist</strong>"));
+  const lees = (pad) => readFileSync(new URL(`../custom_components/domotiapp_coach/${pad}`, import.meta.url), "utf8");
+  const kop = lees("frontend/src/header.js");
+  assert.ok(kop.includes('<span class="brand-2">COACH</span>') && !kop.includes("brand-1"), "de kop heet COACH");
+  assert.ok(kop.includes('t("Vraag het Coach Assist")') && !/de bot|DomotiTech Bot/.test(kop), "de knop: Coach Assist, geen bot");
+  const venster = lees("frontend/src/tickets-sheet.js");
+  assert.ok(venster.includes('<h3 id="bot-titel">${t("Vraag het Coach Assist")}</h3>'));
+  for (const pad of ["frontend/src/header.js", "frontend/src/tickets-sheet.js", "frontend/src/views/notifications.js",
+    "frontend/src/i18n/en/overig.js", "engels/overig.json", "websocket.py"]) {
+    // Een uitspraak van de eigenaar in het commentaar mag de oude naam houden; een tekst voor de klant niet.
+    assert.ok(!/t\("[^"]*\b[Bb]ot\b|"[^"]*DomotiTech Bot[^"]*":|"Ask the bot|"title": "DomotiTech"/.test(lees(pad)),
+      `${pad}: geen bot meer in wat de klant leest`);
+  }
+  const manifest = JSON.parse(lees("manifest.json"));
+  assert.equal(manifest.name, "COACH");
+  assert.equal(manifest.domain, "domotiapp_coach", "het domein blijft");
+  assert.ok(lees("const.py").includes('PANEL_TITLE: Final = "COACH"'));
+  for (const taal of ["strings.json", "translations/nl.json", "translations/en.json"]) {
+    const tekst = JSON.stringify(JSON.parse(lees(taal)));
+    assert.ok(tekst.includes('"title":"COACH"') && !tekst.includes("DomotiApp Coach"), `${taal}: COACH`);
+  }
+  assert.ok(lees("coach.py").includes('{"title": "COACH", "message": message}'), "een melding van het systeem: COACH");
+  assert.ok(lees("monitor.py").includes('{"title": "COACH", "message": message}'));
+  // De fabrikant blijft tot elke klant een lovelace heeft die COACH kent: de kaarten zoeken erop.
+  assert.ok(lees("entiteit.py").includes('manufacturer="DomotiApp Coach",'), "de fabrikant blijft DomotiApp Coach");
+  assert.ok(lees("../../hacs.json").includes('"name": "COACH"'));
+  // Het logo van COACH (v0.223.0): de kop, Coach Assist, het rapport, en de merkbeelden voor Home Assistant.
+  assert.ok(lees("frontend/src/theme.js").includes('new URL("../img/coach.png", import.meta.url)'));
+  assert.ok(lees("frontend/src/header.js").includes('<img src="${LOGO_URL}"'));
+  assert.ok(lees("frontend/src/tickets-sheet.js").includes('<img class="logo" src="${LOGO_URL}"'));
+  assert.ok(lees("frontend/src/views/history.js").includes("logoUrl: LOGO_URL"));
+  const zelfde = (a, b) => readFileSync(new URL(`../custom_components/domotiapp_coach/${a}`, import.meta.url))
+    .equals(readFileSync(new URL(`../custom_components/domotiapp_coach/${b}`, import.meta.url)));
+  assert.ok(zelfde("frontend/img/coach.png", "brand/icon.png") && zelfde("brand/logo@2x.png", "brand/icon@2x.png"),
+    "overal hetzelfde logo");
 });
 
 const Meldingen = geregistreerd.get("dac-view-notifications");

@@ -1882,7 +1882,7 @@ def async_subscribe(
     connection.send_result(msg["id"])
 
 
-# --- De tickets voor de DomotiTech Bot (v0.220.0) -------------------------------------------------------------
+# --- De tickets voor Coach Assist (v0.220.0, tot v0.223.0 de DomotiTech Bot) ----------------------------------
 #
 # De afspraak met de kaart van DomotiApp Lovelace en met wie de vragen beantwoordt is `CONTRACT` in tickets.py.
 # Een huis is één huishouden: elke gebruiker ziet alle tickets van dit huis. Antwoorden en de stand zetten mag
@@ -2068,9 +2068,9 @@ async def async_tickets_answer(
     for doel in ontvangers(settings, "tickets"):
         try:
             await hass.services.async_call("notify", doel, {
-                "title": "DomotiTech",
-                "message": t("DomotiTech heeft je vraag beantwoord") if ticket["id"] == 0
-                else t("DomotiTech heeft geantwoord op je vraag #{nr}", nr=ticket["id"]),
+                "title": "Coach Assist",
+                "message": t("Coach Assist heeft je vraag beantwoord") if ticket["id"] == 0
+                else t("Coach Assist heeft geantwoord op ticket #{nr}", nr=ticket["id"]),
                 # Tikken opent het dashboard: `url` voor iOS, `clickAction` voor Android.
                 "data": {"url": "/", "clickAction": "/"},
             }, blocking=False)

@@ -62,6 +62,9 @@ test_rapport.mjs, met dezelfde gevallen.
 
 ## Vraag het de DomotiTech Bot: het gesprek, tickets en foto's (v0.220.0)
 
+Sinds v0.223.0 heet dit **Coach Assist** ("Vraag het Coach Assist"). Zie de sectie over de namen hieronder; wat hier
+over de bot staat, geldt nu voor Coach Assist.
+
 De eigenaar op 12-11-2026: "Kunnen we niet een soort ticket systeem maken dat klanten aanvraag kunnen doen en ook
 gewoon normale vragen kunnen stellen [...] Ik wil het centraal houden dus het moet in een popup komen zoals Vraag het de
 DomotiTech Bot snap je? Alles in HA". En: "Lovelace moet een eigen kaart hebben en dat moet hetzelfde zijn in de
@@ -99,3 +102,34 @@ zijn aparte dingen", met de vragen als één doorlopende chat en een ticket met 
   weghalen alleen met een hoger getal. De standen zijn `nieuw`, `in_behandeling`, `bij_beheerder` en `klaar`.
 
 Proef 264 en 265 in test_coach.py; de stip, de lijst, het gesprek en de foto in test_rapport.mjs.
+
+## De namen: COACH en Coach Assist (v0.223.0)
+
+De eigenaar op 13-11-2026 over zijn bedrijfsstructuur: DomotiTech is het bedrijf, DomotiApp de app, **COACH** het
+energiemanagementsysteem en **Coach Assist** de digitale hulp. Over de meldingen na een antwoord: "Meldingen boven
+moeten niet DomotiTech zijn maar DomotiApp en dan de coach. Niet meer bot". COACH in hoofdletters als naam en titel;
+in een gewone zin blijft het "de coach".
+
+- **COACH**: de zijbalk (`PANEL_TITLE`), de kop van het paneel, de naam bij Integraties en in HACS (`manifest.json`,
+  `hacs.json`, `strings.json` en de vertalingen), de titel van elke melding van het systeem (`coach.py`, `monitor.py`),
+  het rapport en de bestandsnaam van het rapport en het bestand voor Excel.
+- **Coach Assist**: de knop en het venster ("Vraag het Coach Assist", Engels "Ask Coach Assist"), de soort in Meldingen
+  (Antwoorden van Coach Assist), de afzender van een antwoord, en de pushmelding na een antwoord: titel Coach Assist,
+  "Coach Assist heeft je vraag beantwoord" of "Coach Assist heeft geantwoord op ticket #12". Boven het venster staat
+  DomotiApp.
+- **Een oud antwoord** staat in de opslag met de naam DomotiTech. Het veld blijft zoals het is (`CONTRACT` 1); het
+  paneel toont een antwoord met die naam of zonder naam als Coach Assist (`afzender` in tickets-sheet.js). Een nieuw
+  antwoord krijgt de naam Coach Assist (`antwoord` in tickets.py).
+- **Wat niet verandert**: het domein `domotiapp_coach`, de entiteit-id's, de opdrachten, het event
+  `domotiapp_coach_ticket`, de repo en de bestandsnamen. Dat zou installaties breken.
+- **De fabrikant van de apparaten blijft DomotiApp Coach.** De kaarten van DomotiApp Lovelace zoeken de apparaten van
+  de coach op die naam (`COACH_FABRIKANT`), ook in de apparaatkiezer van hun editors. De uitrol installeert coach en
+  lovelace los van elkaar, dus een klant met een oudere lovelace zou die kaarten kwijtraken. Omzetten pas als elke
+  klant een lovelace heeft die beide namen kent (0.125.0 of nieuwer); proef "de namen" in test_rapport.mjs houdt
+  hem tot dan vast.
+- **Het logo van COACH** (dezelfde dag, "Dat logo moet op alles komen te staan"): een blauwe zeshoekige C met een
+  bliksem. Het staat in `frontend/img/coach.png` (`LOGO_URL` in theme.js) voor de kop van het paneel, het venster van
+  Coach Assist en het rapport (daar op wit, `jpegVan`), en in `brand/` (`icon.png` en `logo.png` op 256,
+  `@2x` op 512) voor Integraties in Home Assistant. Ook bovenaan de README en als `hacs-icon.png`. Het merkteken
+  van DomotiTech is uit het paneel. De zijbalk van Home Assistant kent alleen een mdi-icoon; dat blijft
+  `mdi:home-lightning-bolt`, al een bliksem.

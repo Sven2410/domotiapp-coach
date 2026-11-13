@@ -2,12 +2,12 @@
   "config": {
     "step": {
       "user": {
-        "title": "DomotiApp Coach",
-        "description": "Adds the DomotiApp Coach dashboard to the sidebar. Sensors, thresholds and the home dashboard link are configured in the panel itself, under Instellingen."
+        "title": "COACH",
+        "description": "Adds the COACH dashboard to the sidebar. Sensors, thresholds and the home dashboard link are configured in the panel itself, under Instellingen."
       }
     },
     "abort": {
-      "already_configured": "DomotiApp Coach is already set up."
+      "already_configured": "COACH is already set up."
     }
   },
   "entity": {
