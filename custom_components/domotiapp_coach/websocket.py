@@ -22,6 +22,8 @@ from homeassistant.util import dt as dt_util
 from . import report
 from .const import (
     EVENT_BERICHTEN,
+    EVENT_TICKET,
+    EVENT_TICKET_BIJGEWERKT,
     BONUS_OVER_MARKT,
     BONUS_OVER_MARKT_EN_VERGOEDING,
     ALL_BRANDS,
@@ -1880,9 +1882,237 @@ def async_subscribe(
     connection.send_result(msg["id"])
 
 
+# --- De tickets voor de DomotiTech Bot (v0.220.0) -------------------------------------------------------------
+#
+# De afspraak met de kaart van DomotiApp Lovelace en met wie de vragen beantwoordt is `CONTRACT` in tickets.py.
+# Een huis is één huishouden: elke gebruiker ziet alle tickets van dit huis. Antwoorden en de stand zetten mag
+# alleen een beheerder; een systeemgebruiker stelt geen vragen.
+
+
+def _ticket_fout(connection: websocket_api.ActiveConnection, msg: dict[str, Any], fout: Exception) -> None:
+    connection.send_error(msg["id"], getattr(fout, "code", "fout"), str(fout))
+
+
+def _ticket_uit(ticket: dict[str, Any]) -> dict[str, Any]:
+    """Wat er over de websocket gaat; van het gesprek alleen de laatste berichten."""
+    from .tickets import voor_buiten
+
+    return voor_buiten(ticket)
+
+
+def _gebruiker(connection: websocket_api.ActiveConnection) -> tuple[str, str]:
+    user = connection.user
+    return str(getattr(user, "id", "") or ""), str(getattr(user, "name", "") or "")
+
+
+def _ticket_gebeurtenis(hass: HomeAssistant, ticket: dict[str, Any], bericht: dict[str, Any] | None) -> None:
+    """De gebeurtenis van de afspraak (bij nieuw, reactie en antwoord), en het ticket voor `subscribe`. Het gesprek
+    (0) heeft geen stand; `bijlagen` is het aantal foto's bij het bericht."""
+    from .tickets import voor_buiten
+
+    if bericht is not None:
+        hass.bus.async_fire(EVENT_TICKET, {
+            "ticket_id": ticket["id"], "bericht_id": bericht["id"], "van": bericht["van"],
+            "soort": ticket["soort"], "stand": ticket.get("stand"), "bijlagen": len(bericht.get("bijlagen") or []),
+        })
+    hass.bus.async_fire(EVENT_TICKET_BIJGEWERKT, {"ticket": voor_buiten(ticket)})
+
+
+async def _ticket_wijzig(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any],
+                         wijziging: Any) -> dict[str, Any] | None:
+    """Een wijziging in de opslag; bij een fout de fout terug en None."""
+    from .storage import async_get_tickets
+    from .tickets import TicketFout
+
+    try:
+        return await async_get_tickets(hass).async_wijzig(wijziging)
+    except TicketFout as fout:
+        _ticket_fout(connection, msg, fout)
+        return None
+
+
+@websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/tickets/list"})
+@websocket_api.async_response
+async def async_tickets_list(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Het gesprek en de tickets van dit huis, nieuwste eerst."""
+    from .storage import async_get_tickets
+    from .tickets import overzicht
+
+    connection.send_result(msg["id"], overzicht(await async_get_tickets(hass).async_data()))
+
+
+@websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/tickets/subscribe"})
+@websocket_api.async_response
+async def async_tickets_subscribe(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Eerst de lijst als event, daarna bij elke wijziging het ticket. Ook zonder beheerder te zijn."""
+    from .storage import async_get_tickets
+    from .tickets import overzicht
+
+    @callback
+    def doorgeven(event: Any) -> None:
+        connection.send_message(websocket_api.event_message(msg["id"], {"ticket": event.data.get("ticket")}))
+
+    connection.subscriptions[msg["id"]] = hass.bus.async_listen(EVENT_TICKET_BIJGEWERKT, doorgeven)
+    connection.send_result(msg["id"])
+    data = await async_get_tickets(hass).async_data()
+    connection.send_message(websocket_api.event_message(msg["id"], overzicht(data)))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/tickets/new",
+        vol.Required("soort"): str,
+        vol.Optional("tekst", default=""): str,
+        vol.Optional("bijlagen", default=[]): [str],
+    }
+)
+@websocket_api.async_response
+async def async_tickets_new(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Een nieuw ticket: een storing of een aanvraag, eventueel met foto's."""
+    from .tickets import nieuw
+
+    if getattr(connection.user, "system_generated", False):
+        connection.send_error(msg["id"], "geen_systeem", t("Een systeemgebruiker stelt geen vragen."))
+        return
+    user_id, naam = _gebruiker(connection)
+    uit = await _ticket_wijzig(hass, connection, msg,
+                               lambda data: nieuw(data, msg["soort"], msg.get("tekst", ""), user_id, naam, dt_util.now(),
+                                                  msg.get("bijlagen")))
+    if uit is None:
+        return
+    ticket, bericht = uit
+    _ticket_gebeurtenis(hass, ticket, bericht)
+    connection.send_result(msg["id"], _ticket_uit(ticket))
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/tickets/reply",
+        vol.Required("ticket_id"): int,
+        vol.Optional("tekst", default=""): str,
+        vol.Optional("bijlagen", default=[]): [str],
+    }
+)
+@websocket_api.async_response
+async def async_tickets_reply(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Een vraag in het gesprek (`ticket_id` 0), of een reactie op een ticket, eventueel met foto's."""
+    from .tickets import reageer
+
+    if getattr(connection.user, "system_generated", False):
+        connection.send_error(msg["id"], "geen_systeem", t("Een systeemgebruiker stelt geen vragen."))
+        return
+    user_id, naam = _gebruiker(connection)
+    uit = await _ticket_wijzig(hass, connection, msg,
+                               lambda data: reageer(data, msg["ticket_id"], msg.get("tekst", ""), user_id, naam,
+                                                    dt_util.now(), msg.get("bijlagen")))
+    if uit is None:
+        return
+    ticket, bericht = uit
+    _ticket_gebeurtenis(hass, ticket, bericht)
+    connection.send_result(msg["id"], _ticket_uit(ticket))
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "domotiapp_coach/tickets/read", vol.Required("ticket_id"): int}
+)
+@websocket_api.async_response
+async def async_tickets_read(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Deze gebruiker zag het ticket."""
+    from .tickets import gelezen
+
+    user_id, _ = _gebruiker(connection)
+    ticket = await _ticket_wijzig(hass, connection, msg, lambda data: gelezen(data, msg["ticket_id"], user_id))
+    if ticket is None:
+        return
+    _ticket_gebeurtenis(hass, ticket, None)
+    connection.send_result(msg["id"], {})
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/tickets/answer",
+        vol.Required("ticket_id"): int,
+        vol.Required("tekst"): str,
+        vol.Optional("stand"): str,
+    }
+)
+@websocket_api.async_response
+async def async_tickets_answer(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Een antwoord van DomotiTech, alleen door een beheerder; daarna een pushmelding (soort `tickets`)."""
+    from .ontvangers import ontvangers
+    from .tickets import antwoord
+
+    if not getattr(connection.user, "is_admin", False):
+        connection.send_error(msg["id"], "unauthorized", t("Alleen een beheerder antwoordt."))
+        return
+    uit = await _ticket_wijzig(hass, connection, msg,
+                               lambda data: antwoord(data, msg["ticket_id"], msg["tekst"], dt_util.now(), msg.get("stand")))
+    if uit is None:
+        return
+    ticket, bericht = uit
+    _ticket_gebeurtenis(hass, ticket, bericht)
+    connection.send_result(msg["id"], _ticket_uit(ticket))
+    settings = await async_get_store(hass).async_load()
+    for doel in ontvangers(settings, "tickets"):
+        try:
+            await hass.services.async_call("notify", doel, {
+                "title": "DomotiTech",
+                "message": t("DomotiTech heeft je vraag beantwoord") if ticket["id"] == 0
+                else t("DomotiTech heeft geantwoord op je vraag #{nr}", nr=ticket["id"]),
+                # Tikken opent het dashboard: `url` voor iOS, `clickAction` voor Android.
+                "data": {"url": "/", "clickAction": "/"},
+            }, blocking=False)
+        except Exception:  # noqa: BLE001 - één slechte ontvanger is niet alle
+            continue
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/tickets/set_state",
+        vol.Required("ticket_id"): int,
+        vol.Required("stand"): str,
+    }
+)
+@websocket_api.async_response
+async def async_tickets_set_state(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """De stand van een ticket, alleen door een beheerder."""
+    from .tickets import zet_stand
+
+    if not getattr(connection.user, "is_admin", False):
+        connection.send_error(msg["id"], "unauthorized", t("Alleen een beheerder zet de stand."))
+        return
+    ticket = await _ticket_wijzig(hass, connection, msg,
+                                  lambda data: zet_stand(data, msg["ticket_id"], msg["stand"], dt_util.now()))
+    if ticket is None:
+        return
+    _ticket_gebeurtenis(hass, ticket, None)
+    connection.send_result(msg["id"], _ticket_uit(ticket))
+
+
 @callback
 def async_register(hass: HomeAssistant) -> None:
     """Register the panel's websocket commands."""
+    websocket_api.async_register_command(hass, async_tickets_list)
+    websocket_api.async_register_command(hass, async_tickets_subscribe)
+    websocket_api.async_register_command(hass, async_tickets_new)
+    websocket_api.async_register_command(hass, async_tickets_reply)
+    websocket_api.async_register_command(hass, async_tickets_read)
+    websocket_api.async_register_command(hass, async_tickets_answer)
+    websocket_api.async_register_command(hass, async_tickets_set_state)
     websocket_api.async_register_command(hass, async_store_report)
     websocket_api.async_register_command(hass, async_get_settings)
     websocket_api.async_register_command(hass, async_set_settings)

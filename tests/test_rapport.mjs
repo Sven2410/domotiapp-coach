@@ -765,9 +765,43 @@ proef("iedereen ziet alle personen (v0.114.0, was: een bewoner alleen zichzelf)"
   assert.deepEqual(zichtbaar(mensen, null).length, 3, "zonder gebruiker (het voorbeeld) alles");
   assert.equal(naamVanTelefoon("mobile_app_iphone_van_de_keuken"), "Iphone van de keuken");
   assert.equal(naamVanTelefoon(""), "");
-  assert.deepEqual(STANDAARD_SOORTEN, { kritiek: true, melding: true, besluit: false, belasting: true, herinnering: true },
+  assert.deepEqual(STANDAARD_SOORTEN, { kritiek: true, melding: true, besluit: false, belasting: true, herinnering: true, tickets: true },
     "een nieuwe persoon krijgt alles behalve de besluiten, net als op de server");
 });
+// De DomotiTech Bot (v0.220.0): het venster toont, de coach bewaart. Tekst is tekst, nooit html.
+const { ongelezenTickets, ticketNieuw, ticketsHtml, gesprekHtml, TICKET_SOORTEN, GESPREK } = await import(
+  "../custom_components/domotiapp_coach/frontend/src/tickets-sheet.js"
+);
+proef("de DomotiTech Bot: de stip, de lijst, het gesprek en de foto, en tekst als tekst (v0.220.0)", () => {
+  const ticket = (id, berichten, gelezen = {}) => ({
+    id, soort: "storing", stand: "in_behandeling", onderwerp: `<b>storing ${id}</b>`, bijgewerkt: `2026-11-13T09:0${id}:00`,
+    berichten, gelezen,
+  });
+  const klant = { id: 1, van: "klant", naam: "Bewoner", tekst: "Hoe vol?", at: "2026-11-13T09:00:00" };
+  const antwoord = { id: 2, van: "domotitech", naam: "DomotiTech", tekst: "<script>x</script> 64%", at: "2026-11-13T09:05:00" };
+  const ander = { id: 2, van: "klant", naam: "Partner", tekst: "Ik ook", at: "2026-11-13T09:06:00" };
+  const open = ticket(1, [klant, antwoord], { "u-1": 1 });
+  const gezien = ticket(2, [klant, antwoord], { "u-1": 2 });
+  const alleenKlant = ticket(3, [klant, ander], { "u-1": 1 });
+  assert.equal(ticketNieuw(open, "u-1"), true, "een antwoord dat hij nog niet zag");
+  assert.equal(ticketNieuw(gezien, "u-1"), false);
+  assert.equal(ticketNieuw(open, "u-2"), true, "per gebruiker: een ander zag het ook nog niet");
+  assert.equal(ticketNieuw(alleenKlant, "u-1"), false, "een bericht van een huisgenoot is geen antwoord");
+  const gesprek = { id: GESPREK, soort: "vraag", berichten: [klant, antwoord], gelezen: { "u-1": 1 } };
+  assert.equal(ongelezenTickets([open, gezien, alleenKlant], "u-1"), 1, "de stip telt alleen een antwoord van DomotiTech");
+  assert.equal(ongelezenTickets([open, gezien], "u-1", gesprek), 2, "en het gesprek telt mee");
+  const lijst = ticketsHtml([open, gezien], "u-1");
+  assert.ok(lijst.indexOf("#2") < lijst.indexOf("#1"), "nieuwste eerst");
+  assert.ok(!lijst.includes("<b>storing") && lijst.includes("&lt;b>storing"), "het onderwerp als tekst");
+  const html = gesprekHtml(open);
+  assert.ok(!html.includes("<script>") && html.includes("&lt;script>"), "een bericht als tekst");
+  const metFoto = gesprekHtml(ticket(4, [{ ...klant, tekst: "", bijlagen: [{ id: "a".repeat(32), type: "image/jpeg", grootte: 1 }] }]));
+  assert.ok(metFoto.includes(`data-foto="${"a".repeat(32)}"`) && !metFoto.includes("<p>"), "een foto als plaatje, zonder lege tekst");
+  assert.ok(gesprekHtml({ id: GESPREK, berichten: [] }).includes("vraag"), "een leeg gesprek zegt wat je kunt vragen");
+  assert.deepEqual(TICKET_SOORTEN.map((s) => s.id), ["storing", "aanvraag"], "een ticket is een storing of een aanvraag");
+  assert.ok(ticketsHtml([], "u-1").includes("Nieuw ticket"), "zonder tickets een zin die zegt wat je kunt doen");
+});
+
 const Meldingen = geregistreerd.get("dac-view-notifications");
 assert.ok(Meldingen, "het meldingenscherm hoort zich te registreren");
 

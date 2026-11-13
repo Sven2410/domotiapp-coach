@@ -294,6 +294,10 @@ export const icons = {
   arrowRight: svg(`<path d="M4.5 12h14M13 6.5l5.5 5.5-5.5 5.5"/>`),
   arrowLeft: svg(`<path d="M19.5 12h-14M11 6.5 5.5 12l5.5 5.5"/>`),
   chevronRight: svg(`<path d="m9.5 5.5 6.5 6.5-6.5 6.5"/>`),
+  // Een tekstballon, voor de DomotiTech Bot (v0.220.0).
+  chat: svg(
+    `<path d="M20 12.5a7.5 7.5 0 0 1-11 6.6L4 20l1.1-4.2A7.5 7.5 0 1 1 20 12.5Z"/>`
+  ),
   bell: svg(
     `<path d="M18 9.4a6 6 0 1 0-12 0c0 5.2-2 6.6-2 6.6h16s-2-1.4-2-6.6Z"/>
      <path d="M13.7 19.4a2 2 0 0 1-3.4 0"/>`
