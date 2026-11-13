@@ -17,7 +17,7 @@
  * niet bewaard is.
  */
 
-import { DacElement, define } from "./base.js";
+import { DacElement, define, openSheet } from "./base.js";
 import { icons } from "./icons.js";
 import { DEADLINE_ONLY_TYPES, PROGRAM_TYPES, canHaveDeadline, needsRelease, programOf, typeMeta } from "./devices.js";
 import { heeftVoorkeuren, voorkeurHtml, voorkeurWijziging, vulVoorkeuren } from "./voorkeur-velden.js";
@@ -467,7 +467,7 @@ export class DacScheduleSheet extends DacElement {
     this.label_ = label || "";
     this.paint_();
     const dialog = this.$("dialog");
-    if (!dialog.open) dialog.showModal();
+    openSheet(dialog);
   }
 
   close() {

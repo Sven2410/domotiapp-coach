@@ -11,7 +11,7 @@
  * is worse than one that admits it does not know.
  */
 
-import { DacElement, define } from "../base.js";
+import { DacElement, define, openSheet } from "../base.js";
 import { icons } from "../icons.js";
 import {
   ACTIVE_WATTS,
@@ -2576,7 +2576,7 @@ class DacViewOverview extends DacElement {
    */
   openPrices_() {
     const sheet = this.$("#prices");
-    sheet.showModal();
+    openSheet(sheet);
     // Away from the close button, which is what a dialog focuses by default
     // and what iOS then rings in blue.
     sheet.focus();
@@ -3540,7 +3540,7 @@ class DacViewOverview extends DacElement {
     }
 
     const sheet = this.$("#manual");
-    sheet.showModal();
+    openSheet(sheet);
     sheet.focus();
   }
 

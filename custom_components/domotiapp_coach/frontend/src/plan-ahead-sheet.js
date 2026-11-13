@@ -47,7 +47,7 @@ export function paalPerUur(blokken = []) {
     };
   });
 }
-import { DacElement, define } from "./base.js";
+import { DacElement, define, openSheet } from "./base.js";
 import { coachRijen } from "./data-source.js";
 import { huisNu } from "./format.js";
 import { icons } from "./icons.js";
@@ -332,7 +332,7 @@ export class DacPlanAheadSheet extends DacElement {
     this.reason_ = [besluit?.reason, besluit?.plan].filter(Boolean).join(" ");
     this.paint_();
     const dialog = this.$("dialog");
-    if (!dialog.open) dialog.showModal();
+    openSheet(dialog);
   }
 
   /** Bijwerken terwijl hij openstaat, want de coach denkt elke minuut opnieuw. */

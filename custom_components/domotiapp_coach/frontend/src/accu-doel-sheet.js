@@ -10,7 +10,7 @@
  * `pct` null voor stoppen).
  */
 
-import { DacElement, define } from "./base.js";
+import { DacElement, define, openSheet } from "./base.js";
 import { icons } from "./icons.js";
 import { sheetCss } from "./theme.js";
 import { t } from "./i18n.js";
@@ -118,7 +118,7 @@ export class DacAccuDoelSheet extends DacElement {
     stop.hidden = !keuze.actief;
     stop.textContent = t("Stoppen");
     const dialog = this.$("dialog");
-    if (dialog && !dialog.open) dialog.showModal();
+    openSheet(dialog);
   }
 }
 

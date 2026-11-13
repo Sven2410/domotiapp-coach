@@ -11,7 +11,7 @@
  * ondertekent het paneel (`uploader`, `fotoAdres`). Tekst is altijd tekst, nooit html.
  */
 
-import { DacElement, define } from "./base.js";
+import { DacElement, define, openSheet } from "./base.js";
 import { icons } from "./icons.js";
 import { huisNu } from "./format.js";
 import { sheetCss } from "./theme.js";
@@ -87,28 +87,28 @@ async function verklein(bestand) {
 const css = /* css */ `
   ${sheetCss}
   .tabs { display: flex; gap: 6px; margin: 0 0 12px; }
-  .tabs button[aria-selected="true"] { border-color: rgba(250,178,25,0.7); background: rgba(250,178,25,0.18); }
+  .tabs button[aria-selected="true"] { border-color: rgba(25,143,217,0.55); background: var(--dac-accent-soft); }
   .lijst, .gesprek { display: grid; gap: 8px; }
-  .gesprek { max-height: 52vh; overflow-y: auto; }
+  .gesprek { max-height: 52vh; overflow-y: auto; overscroll-behavior: contain; }
   .balk { display: flex; gap: 8px; align-items: center; margin: 0 0 12px; flex-wrap: wrap; }
   .knop {
     display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: 13px; padding: 8px 12px;
     border-radius: var(--dac-radius-sm); border: 1px solid var(--dac-border); background: rgba(var(--dac-veil),0.04);
     color: var(--dac-ink); cursor: pointer;
   }
-  .knop.hoofd { border-color: rgba(250,178,25,0.6); background: rgba(250,178,25,0.14); }
+  .knop.hoofd { border-color: rgba(25,143,217,0.55); background: var(--dac-accent-soft); }
   .knop .icon { width: 14px; height: 14px; flex: 0 0 auto; }
   .knop[hidden], .balk[hidden] { display: none; }
   .ticket {
     display: grid; gap: 4px; text-align: left; font: inherit; padding: 12px 14px; border-radius: var(--dac-radius-sm);
     border: 1px solid var(--dac-border); background: rgba(var(--dac-veil),0.02); color: var(--dac-ink); cursor: pointer;
   }
-  .ticket.nieuw { border-color: rgba(250,178,25,0.5); background: rgba(250,178,25,0.07); }
+  .ticket.nieuw { border-color: rgba(25,143,217,0.45); background: rgba(2,111,161,0.08); }
   .t-kop { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
   .t-kop strong { font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
   .t-wanneer, .t-sub { font-size: 12px; color: var(--dac-ink-3); }
   .bericht { padding: 10px 12px; border-radius: var(--dac-radius-sm); border: 1px solid var(--dac-border); }
-  .bericht.zij { background: rgba(250,178,25,0.07); border-color: rgba(250,178,25,0.35); margin-right: 24px; }
+  .bericht.zij { background: rgba(2,111,161,0.08); border-color: rgba(25,143,217,0.35); margin-right: 24px; }
   .bericht.wij { background: rgba(var(--dac-veil),0.03); margin-left: 24px; }
   .b-kop { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--dac-ink-3); }
   .b-kop strong { color: var(--dac-ink); font-size: 13px; }
@@ -116,7 +116,7 @@ const css = /* css */ `
   .fotos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
   .fotos img { width: 96px; height: 96px; object-fit: cover; border-radius: var(--dac-radius-sm); background: rgba(var(--dac-veil),0.06); }
   .soorten { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
-  .soorten button[aria-pressed="true"] { border-color: rgba(250,178,25,0.7); background: rgba(250,178,25,0.18); }
+  .soorten button[aria-pressed="true"] { border-color: rgba(25,143,217,0.55); background: var(--dac-accent-soft); }
   textarea {
     width: 100%; box-sizing: border-box; min-height: 80px; font: inherit; font-size: 14px; padding: 10px;
     border-radius: var(--dac-radius-sm); border: 1px solid var(--dac-border); background: rgba(var(--dac-veil),0.03);
@@ -274,7 +274,7 @@ export class DacTicketsSheet extends DacElement {
   open() {
     this.kiesTab_(this.tab_);
     const dialog = this.$("dialog");
-    if (dialog && !dialog.open) dialog.showModal();
+    openSheet(dialog);
     if (this.tab_ === "vragen") this.leesGesprek_();
   }
 
