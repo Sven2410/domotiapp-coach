@@ -26,6 +26,7 @@
 
 import { define } from "../base.js";
 import { icons } from "../icons.js";
+import { pakketOver, vragenOver } from "../tickets-sheet.js";
 import {
   DacEditorElement,
   editorCss,
@@ -229,6 +230,13 @@ class DacViewContract extends DacEditorElement {
           <p>${t("Per energiebron je contract van nu en wat je eerder had. De coach rekent met je stroomcontract; gas en water zijn voor de historie en het rapport.")}</p>
           <p class="bewoner-uitleg">${t("Je installateur vult je contract in. Kijk hieronder of je stroomprijs klopt met de app of site van je leverancier, en bevestig hem. Klopt er iets niet, laat het je installateur dan weten.")}</p>
         </header>
+
+        <!-- Het abonnement van dit huis (v0.225.0), alleen als er een is. De eigenaar op 15-11-2026: "ja maar ook in
+             de coach zelf". -->
+        <section class="card" id="abonnement" hidden>
+          <h2>${icons.chat} ${t("Abonnement")}: <span id="abo-naam"></span></h2>
+          <div class="abo-regels" id="abo-regels"></div>
+        </section>
 
         <!-- ================= stroom ================= -->
         <section class="card" id="stroom">
@@ -1000,7 +1008,7 @@ class DacViewContract extends DacEditorElement {
     } catch (error) {
       if (run !== this.checkRun_) return;
       this.check_ = null;
-      console.warn("[DomotiApp Coach] de opbouw kon niet worden opgehaald", error);
+      console.warn("[COACH] de opbouw kon niet worden opgehaald", error);
     }
     this.paintOpbouw_();
   }
@@ -1073,7 +1081,27 @@ class DacViewContract extends DacEditorElement {
     if (this.draft_) for (const bron of ["stroom", "gas", "water"]) this.paintPeriods_(bron);
   }
 
+  /** Het abonnement uit de coach (`pakket` bij de tickets, v0.225.0), of null. */
+  set pakket(pakket) {
+    this.pakket_ = pakket && typeof pakket === "object" ? pakket : null;
+    this.paintAbonnement_();
+  }
+
+  paintAbonnement_() {
+    if (!this.rendered_) return;
+    const p = this.pakket_;
+    this.$("#abonnement").hidden = !p?.naam;
+    if (!p?.naam) return;
+    this.$("#abo-naam").textContent = p.naam;
+    const regel = (label, per, over) => `<div class="abo-regel"><span>${label}</span><strong>${per == null
+      ? t("onbeperkt") : over == null ? String(per) : t("{per}, nog {over} vandaag", { per, over })}</strong></div>`;
+    this.$("#abo-regels").innerHTML = p.coach_assist === false
+      ? `<p class="hint">${t("Coach Assist zit niet in je abonnement.")}</p>`
+      : regel(t("Vragen per dag"), p.vragen_per_dag, vragenOver(p)) + regel(t("Tickets per dag"), p.tickets_per_dag, pakketOver(p, "tickets"));
+  }
+
   paint_() {
+    this.paintAbonnement_();
     if (!this.draft_ || !this.rendered_) return;
     for (const d of [this.draft_, this.saved_]) if (d?.contract) d.contract.periods ??= [];
     const contract = this.draft_.contract;
@@ -1429,6 +1457,11 @@ class DacViewContract extends DacEditorElement {
 DacViewContract.css = /* css */ `
   ${editorCss}
   ${opbouwCss}
+
+  #abonnement[hidden] { display: none; }
+  .abo-regels { display: grid; gap: 6px; margin-top: 8px; }
+  .abo-regel { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; color: var(--dac-ink-2); }
+  .abo-regel strong { color: var(--dac-ink); font-weight: 600; text-align: right; }
 
   .segmented.drie { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   @media (max-width: 720px) { .segmented.drie { grid-template-columns: minmax(0, 1fr); } }

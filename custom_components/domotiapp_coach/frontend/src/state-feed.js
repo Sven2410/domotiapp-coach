@@ -85,7 +85,7 @@ export class StateFeed {
       .catch((error) => {
         // Not fatal: the seed still updates whenever HA does hand over a fresh
         // `hass`, so the dashboard degrades to how it behaved before.
-        console.warn("[DomotiApp Coach] kon statuswijzigingen niet volgen", error);
+        console.warn("[COACH] kon statuswijzigingen niet volgen", error);
         this.connecting_ = null;
       });
 
@@ -101,7 +101,7 @@ export class StateFeed {
       this.live_ = new Map(states.map((state) => [state.entity_id, state]));
       for (const listener of this.listeners_) listener(null);
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de meetwaarden niet opnieuw ophalen", error);
+      console.warn("[COACH] kon de meetwaarden niet opnieuw ophalen", error);
     }
   }
 

@@ -161,6 +161,34 @@ export function gesprekHtml(ticket, nu = huisNu(), { userId = "", gekozen = "" }
   return lijst + dagen.filter(toon).map((d) => scheiding(d.dag) + blok(d)).join("");
 }
 
+/**
+ * Hoeveel vragen of nieuwe tickets (`soort`) er vandaag nog over zijn (v0.225.0), of null zonder grens. Na `opnieuw`
+ * (middernacht in het huis) staat het weer op het hele pakket, ook als de coach dat nog niet liet weten.
+ */
+export function pakketOver(pakket, soort, nu = Date.now()) {
+  const grens = pakket?.[`${soort}_per_dag`];
+  if (grens == null) return null;
+  const opnieuw = Date.parse(pakket.opnieuw ?? "");
+  if (!Number.isNaN(opnieuw) && nu >= opnieuw) return Number(grens);
+  return Math.max(0, Number(pakket[`${soort}_over`] ?? grens));
+}
+
+export const vragenOver = (pakket, nu = Date.now()) => pakketOver(pakket, "vragen", nu);
+
+/** "Nog 7 vragen vandaag", of "" zonder grens. */
+export const vragenOverTekst = (over) =>
+  over == null ? "" : over === 1 ? t("Nog 1 vraag vandaag") : t("Nog {n} vragen vandaag", { n: over });
+
+/** "Nog 1 ticket vandaag", alleen bij `TICKETS_WEINIG` of minder; anders "". */
+export const ticketsOverTekst = (over) =>
+  over == null || over > TICKETS_WEINIG ? "" : over === 1 ? t("Nog 1 ticket vandaag") : t("Nog {n} tickets vandaag", { n: over });
+
+const PAKKET_OP = nt("Je hebt je vragen voor vandaag gesteld. Morgen kun je weer vragen stellen. Is er iets kapot? Meld dan een storing.");
+const TICKETS_OP = nt("Je hebt vandaag al het maximum aantal tickets gemaakt. Morgen kan het weer. Is het dringend? Neem dan contact op met je installateur.");
+// Vanaf hoeveel vragen over de regel opvalt, en vanaf hoeveel tickets over hij er staat.
+const WEINIG = 3;
+const TICKETS_WEINIG = 2;
+
 /** Een foto verkleind tot een JPEG van hoogstens 2000 px, zoals de kaart; lukt dat niet, dan het bestand zelf. */
 async function verklein(bestand) {
   try {
@@ -248,6 +276,19 @@ const css = /* css */ `
   .melding.fout { color: rgb(229,72,77); }
   .melding[hidden] { display: none; }
   .leeg { margin: 0; font-size: 13px; color: var(--dac-ink-2); }
+  /* Het pakket (v0.225.0): de naam als etiket in het bovenschrift, wat er vandaag over is onder het veld. De eigenaar
+     op 15-11-2026: "ik wil bij de coach assist ook zien welk abbo je hebt". */
+  .pakket {
+    display: inline-block; text-transform: none;
+    font-size: 11px; font-weight: 600; letter-spacing: 0.02em; padding: 2px 8px; border-radius: 999px;
+    color: rgb(25,143,217); background: var(--dac-accent-soft); border: 1px solid rgba(25,143,217,0.35); white-space: nowrap;
+  }
+  .over { margin: 0; font-size: 12px; color: var(--dac-ink-3); }
+  .over.weinig { color: rgb(25,143,217); font-weight: 600; }
+  .op { display: grid; gap: 8px; margin-top: 12px; }
+  .op p { margin: 0; font-size: 13px; line-height: 1.5; color: var(--dac-ink-2); }
+  .over[hidden], .op[hidden] { display: none; }
+  textarea:disabled { opacity: 0.6; }
   input[type="file"] { display: none; }
 `;
 
@@ -268,6 +309,10 @@ export class DacTicketsSheet extends DacElement {
     this.gekozenDag_ = "";
     this.uploader = null;
     this.fotoAdres = null;
+    this.pakket_ = null;
+    this.opnieuwKlok_ = null;
+    this.laatsteVraag_ = "";
+    this.laatsteTicket_ = "";
   }
 
   render() {
@@ -276,7 +321,9 @@ export class DacTicketsSheet extends DacElement {
         <div class="sheet-head">
           <img class="logo" src="${LOGO_URL}" alt="" draggable="false">
           <div>
-            <div class="eyebrow">DomotiApp</div>
+            <!-- Het bovenschrift: de naam van het abonnement als etiket, zonder abonnement COACH (v0.225.0). De
+                 eigenaar op 15-11-2026: "de coach staat los snap je? Dus niks van domotiapp namen in de coach". -->
+            <div class="eyebrow" id="bovenschrift">COACH</div>
             <h3 id="bot-titel">${t("Vraag het Coach Assist")}</h3>
           </div>
           <button class="sheet-close" type="button" id="bot-dicht" aria-label="${t("Sluiten")}">${icons.close}</button>
@@ -291,13 +338,20 @@ export class DacTicketsSheet extends DacElement {
           <div class="schrijf">
             <textarea id="vraag" maxlength="4000" aria-label="${t("Je vraag")}" placeholder="${t("Waar kunnen we je mee helpen?")}"></textarea>
             <button type="button" class="knop hoofd" id="stuur-vraag">${t("Versturen")}</button>
+            <p class="over" id="over" hidden></p>
+          </div>
+          <div class="op" id="op" hidden>
+            <p>${t(PAKKET_OP)}</p>
+            <button type="button" class="knop hoofd" id="meld-storing">${t("Meld een storing")}</button>
           </div>
         </div>
         <div class="scherm" id="s-tickets" hidden>
           <div class="balk">
             <button type="button" class="knop" id="terug" hidden>${icons.arrowLeft}<span>${t("Alle tickets")}</span></button>
             <button type="button" class="knop hoofd" id="nieuw">${icons.plus}<span>${t("Nieuw ticket")}</span></button>
+            <span class="over" id="tickets-over" hidden></span>
           </div>
+          <p class="melding" id="tickets-op" hidden>${t(TICKETS_OP)}</p>
           <div id="t-lijst"><div class="lijst" id="lijst"></div></div>
           <div id="t-gesprek" hidden>
             <div class="gesprek" id="gesprek-ticket"></div>
@@ -356,16 +410,26 @@ export class DacTicketsSheet extends DacElement {
     }
     for (const knop of this.$$("[data-foto-kies]")) knop.addEventListener("click", () => this.$("#foto").click());
     this.$("#foto").addEventListener("change", (event) => this.fotosErbij_(event.target.files));
+    this.$("#meld-storing").addEventListener("click", () => {
+      // De vraag die niet meer kon gaat mee naar de storing.
+      const tekst = this.$("#vraag").value.trim();
+      this.soort_ = "storing";
+      this.tab_ = "tickets";
+      this.toon_("nieuw");
+      if (tekst && !this.$("#ticket-tekst").value.trim()) this.$("#ticket-tekst").value = tekst;
+    });
     this.$("#stuur-vraag").addEventListener("click", () => {
       const tekst = this.$("#vraag").value.trim();
-      if (!tekst) return;
+      if (!tekst || vragenOver(this.pakket_) === 0) return;
+      this.laatsteVraag_ = tekst;
       this.fire("dac-ticket-reageer", { id: GESPREK, tekst, bijlagen: [] });
       this.$("#vraag").value = "";
       this.naarOnder_();
     });
     this.$("#stuur-nieuw").addEventListener("click", () => {
       const tekst = this.$("#ticket-tekst").value.trim();
-      if (!tekst && !this.fotos_.length) return;
+      if ((!tekst && !this.fotos_.length) || pakketOver(this.pakket_, "tickets") === 0) return;
+      this.laatsteTicket_ = tekst;
       this.fire("dac-ticket-nieuw", { soort: this.soort_, tekst, bijlagen: this.fotos_.map((f) => f.id) });
       this.$("#ticket-tekst").value = "";
       this.fotos_ = [];
@@ -398,6 +462,30 @@ export class DacTicketsSheet extends DacElement {
   set userId(id) {
     this.userId_ = String(id ?? "");
     this.paint_();
+  }
+
+  /** Het pakket uit de coach (v0.225.0), of null. Om middernacht gaat het veld vanzelf weer open. */
+  set pakket(pakket) {
+    this.pakket_ = pakket && typeof pakket === "object" ? pakket : null;
+    clearTimeout(this.opnieuwKlok_);
+    const over = Date.parse(this.pakket_?.opnieuw ?? "") - Date.now();
+    if (over > 0 && over < 26 * 3600 * 1000) this.opnieuwKlok_ = setTimeout(() => this.paint_(), over + 1000);
+    this.paint_();
+  }
+
+  /**
+   * De coach weigerde een vraag (`reply`) of een nieuw ticket (`new`): de grens is bereikt (v0.225.0). Wat er getypt
+   * was blijft staan.
+   */
+  pakketOp(tekst, soort = "reply") {
+    const ticket = soort === "new";
+    if (this.pakket_) this.pakket_ = { ...this.pakket_, [ticket ? "tickets_over" : "vragen_over"]: 0 };
+    if (!this.rendered_) return;
+    const veld = this.$(ticket ? "#ticket-tekst" : "#vraag");
+    if (!veld.value.trim()) veld.value = ticket ? this.laatsteTicket_ : this.laatsteVraag_;
+    this.$("#melding").hidden = true;
+    this.paint_();
+    if (!this.pakket_) this.meld_(String(tekst || t(ticket ? TICKETS_OP : PAKKET_OP)), true);
   }
 
   /** Een fout van de coach, met zijn eigen zin. */
@@ -505,6 +593,27 @@ export class DacTicketsSheet extends DacElement {
     if (ticketOnder) vak.scrollTop = vak.scrollHeight;
     this.vulFotos_(vak);
     for (const knop of this.$$("[data-soort]")) knop.setAttribute("aria-pressed", String(knop.dataset.soort === this.soort_));
+    // Het pakket: de naam, wat er vandaag over is, en op nul het veld dicht met de weg naar een storing.
+    const over = vragenOver(this.pakket_);
+    const boven = this.$("#bovenschrift");
+    boven.innerHTML = this.pakket_?.naam ? `<span class="pakket">${esc(this.pakket_.naam)}</span>` : "COACH";
+    const regel = this.$("#over");
+    regel.textContent = vragenOverTekst(over);
+    regel.hidden = !over;
+    regel.classList.toggle("weinig", over != null && over <= WEINIG);
+    this.$("#vraag").disabled = over === 0;
+    this.$("#stuur-vraag").hidden = over === 0;
+    this.$("#op").hidden = over !== 0;
+    // Tickets: op nul geen Nieuw ticket en geen Meld een storing, met de reden; bij weinig over hoeveel nog.
+    const tickets = pakketOver(this.pakket_, "tickets");
+    const ticketsRegel = this.$("#tickets-over");
+    ticketsRegel.textContent = ticketsOverTekst(tickets);
+    ticketsRegel.hidden = !tickets || !ticketsRegel.textContent;
+    ticketsRegel.classList.toggle("weinig", !ticketsRegel.hidden);
+    this.$("#tickets-op").hidden = tickets !== 0 || this.scherm_ === "gesprek";
+    if (tickets === 0) this.$("#nieuw").hidden = true;
+    this.$("#stuur-nieuw").hidden = tickets === 0;
+    this.$("#meld-storing").hidden = tickets === 0;
     const gekozen = this.fotos_.length ? t("{n} foto('s) erbij", { n: this.fotos_.length }) : "";
     for (const plek of this.$$("[data-gekozen]")) plek.textContent = gekozen;
     for (const knop of this.$$("[data-foto-kies]")) knop.hidden = !this.uploader || this.fotos_.length >= FOTOS_MAX;

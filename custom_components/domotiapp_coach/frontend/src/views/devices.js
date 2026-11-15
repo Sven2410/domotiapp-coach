@@ -266,7 +266,7 @@ class DacViewDevices extends DacEditorElement {
         ? known
         : await this.hass_.callWS({ type: "config/device_registry/list" });
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de apparaten van Home Assistant niet lezen", error);
+      console.warn("[COACH] kon de apparaten van Home Assistant niet lezen", error);
       this.haDevices_ = [];
     }
 
@@ -791,7 +791,7 @@ class DacViewDevices extends DacEditorElement {
       this.saved_.program_measured = this.draft_.program_measured;
       this.paintDevices_();
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de meting niet wissen", error);
+      console.warn("[COACH] kon de meting niet wissen", error);
     }
   }
 

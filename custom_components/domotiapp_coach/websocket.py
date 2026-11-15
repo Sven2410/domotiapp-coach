@@ -1905,9 +1905,11 @@ def _gebruiker(connection: websocket_api.ActiveConnection) -> tuple[str, str]:
     return str(getattr(user, "id", "") or ""), str(getattr(user, "name", "") or "")
 
 
-def _ticket_gebeurtenis(hass: HomeAssistant, ticket: dict[str, Any], bericht: dict[str, Any] | None) -> None:
+def _ticket_gebeurtenis(hass: HomeAssistant, ticket: dict[str, Any], bericht: dict[str, Any] | None,
+                        pakket: Any = ...) -> None:
     """De gebeurtenis van de afspraak (bij nieuw, reactie en antwoord), en het ticket voor `subscribe`. Het gesprek
-    (0) heeft geen stand; `bijlagen` is het aantal foto's bij het bericht."""
+    (0) heeft geen stand; `bijlagen` is het aantal foto's bij het bericht. Met `pakket` gaat het pakket mee
+    (v0.225.0), na een vraag of een nieuw ticket, die meetellen."""
     from .tickets import voor_buiten
 
     if bericht is not None:
@@ -1915,7 +1917,8 @@ def _ticket_gebeurtenis(hass: HomeAssistant, ticket: dict[str, Any], bericht: di
             "ticket_id": ticket["id"], "bericht_id": bericht["id"], "van": bericht["van"],
             "soort": ticket["soort"], "stand": ticket.get("stand"), "bijlagen": len(bericht.get("bijlagen") or []),
         })
-    hass.bus.async_fire(EVENT_TICKET_BIJGEWERKT, {"ticket": voor_buiten(ticket)})
+    hass.bus.async_fire(EVENT_TICKET_BIJGEWERKT, {"ticket": voor_buiten(ticket),
+                                                  **({} if pakket is ... else {"pakket": pakket})})
 
 
 async def _ticket_wijzig(hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any],
@@ -1940,7 +1943,7 @@ async def async_tickets_list(
     from .storage import async_get_tickets
     from .tickets import overzicht
 
-    connection.send_result(msg["id"], overzicht(await async_get_tickets(hass).async_data()))
+    connection.send_result(msg["id"], overzicht(await async_get_tickets(hass).async_data(), dt_util.now()))
 
 
 @websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/tickets/subscribe"})
@@ -1954,12 +1957,14 @@ async def async_tickets_subscribe(
 
     @callback
     def doorgeven(event: Any) -> None:
-        connection.send_message(websocket_api.event_message(msg["id"], {"ticket": event.data.get("ticket")}))
+        # Het ticket, en sinds v0.225.0 het pakket als dat veranderde; alleen wat er is.
+        connection.send_message(websocket_api.event_message(
+            msg["id"], {sleutel: event.data[sleutel] for sleutel in ("ticket", "pakket") if sleutel in event.data}))
 
     connection.subscriptions[msg["id"]] = hass.bus.async_listen(EVENT_TICKET_BIJGEWERKT, doorgeven)
     connection.send_result(msg["id"])
     data = await async_get_tickets(hass).async_data()
-    connection.send_message(websocket_api.event_message(msg["id"], overzicht(data)))
+    connection.send_message(websocket_api.event_message(msg["id"], overzicht(data, dt_util.now())))
 
 
 @websocket_api.websocket_command(
@@ -1974,8 +1979,10 @@ async def async_tickets_subscribe(
 async def async_tickets_new(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Een nieuw ticket: een storing of een aanvraag, eventueel met foto's."""
-    from .tickets import nieuw
+    """Een nieuw ticket: een storing of een aanvraag, eventueel met foto's. Over de grens van het pakket de fout
+    `pakket_op` (v0.225.0); anders gaat het pakket mee in het event."""
+    from .storage import async_get_tickets
+    from .tickets import nieuw, pakket_stand
 
     if getattr(connection.user, "system_generated", False):
         connection.send_error(msg["id"], "geen_systeem", t("Een systeemgebruiker stelt geen vragen."))
@@ -1987,7 +1994,8 @@ async def async_tickets_new(
     if uit is None:
         return
     ticket, bericht = uit
-    _ticket_gebeurtenis(hass, ticket, bericht)
+    _ticket_gebeurtenis(hass, ticket, bericht,
+                        pakket_stand(await async_get_tickets(hass).async_data(), dt_util.now()))
     connection.send_result(msg["id"], _ticket_uit(ticket))
 
 
@@ -2003,8 +2011,10 @@ async def async_tickets_new(
 async def async_tickets_reply(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Een vraag in het gesprek (`ticket_id` 0), of een reactie op een ticket, eventueel met foto's."""
-    from .tickets import reageer
+    """Een vraag in het gesprek (`ticket_id` 0), of een reactie op een ticket, eventueel met foto's. Een vraag over
+    de grens van het pakket geeft de fout `pakket_op` (v0.225.0); dan is er niets bewaard."""
+    from .storage import async_get_tickets
+    from .tickets import GESPREK, pakket_stand, reageer
 
     if getattr(connection.user, "system_generated", False):
         connection.send_error(msg["id"], "geen_systeem", t("Een systeemgebruiker stelt geen vragen."))
@@ -2016,7 +2026,11 @@ async def async_tickets_reply(
     if uit is None:
         return
     ticket, bericht = uit
-    _ticket_gebeurtenis(hass, ticket, bericht)
+    if ticket["id"] == GESPREK:
+        pakket = pakket_stand(await async_get_tickets(hass).async_data(), dt_util.now())
+        _ticket_gebeurtenis(hass, ticket, bericht, pakket)
+    else:
+        _ticket_gebeurtenis(hass, ticket, bericht)
     connection.send_result(msg["id"], _ticket_uit(ticket))
 
 
@@ -2103,6 +2117,38 @@ async def async_tickets_set_state(
     connection.send_result(msg["id"], _ticket_uit(ticket))
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "domotiapp_coach/tickets/set_plan",
+        vol.Required("naam"): vol.Any(None, str),
+        vol.Required("vragen_per_dag"): vol.Any(None, int),
+        vol.Optional("tickets_per_dag", default=None): vol.Any(None, int),
+        vol.Optional("coach_assist", default=True): bool,
+    }
+)
+@websocket_api.async_response
+async def async_tickets_set_plan(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Het pakket van dit huis (v0.225.0), alleen door een beheerder: de naam, en hoeveel vragen en nieuwe tickets
+    per dag, `None` voor onbeperkt, en of Coach Assist erin zit; `naam` None haalt het weg. Antwoord en event: het
+    pakket zoals in `list`."""
+    from .tickets import pakket_stand, zet_pakket
+
+    if not getattr(connection.user, "is_admin", False):
+        connection.send_error(msg["id"], "unauthorized", t("Alleen een beheerder zet het pakket."))
+        return
+    if await _ticket_wijzig(hass, connection, msg,
+                            lambda data: zet_pakket(data, msg["naam"], msg["vragen_per_dag"],
+                                                      msg.get("tickets_per_dag"), msg.get("coach_assist", True))) is None:
+        return
+    from .storage import async_get_tickets
+
+    pakket = pakket_stand(await async_get_tickets(hass).async_data(), dt_util.now())
+    hass.bus.async_fire(EVENT_TICKET_BIJGEWERKT, {"pakket": pakket})
+    connection.send_result(msg["id"], pakket)
+
+
 @callback
 def async_register(hass: HomeAssistant) -> None:
     """Register the panel's websocket commands."""
@@ -2113,6 +2159,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_tickets_read)
     websocket_api.async_register_command(hass, async_tickets_answer)
     websocket_api.async_register_command(hass, async_tickets_set_state)
+    websocket_api.async_register_command(hass, async_tickets_set_plan)
     websocket_api.async_register_command(hass, async_store_report)
     websocket_api.async_register_command(hass, async_get_settings)
     websocket_api.async_register_command(hass, async_set_settings)

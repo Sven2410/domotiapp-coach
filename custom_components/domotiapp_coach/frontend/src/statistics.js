@@ -128,7 +128,7 @@ export async function withStatistics(hass, ids) {
     const known = new Set(rows.map((row) => row.statistic_id));
     return new Set(wanted.filter((id) => known.has(id)));
   } catch (error) {
-    console.warn("[DomotiApp Coach] kon de statistieken niet opvragen", error);
+    console.warn("[COACH] kon de statistieken niet opvragen", error);
     return new Set();
   }
 }
@@ -170,7 +170,7 @@ export async function fetchPeriod(hass, ids, period, start, bereik = null) {
       );
     }
   } catch (error) {
-    console.warn("[DomotiApp Coach] kon de historie niet ophalen", error);
+    console.warn("[COACH] kon de historie niet ophalen", error);
   }
 
   return out;
@@ -214,7 +214,7 @@ export async function fetchPrices(hass, entityId, period, start, bereik = null) 
       out.set(alsHuis(row.start).getTime(), Number(row.mean));
     }
   } catch (error) {
-    console.warn("[DomotiApp Coach] kon de prijsgeschiedenis niet ophalen", error);
+    console.warn("[COACH] kon de prijsgeschiedenis niet ophalen", error);
   }
 
   return out;
@@ -267,7 +267,7 @@ export async function fetchDevices(hass, devices, period, start) {
         })) ?? {}
       );
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon het verbruik per apparaat niet ophalen", error);
+      console.warn("[COACH] kon het verbruik per apparaat niet ophalen", error);
       return {};
     }
   };
@@ -387,7 +387,7 @@ export async function fetchBattery(hass, batteries, period, start, bereik = null
         })) ?? {}
       );
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de thuisbatterij niet ophalen", error);
+      console.warn("[COACH] kon de thuisbatterij niet ophalen", error);
       return {};
     }
   };
@@ -477,7 +477,7 @@ export async function fetchSoc(hass, batteries, van, tot) {
         types: ["min"],
       })) ?? {};
   } catch (error) {
-    console.warn("[DomotiApp Coach] kon de accustand niet ophalen", error);
+    console.warn("[COACH] kon de accustand niet ophalen", error);
     return out;
   }
   for (const [id, soc] of ids) {
@@ -551,7 +551,7 @@ export async function quarters(hass, entityIds, start, end) {
   } catch (error) {
     // Een installatie die nog niet bijgewerkt is kent dit commando niet. Dan
     // blijft de piekentabel gewoon weg in plaats van dat het rapport stukloopt.
-    console.warn("[DomotiApp Coach] kon de kwartieren niet ophalen", error);
+    console.warn("[COACH] kon de kwartieren niet ophalen", error);
   }
 
   return uit;

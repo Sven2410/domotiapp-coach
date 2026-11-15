@@ -1380,7 +1380,7 @@ class DacViewHistory extends DacElement {
     try {
       meldingen = (await this.hass_.callWS({ type: "domotiapp_coach/notifications/list" })) ?? [];
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de meldingen voor de tijdlijn niet ophalen", error);
+      console.warn("[COACH] kon de meldingen voor de tijdlijn niet ophalen", error);
     }
     const kwartieren = await quarters(
       this.hass_,
@@ -2135,7 +2135,7 @@ class DacViewHistory extends DacElement {
       if (label && uitkomst === "mislukt") label.textContent = t("Niet gelukt");
       else if (label) label.textContent = oud;
     } catch (fout) {
-      console.error("[DomotiApp Coach] het rapport kon niet gemaakt worden", fout);
+      console.error("[COACH] het rapport kon niet gemaakt worden", fout);
       if (label) label.textContent = t("Niet gelukt");
     } finally {
       if (knop) knop.disabled = false;
@@ -2192,7 +2192,7 @@ class DacViewHistory extends DacElement {
         return "gedownload";
       }
     } catch (fout) {
-      console.warn("[DomotiApp Coach] rapport kon niet via Home Assistant, nu rechtstreeks", fout);
+      console.warn("[COACH] rapport kon niet via Home Assistant, nu rechtstreeks", fout);
     }
     return afleveren(blob, naam, soort === "csv" ? "text/csv" : "application/pdf");
   }
@@ -2246,7 +2246,7 @@ class DacViewHistory extends DacElement {
       const uitkomst = await this.bezorg_(blob, naam, "csv");
       label.textContent = uitkomst === "mislukt" ? t("Niet gelukt") : oud;
     } catch (fout) {
-      console.error("[DomotiApp Coach] het bestand kon niet gemaakt worden", fout);
+      console.error("[COACH] het bestand kon niet gemaakt worden", fout);
       label.textContent = t("Niet gelukt");
     } finally {
       knop.disabled = false;
@@ -2642,7 +2642,7 @@ class DacViewHistory extends DacElement {
     try {
       this.beurten_ = await this.hass_.callWS({ type: "domotiapp_coach/savings/list" });
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de laadbeurten niet laden", error);
+      console.warn("[COACH] kon de laadbeurten niet laden", error);
       this.beurten_ = [];
     }
     this.paint_();

@@ -122,11 +122,10 @@ in een gewone zin blijft het "de coach".
   antwoord krijgt de naam Coach Assist (`antwoord` in tickets.py).
 - **Wat niet verandert**: het domein `domotiapp_coach`, de entiteit-id's, de opdrachten, het event
   `domotiapp_coach_ticket`, de repo en de bestandsnamen. Dat zou installaties breken.
-- **De fabrikant van de apparaten blijft DomotiApp Coach.** De kaarten van DomotiApp Lovelace zoeken de apparaten van
-  de coach op die naam (`COACH_FABRIKANT`), ook in de apparaatkiezer van hun editors. De uitrol installeert coach en
-  lovelace los van elkaar, dus een klant met een oudere lovelace zou die kaarten kwijtraken. Omzetten pas als elke
-  klant een lovelace heeft die beide namen kent (0.125.0 of nieuwer); proef "de namen" in test_rapport.mjs houdt
-  hem tot dan vast.
+- **De fabrikant van de apparaten bleef tot v0.225.0 DomotiApp Coach.** De kaarten van DomotiApp Lovelace zoeken de
+  apparaten van de coach op die naam (`COACH_FABRIKANT`), ook in de apparaatkiezer van hun editors. De uitrol
+  installeert coach en lovelace los van elkaar, dus een klant met een oudere lovelace zou die kaarten kwijtraken.
+  Omzetten kon pas als elke klant een lovelace had die beide namen kent (0.125.0 of nieuwer); zie hieronder, v0.225.0.
 - **Het logo van COACH** (dezelfde dag, "Dat logo moet op alles komen te staan"): een blauwe zeshoekige C met een
   bliksem. Het staat in `frontend/img/coach.png` (`LOGO_URL` in theme.js) voor de kop van het paneel, het venster van
   Coach Assist en het rapport (daar op wit, `jpegVan`), en in `brand/` (`icon.png` en `logo.png` op 256,
@@ -173,4 +172,66 @@ afgesproken. Het
 contract met de kaart verandert er niet door.
 
 Op het scherm nagemeten op 390, 320 en 280 px. De proef "het gesprek zoals WhatsApp" in test_rapport.mjs.
+
+## Het pakket: een grens op vragen en tickets per dag (v0.225.0)
+
+De eigenaar op 15-11-2026: klanten krijgen een abonnement met een grens per dag, "Zo wordt het ook niet overvol en kan
+ik alles managen", en "nee elk abbo heeft geen maandlimiet". Voor nieuwe tickets ook: "ook om spammen te voorkomen max
+aantal per dag snap je?". En: "ik wil bij de coach assist ook zien welk abbo je hebt". Welke pakketten er zijn en wie
+wat heeft, beheert de mini-pc. De coach kent alleen wat hem met `set_plan` gezegd wordt. Er staat geen naam van een
+pakket in de code. De afspraak staat in de privénotities, bij de afspraak over de tickets.
+
+- **Wat telt**, per kalenderdag in de tijdzone van Home Assistant:
+  - een vraag in het gesprek (`reply` op 0, `van: "klant"`);
+  - een nieuw ticket (`new`, storing en aanvraag samen).
+  - Een reactie op een ticket telt niet. Er is geen grens per maand.
+- **Geteld uit wat er bewaard is** (`pakket_stand` in tickets.py): de berichten in het hele gesprek, niet alleen de
+  laatste `GESPREK_MAX`, en `gemaakt` van de tickets. Er is geen eigen teller, dus na een herstart klopt het vanzelf.
+  Een tijd in UTC telt op de dag van het huis.
+- **`set_plan`**, alleen een beheerder:
+  - `naam` (1 tot 40 tekens, of `null`: geen pakket);
+  - `vragen_per_dag` en `tickets_per_dag` (1 tot 1000, of `null` voor onbeperkt; `tickets_per_dag` mag ontbreken).
+  - Bewaard in `TicketsStore`, onder `pakket`.
+- **`list` en `subscribe`** hebben altijd `pakket`: `null`, of `naam`, `vragen_per_dag`, `vragen_vandaag`, `vragen_over`,
+  `tickets_per_dag`, `tickets_vandaag`, `tickets_over` en `opnieuw` (de volgende middernacht, met de juiste offset op
+  een dag van 23 of 25 uur).
+- **Events:** na een vraag en na een nieuw ticket gaat het pakket mee in het event van `subscribe`
+  (`{"ticket", "pakket"}`). Na `set_plan` komt een event met alleen `{"pakket"}`. Na een antwoord, gelezen of een stand
+  komt er geen pakket mee.
+- **Op de grens: de fout `pakket_op`**, met een eigen zin voor vragen en voor tickets. Er is dan niets bewaard (ook
+  geen foto vastgemaakt) en er gaat geen gebeurtenis af. Zonder pakket is er geen grens; de 60 berichten en 20 tickets
+  per uur per gebruiker blijven.
+- **Geen Coach Assist** (`coach_assist` onwaar; de eigenaar: "Dan moet er geen AI assistant in
+  zitten etc"): een vraag, een nieuw ticket en een reactie geven de fout `geen_coach_assist`. Er wordt niets bewaard.
+  Wat er al was blijft in `list` staan, en de knop Coach Assist verdwijnt uit de kop. `coach_assist` mag ontbreken,
+  dan is hij waar.
+- **Het abonnement in het paneel** (de eigenaar: "ja maar ook in de coach zelf"), alleen als er een pakket is:
+  - het bovenschrift van het venster wordt de naam als etiket (zonder pakket staat er COACH);
+  - een klein etiket naast COACH in de kop, dat op een telefoon net als COACH zelf wegvalt;
+  - op Contract een kaart Abonnement, met vragen en tickets per dag en wat er vandaag over is.
+- **Het venster:**
+  - Onder het veld staat "Nog 7 vragen vandaag", opvallender bij 3 of minder.
+  - Op 0 vragen gaat het veld dicht. Eronder komen de zin en een knop "Meld een storing" die Nieuw ticket opent met
+    Storing gekozen en de getypte vraag erin.
+  - Bij tickets staat "Nog 2 tickets vandaag" naast Nieuw ticket, alleen bij 2 of minder.
+  - Op 0 tickets is Nieuw ticket weg, met de zin, en ook "Meld een storing" en Versturen.
+  - Na `opnieuw` gaat alles vanzelf weer open, ook zonder bericht van de coach.
+  - Gelijk aan de kaart van DomotiApp Lovelace.
+
+Proef 268 in test_coach.py, met een herstart halverwege de dag en middernacht. De proef "het pakket" in
+test_rapport.mjs.
+
+## De fabrikant COACH, en nergens meer DomotiApp (v0.225.0)
+
+De eigenaar op 15-11-2026: "de coach staat los snap je? Dus niks van domotiapp namen in de coach".
+
+- **De fabrikant** van de apparaten is nu COACH (tot dan "DomotiApp Coach"). Op 15-11 had elke klant met een coach
+  lovelace 0.126.0 of 0.127.0, en lovelace kent sinds 0.125.0 allebei de namen. De identifiers zijn dezelfde, dus het
+  blijft hetzelfde apparaat met een nieuwe fabrikant.
+- **Het log en de console** zeggen COACH of `[COACH]`.
+- **Het bovenschrift** van Coach Assist zegt COACH, of de naam van het abonnement.
+- **De technische namen blijven** (`domotiapp_coach`, de repo, id's, events, bestandsnamen), net als het commentaar
+  dat over de geschiedenis gaat.
+- **De proef** "nergens DomotiApp" in test_rapport.mjs leest elke .js, .py en .json van de integratie zonder
+  commentaar. Hij valt om op elke DomotiApp in tekst, behalve een klassenaam.
 

@@ -18,11 +18,18 @@ opslag staat in storage.py (`TicketsStore`), de websocket in websocket.py, de fo
 
 Het contract met de kaart en met wie de vragen beantwoordt is `CONTRACT`: toevoegen mag, hernoemen of weghalen
 alleen met een hoger getal, zoals bij de entiteiten (`CONTRACT` in entiteit.py).
+
+Het pakket (v0.225.0): een huis kan een grens hebben op het aantal vragen per dag. De eigenaar op 15-11-2026: "Zo
+wordt het ook niet overvol en kan ik alles managen", en "elk abbo heeft geen maandlimiet". Een vraag in het gesprek
+telt bij de vragen, een nieuw ticket bij de tickets ("ook om spammen te voorkomen max aantal per dag snap je?"); een
+reactie op een ticket telt niet. Een pakket zonder Coach Assist ("Dan moet er geen AI assistant in zitten etc") laat
+geen vraag en geen ticket meer toe; wat er al was blijft. Welk pakket het is zet een beheerder (`zet_pakket`); zonder
+pakket is er geen grens.
 """
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from typing import Any
 
 from .taal import t
@@ -53,6 +60,10 @@ BIJLAGE_LOS = timedelta(hours=1)
 
 KLANT = "klant"
 DOMOTITECH = "domotitech"
+
+# Het pakket: hoe lang de naam mag zijn, en hoeveel vragen per dag hoogstens.
+PAKKET_NAAM_MAX = 40
+PAKKET_VRAGEN_MAX = 1000
 
 
 class TicketFout(ValueError):
@@ -209,6 +220,10 @@ def nieuw(
     heel(data)
     if soort not in SOORTEN:
         raise TicketFout("soort", t("Onbekende soort: {soort}.", soort=soort))
+    _zonder_coach_assist(data, at)
+    if (pakket_stand(data, at) or {}).get("tickets_over") == 0:
+        raise TicketFout("pakket_op", t("Je hebt vandaag al het maximum aantal tickets gemaakt. Morgen kan het weer. "
+                                        "Is het dringend? Neem dan contact op met je installateur."))
     schoon = _tekst(tekst, mag_leeg=bool(bijlagen))
     recent = sum(
         1 for ticket in data["tickets"]
@@ -240,7 +255,11 @@ def reageer(
     """Een bericht van de bewoner: een vraag in het gesprek (0), of een reactie op een ticket. Een ticket dat klaar
     was gaat terug naar `nieuw`. In het gesprek hoogstens `GESPREK_PER_UUR` berichten per gebruiker."""
     ticket = zoek(data, ticket_id)
+    _zonder_coach_assist(data, at)
     schoon = _tekst(tekst, mag_leeg=bool(bijlagen) and ticket_id != GESPREK)
+    if ticket_id == GESPREK and (pakket_stand(data, at) or {}).get("vragen_over") == 0:
+        raise TicketFout("pakket_op", t("Je hebt je vragen voor vandaag gesteld. Morgen kun je weer vragen stellen. "
+                                        "Is er iets kapot? Meld dan een storing."))
     if ticket_id == GESPREK:
         recent = sum(
             1 for b in ticket.get("berichten") or []
@@ -308,6 +327,72 @@ def lijst(data: dict[str, Any]) -> list[dict[str, Any]]:
     return tickets[:LIJST_MAX]
 
 
-def overzicht(data: dict[str, Any]) -> dict[str, Any]:
-    """Het antwoord van `list` en het eerste event van `subscribe`."""
-    return {"contract": CONTRACT, "gesprek": voor_buiten(heel(data)["gesprek"]), "tickets": lijst(data)}
+def overzicht(data: dict[str, Any], at: datetime | None = None) -> dict[str, Any]:
+    """Het antwoord van `list` en het eerste event van `subscribe`; `pakket` altijd, `None` zonder (v0.225.0)."""
+    return {"contract": CONTRACT, "gesprek": voor_buiten(heel(data)["gesprek"]), "tickets": lijst(data),
+            "pakket": pakket_stand(data, at or datetime.now().astimezone())}
+
+
+def zet_pakket(data: dict[str, Any], naam: Any, vragen_per_dag: Any, tickets_per_dag: Any = None,
+               coach_assist: Any = True) -> dict[str, Any]:
+    """Het pakket van dit huis, of geen (`naam` None) (v0.225.0). Een grens None is onbeperkt; `coach_assist` onwaar
+    is een pakket zonder Coach Assist. Geeft wat er bewaard is, `{}` zonder pakket."""
+    if naam is None:
+        data.pop("pakket", None)
+        return {}
+    schoon = str(naam).strip() if isinstance(naam, str) else ""
+    if not 1 <= len(schoon) <= PAKKET_NAAM_MAX:
+        raise TicketFout("pakket", t("De naam van het pakket is 1 tot {n} tekens.", n=PAKKET_NAAM_MAX))
+    for grens in (vragen_per_dag, tickets_per_dag):
+        if grens is not None and (isinstance(grens, bool) or not isinstance(grens, int)
+                                  or not 1 <= grens <= PAKKET_VRAGEN_MAX):
+            raise TicketFout("pakket", t("Het aantal per dag is 1 tot {n}, of leeg voor onbeperkt.", n=PAKKET_VRAGEN_MAX))
+    if not isinstance(coach_assist, bool):
+        raise TicketFout("pakket", t("Coach Assist staat aan of uit."))
+    data["pakket"] = {"naam": schoon, "coach_assist": coach_assist, "vragen_per_dag": vragen_per_dag,
+                      "tickets_per_dag": tickets_per_dag}
+    return data["pakket"]
+
+
+def _zonder_coach_assist(data: dict[str, Any], at: datetime) -> None:
+    """De fout `geen_coach_assist` als het pakket geen Coach Assist heeft (v0.225.0)."""
+    if (pakket_stand(data, at) or {}).get("coach_assist") is False:
+        raise TicketFout("geen_coach_assist", t("Coach Assist zit niet in je abonnement."))
+
+
+def _zelfde_dag(moment: datetime, at: datetime) -> bool:
+    """Of `moment` op de kalenderdag van `at` valt, in de tijdzone van `at` (die van Home Assistant)."""
+    if moment.tzinfo is not None and at.tzinfo is not None:
+        moment = moment.astimezone(at.tzinfo)
+    return moment.date() == at.date()
+
+
+def pakket_stand(data: dict[str, Any], at: datetime) -> dict[str, Any] | None:
+    """Het pakket zoals de kaart het leest, of None zonder pakket (v0.225.0).
+
+    `vragen_vandaag` komt uit de berichten zelf: wat de bewoners vandaag in het gesprek vroegen, geteld uit het hele
+    gesprek en niet alleen de laatste `GESPREK_MAX`; `tickets_vandaag` uit `gemaakt` van de tickets. Geen eigen
+    teller, dus na een herstart klopt het vanzelf.
+    `opnieuw` is de volgende middernacht in de tijdzone van `at`; ook op een dag van 23 of 25 uur.
+    """
+    pakket = data.get("pakket")
+    if not isinstance(pakket, dict) or not pakket.get("naam"):
+        return None
+    vandaag = sum(
+        1 for b in (heel(data)["gesprek"].get("berichten") or [])
+        if b.get("van") == KLANT and (moment := _moment(b.get("at"))) is not None and _zelfde_dag(moment, at)
+    )
+    tickets = sum(
+        1 for ticket in data.get("tickets") or []
+        if (moment := _moment(ticket.get("gemaakt"))) is not None and _zelfde_dag(moment, at)
+    )
+    per_dag, tickets_per_dag = pakket.get("vragen_per_dag"), pakket.get("tickets_per_dag")
+    opnieuw = datetime.combine(at.date() + timedelta(days=1), time(0), tzinfo=at.tzinfo)
+    return {
+        "naam": pakket["naam"], "coach_assist": pakket.get("coach_assist") is not False,
+        "vragen_per_dag": per_dag, "vragen_vandaag": vandaag,
+        "vragen_over": None if per_dag is None else max(0, int(per_dag) - vandaag),
+        "tickets_per_dag": tickets_per_dag, "tickets_vandaag": tickets,
+        "tickets_over": None if tickets_per_dag is None else max(0, int(tickets_per_dag) - tickets),
+        "opnieuw": opnieuw.isoformat(),
+    }

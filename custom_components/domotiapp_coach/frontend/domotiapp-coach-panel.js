@@ -161,13 +161,13 @@ class DomotiAppCoachPanel extends DacElement {
     try {
       this.applySettings_(await this.hass_.callWS({ type: "domotiapp_coach/settings/get" }));
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon instellingen niet laden", error);
+      console.warn("[COACH] kon instellingen niet laden", error);
     }
 
     try {
       this.unsubscribe_ = await volgCoach(this.hass_, "settings", (data) => this.applySettings_(data?.settings));
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon instellingen niet volgen", error);
+      console.warn("[COACH] kon instellingen niet volgen", error);
     }
 
     // De berichtenbox (v0.130.0): een keer ophalen, dan volgen.
@@ -188,6 +188,8 @@ class DomotiAppCoachPanel extends DacElement {
           this.tickets_ = data.tickets;
           this.gesprek_ = data.gesprek ?? null;
         } else if (data?.ticket) this.zetTicket_(data.ticket);
+        // Het pakket (v0.225.0): in de lijst, na een vraag en na een nieuw pakket; een coach zonder kent het niet.
+        if (data && "pakket" in data) this.pakket_ = data.pakket;
         this.zetTickets_();
       }, { type: "domotiapp_coach/tickets/subscribe" });
     } catch (error) {
@@ -205,6 +207,9 @@ class DomotiAppCoachPanel extends DacElement {
     if (!this.rendered_ || !this.tickets_) return;
     const wie = this.hass_?.user?.id ?? "";
     this.$("dac-header").botOngelezen = ongelezenTickets(this.tickets_, wie, this.gesprek_);
+    // Het abonnement (v0.225.0): in de kop en op Contract.
+    this.$("dac-header").pakket = this.pakket_ ?? null;
+    for (const view of this.views_.values()) if ("pakket" in view) view.pakket = this.pakket_ ?? null;
     const sheet = this.$("dac-tickets-sheet");
     sheet.userId = wie;
     sheet.uploader = (blob) => this.fotoUploaden_(blob);
@@ -213,6 +218,7 @@ class DomotiAppCoachPanel extends DacElement {
     })).path;
     sheet.tickets = this.tickets_;
     sheet.gesprek = this.gesprek_;
+    sheet.pakket = this.pakket_ ?? null;
   }
 
   /** Een foto naar de coach (v0.220.0); het antwoord is wat een ticket in `bijlagen` meeneemt. */
@@ -233,8 +239,11 @@ class DomotiAppCoachPanel extends DacElement {
         this.zetTickets_();
       }
     } catch (error) {
-      // De zin van de coach, in de taal van de installatie (tickets.py).
-      this.$("dac-tickets-sheet").fout = error?.message || t("Versturen lukte niet.");
+      // De zin van de coach, in de taal van de installatie (tickets.py). Op het pakket: het venster gaat dicht voor
+      // vragen, en de getypte tekst blijft (v0.225.0).
+      const sheet = this.$("dac-tickets-sheet");
+      if (error?.code === "pakket_op") sheet.pakketOp(error.message, soort);
+      else sheet.fout = error?.message || t("Versturen lukte niet.");
     }
   }
 
@@ -258,7 +267,7 @@ class DomotiAppCoachPanel extends DacElement {
     try {
       this.zetBerichten_(await this.hass_.callWS({ type: "domotiapp_coach/berichten/read", ...(id ? { id } : {}) }));
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon het bericht niet als gelezen markeren", error);
+      console.warn("[COACH] kon het bericht niet als gelezen markeren", error);
     }
   }
 
@@ -418,6 +427,7 @@ class DomotiAppCoachPanel extends DacElement {
     el.hass = this.hass_;
     el.stateFeed = this.feed_;
     el.settings = this.settings_;
+    if ("pakket" in el) el.pakket = this.pakket_ ?? null;
 
     this.views_.set(id, el);
     return el;
