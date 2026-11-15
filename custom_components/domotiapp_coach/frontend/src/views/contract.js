@@ -1095,9 +1095,11 @@ class DacViewContract extends DacEditorElement {
     this.$("#abo-naam").textContent = p.naam;
     const regel = (label, per, over) => `<div class="abo-regel"><span>${label}</span><strong>${per == null
       ? t("onbeperkt") : over == null ? String(per) : t("{per}, nog {over} vandaag", { per, over })}</strong></div>`;
+    const tickets = regel(t("Tickets per dag"), p.tickets_per_dag, pakketOver(p, "tickets"));
+    // Zonder Coach Assist kan een storing wel (v0.226.0), dus de grens op tickets blijft staan.
     this.$("#abo-regels").innerHTML = p.coach_assist === false
-      ? `<p class="hint">${t("Coach Assist zit niet in je abonnement.")}</p>`
-      : regel(t("Vragen per dag"), p.vragen_per_dag, vragenOver(p)) + regel(t("Tickets per dag"), p.tickets_per_dag, pakketOver(p, "tickets"));
+      ? `<p class="hint">${t("Coach Assist zit niet in je abonnement. Een storing melden kan altijd.")}</p>${tickets}`
+      : regel(t("Vragen per dag"), p.vragen_per_dag, vragenOver(p)) + tickets;
   }
 
   paint_() {

@@ -7,10 +7,12 @@
  * header carries both the section navigation and an explicit way back to the
  * home dashboard.
  *
- * On a phone the five sections do not fit side by side, so the navigation drops
- * to its own scrollable row under the brand and the active pill is scrolled into
- * view. Most customers open this on a phone, so that row is the layout that
- * matters, not the desktop one.
+ * Alles past, op elke breedte (v0.226.0). De eigenaar op 15-11-2026, toen de tabbladen van de installateur bij
+ * 1200 px gingen schuiven: "Ik wil dat alles past". Daarom geen vaste breekpunten meer maar stappen (`STANDEN`):
+ * eerst de knoppen rechts alleen een icoon, dan het abonnement onder COACH, dan de tabbladen alleen een icoon (de
+ * actieve houdt zijn tekst), dan de tabbladen op een eigen rij zoals op een telefoon, en zo verder. Een
+ * `ResizeObserver` meet na elke stap of het past en houdt de eerste die past (`kiesStand`); komt er een knop bij, dan
+ * klopt het nog steeds.
  */
 
 import { DacElement, define } from "./base.js";
@@ -34,6 +36,34 @@ export const NAV_ITEMS = [
   // bevestigen; wijzigen blijft van de installateur (`views/contract.js`).
   { id: "contract", label: nt("Contract"), icon: "euro" },
 ];
+
+/**
+ * De standen van de kop, van ruim naar krap (v0.226.0). Elke stand is een rij attributen op de kop:
+ * `ki` knoppen rechts alleen een icoon, `ao` het abonnement onder COACH, `ta` de tabbladen behalve de actieve alleen
+ * een icoon, `ti` alle tabbladen alleen een icoon, `rijen` de tabbladen op een eigen rij, `krap` minder ruimte rond de
+ * tabbladen, `aw` geen abonnement naast COACH (het staat ook bij Coach Assist en op Contract), `zn` alleen het logo.
+ */
+export const STANDEN = [
+  [],
+  ["ki"],
+  ["ki", "ao"],
+  ["ki", "ao", "ta"],
+  ["ki", "ao", "ti"],
+  ["rijen"],
+  ["rijen", "ki"],
+  ["rijen", "ki", "ao"],
+  ["rijen", "ki", "ao", "ta"],
+  ["rijen", "ki", "ao", "ti"],
+  ["rijen", "ki", "ao", "ti", "krap"],
+  ["rijen", "ki", "ti", "krap", "aw"],
+  ["rijen", "ki", "ti", "krap", "zn"],
+];
+
+/** De eerste stand waarin `past(stand)` waar is, anders de laatste. */
+export function kiesStand(standen, past) {
+  for (const stand of standen) if (past(stand)) return stand;
+  return standen[standen.length - 1];
+}
 
 /** The sections this user may open. */
 export const navItemsFor = (isAdmin) =>
@@ -209,36 +239,28 @@ class DacHeader extends DacElement {
       background: var(--dac-accent-soft);
     }
 
-    /* ---- responsive ---- */
-    @media (max-width: 1080px) {
-      .bar {
-        flex-wrap: wrap;
-        padding: 10px max(16px, var(--dac-safe-r)) 0 max(16px, var(--dac-safe-l));
-        gap: 10px;
-      }
-      .brand { order: 1; margin-right: auto; }
-      .actions { order: 2; }
-      nav { order: 3; flex-basis: 100%; justify-content: flex-start; }
+    /* ---- de standen (v0.226.0, zie STANDEN) ---- */
+    :host([ki]) button.ghost > span { display: none; }
+    :host([ki]) button.ghost { padding: 9px; }
+    :host([ao]) .brand-text { flex-direction: column; align-items: flex-start; gap: 2px; }
+    :host([ao]) .abo { align-self: flex-start; font-size: 10px; padding: 1px 6px; }
+    :host([ta]) button.pill:not([aria-current="page"]) > span { display: none; }
+    :host([ti]) button.pill > span { display: none; }
+    :host([ta]) button.pill, :host([ti]) button.pill { padding: 9px 12px; }
+    :host([rijen]) .bar {
+      flex-wrap: wrap;
+      padding: 10px max(16px, var(--dac-safe-r)) 0 max(16px, var(--dac-safe-l));
+      gap: 10px;
     }
-
-    @media (max-width: 640px) {
-      .bar { padding: 8px max(12px, var(--dac-safe-r)) 0 max(12px, var(--dac-safe-l)); }
-      .brand img { width: 30px; height: 30px; }
-      .brand-2 { font-size: 14px; }
-      button.ghost span { display: none; }
-      button.ghost { padding: 9px; }
-      button.pill { padding: 8px 12px; font-size: 13px; }
-      /* Fade the right edge so it reads as "more sections that way". */
-      nav {
-        padding-right: 14px;
-        mask-image: linear-gradient(90deg, #000 calc(100% - 22px), transparent 100%);
-        -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 22px), transparent 100%);
-      }
-    }
-
-    @media (max-width: 380px) {
-      .brand-text { display: none; }
-    }
+    :host([rijen]) .brand { order: 1; margin-right: auto; }
+    :host([rijen]) .actions { order: 2; }
+    :host([rijen]) nav { order: 3; flex-basis: 100%; }
+    :host([krap]) .bar { padding-left: max(12px, var(--dac-safe-l)); padding-right: max(12px, var(--dac-safe-r)); }
+    :host([krap]) nav { gap: 0; }
+    :host([krap]) button.pill { padding: 8px 10px; }
+    :host([krap]) .brand img { width: 30px; height: 30px; }
+    :host([aw]) .abo { display: none; }
+    :host([zn]) .brand-text { display: none; }
   `;
 
   constructor() {
@@ -249,7 +271,9 @@ class DacHeader extends DacElement {
   set active(value) {
     if (this.active_ === value) return;
     this.active_ = value;
+    // Het actieve tabblad houdt zijn tekst (`ta`), dus de breedte verandert.
     this.syncActive_();
+    this.pas_();
   }
 
   get active() {
@@ -278,8 +302,8 @@ class DacHeader extends DacElement {
 
   /**
    * Het abonnement van dit huis (v0.225.0), uit de coach (`pakket` bij de tickets), of null: de naam als etiket naast
-   * COACH, en zonder Coach Assist in het abonnement geen knop. De eigenaar op 15-11-2026: "ja maar ook in de coach zelf",
-   * en "Dan moet er geen AI assistant in zitten etc".
+   * COACH, en zonder Coach Assist in het abonnement heet de knop Meld een storing. De eigenaar op 15-11-2026: "ja maar
+   * ook in de coach zelf", "Dan moet er geen AI assistant in zitten etc", en "Ja zonder care wel een storing melden".
    */
   set pakket(pakket) {
     this.pakket_ = pakket && typeof pakket === "object" ? pakket : null;
@@ -290,9 +314,21 @@ class DacHeader extends DacElement {
     const teller = this.rendered_ ? this.$("#bot-teller") : null;
     if (!teller) return;
     const abo = this.$("#abo");
-    abo.textContent = this.pakket_?.naam ?? "";
-    abo.hidden = !this.pakket_?.naam;
-    this.$("#bot").hidden = this.pakket_?.coach_assist === false;
+    const naam = this.pakket_?.naam ?? "";
+    if (abo.textContent !== naam || abo.hidden !== !naam) {
+      abo.textContent = naam;
+      abo.hidden = !naam;
+      this.pas_();
+    }
+    // Zonder Coach Assist blijft de knop, voor een storing (v0.226.0: "Ja zonder care wel een storing melden").
+    const knop = this.$("#bot");
+    const naamKnop = this.pakket_?.coach_assist === false ? t("Meld een storing") : t("Vraag het Coach Assist");
+    if (knop.title !== naamKnop) {
+      knop.title = naamKnop;
+      knop.setAttribute("aria-label", naamKnop);
+      knop.querySelector("span").textContent = this.pakket_?.coach_assist === false ? naamKnop : "Coach Assist";
+      this.pas_();
+    }
     teller.hidden = !this.botOngelezen_;
     teller.textContent = this.botOngelezen_ > 9 ? "9+" : String(this.botOngelezen_ || "");
   }
@@ -371,8 +407,37 @@ class DacHeader extends DacElement {
   onConnect() {
     // The sliding highlight is measured, so it has to be re-measured whenever
     // the bar reflows (window resize, sidebar collapse, orientation change).
-    this.observer_ ??= new ResizeObserver(() => this.syncActive_());
+    // En of alles past (v0.226.0): op de breedte van de kop zelf, want de stand verandert de hoogte, niet de breedte.
+    this.observer_ ??= new ResizeObserver(() => this.pas_());
+    this.observer_.observe(this);
     this.observer_.observe(this.$("nav"));
+    // De letters komen soms pas na de eerste meting binnen, en dan worden de knoppen breder of smaller.
+    document.fonts?.ready?.then(() => this.pas_());
+    this.pas_();
+  }
+
+  /** De eerste stand waarin de kop past (`STANDEN`), en daarna de markering onder het actieve tabblad. */
+  pas_() {
+    if (!this.rendered_ || !this.isConnected) return;
+    const zet = (stand) => {
+      for (const naam of ["ki", "ao", "ta", "ti", "rijen", "krap", "aw", "zn"]) this.toggleAttribute(naam, stand.includes(naam));
+    };
+    const bar = this.$(".bar");
+    const nav = this.$("nav");
+    const brand = this.$(".brand");
+    const acties = this.$(".actions");
+    const tekst = this.$(".brand-text");
+    const past = (stand) => {
+      zet(stand);
+      if (!bar.clientWidth) return true;
+      if (bar.scrollWidth > bar.clientWidth + 1 || nav.scrollWidth > nav.clientWidth + 1) return false;
+      // COACH en het abonnement afgeknipt naast het logo telt ook als niet passen.
+      if (tekst.scrollWidth > tekst.clientWidth + 1) return false;
+      // Het logo en de knoppen horen op één rij; staan ze onder elkaar, dan past het niet.
+      return Math.abs(brand.getBoundingClientRect().top - acties.getBoundingClientRect().top) < 12;
+    };
+    this.stand_ = kiesStand(STANDEN, past);
+    zet(this.stand_);
     this.syncActive_();
   }
 
