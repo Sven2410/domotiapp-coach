@@ -9,10 +9,14 @@
  *
  * Alles past, op elke breedte (v0.226.0). De eigenaar op 15-11-2026, toen de tabbladen van de installateur bij
  * 1200 px gingen schuiven: "Ik wil dat alles past". Daarom geen vaste breekpunten meer maar stappen (`STANDEN`):
- * eerst de knoppen rechts alleen een icoon, dan het abonnement onder COACH, dan de tabbladen alleen een icoon (de
- * actieve houdt zijn tekst), dan de tabbladen op een eigen rij zoals op een telefoon, en zo verder. Een
- * `ResizeObserver` meet na elke stap of het past en houdt de eerste die past (`kiesStand`); komt er een knop bij, dan
- * klopt het nog steeds.
+ * eerst de knoppen rechts alleen een icoon, dan het abonnement onder COACH, dan de tabbladen kleiner, dan de
+ * tabbladen op een eigen rij zoals op een telefoon, en zo verder. Een `ResizeObserver` meet na elke stap of het past
+ * en houdt de eerste die past (`kiesStand`); komt er een knop bij, dan klopt het nog steeds.
+ *
+ * Sinds v0.227.0 zijn de tabbladen altijd allemaal hetzelfde: met tekst ernaast, met de naam klein eronder, of alleen
+ * een icoon met het actieve in kleur en een streep eronder; nooit één met tekst en de rest zonder. En elk tabblad heeft
+ * een eigen icoon. De eigenaar op 15-11-2026 op zijn telefoon: "je hebt voor home en history hetzelfde icoontje" en
+ * "sommige icoontjes hebben wel tekst, sommige niet".
  */
 
 import { DacElement, define } from "./base.js";
@@ -21,9 +25,9 @@ import { icons } from "./icons.js";
 import { nt, t } from "./i18n.js";
 
 export const NAV_ITEMS = [
-  { id: "overzicht", label: nt("Overzicht"), icon: "gauge" },
-  { id: "historie", label: nt("Historie"), icon: "gauge" },
-  { id: "meldingen", label: nt("Meldingen"), icon: "bell" },
+  { id: "overzicht", label: nt("Overzicht"), icon: "tegels" },
+  { id: "historie", label: nt("Historie"), icon: "historie" },
+  { id: "meldingen", label: nt("Meldingen"), icon: "megafoon" },
   // Heette Strategie tot v0.114.0; het id blijft, zodat een bladwijzer werkt.
   { id: "strategie", label: nt("Voorkeuren"), icon: "compass" },
   // Van de installateur, en de bewoner ziet ze niet, ook niet grijs (v0.114.0).
@@ -39,20 +43,21 @@ export const NAV_ITEMS = [
 
 /**
  * De standen van de kop, van ruim naar krap (v0.226.0). Elke stand is een rij attributen op de kop:
- * `ki` knoppen rechts alleen een icoon, `ao` het abonnement onder COACH, `ta` de tabbladen behalve de actieve alleen
- * een icoon, `ti` alle tabbladen alleen een icoon, `rijen` de tabbladen op een eigen rij, `krap` minder ruimte rond de
+ * `ki` knoppen rechts alleen een icoon, `ao` het abonnement onder COACH, `onder` elk tabblad een icoon met de naam
+ * klein eronder, `ti` alle tabbladen alleen een icoon, `rijen` de tabbladen op een eigen rij, `krap` minder ruimte rond de
  * tabbladen, `aw` geen abonnement naast COACH (het staat ook bij Coach Assist en op Contract), `zn` alleen het logo.
  */
 export const STANDEN = [
   [],
   ["ki"],
   ["ki", "ao"],
-  ["ki", "ao", "ta"],
+  ["ki", "ao", "onder"],
   ["ki", "ao", "ti"],
   ["rijen"],
   ["rijen", "ki"],
   ["rijen", "ki", "ao"],
-  ["rijen", "ki", "ao", "ta"],
+  ["rijen", "ki", "ao", "onder"],
+  ["rijen", "ki", "ao", "onder", "krap"],
   ["rijen", "ki", "ao", "ti"],
   ["rijen", "ki", "ao", "ti", "krap"],
   ["rijen", "ki", "ti", "krap", "aw"],
@@ -244,9 +249,19 @@ class DacHeader extends DacElement {
     :host([ki]) button.ghost { padding: 9px; }
     :host([ao]) .brand-text { flex-direction: column; align-items: flex-start; gap: 2px; }
     :host([ao]) .abo { align-self: flex-start; font-size: 10px; padding: 1px 6px; }
-    :host([ta]) button.pill:not([aria-current="page"]) > span { display: none; }
     :host([ti]) button.pill > span { display: none; }
-    :host([ta]) button.pill, :host([ti]) button.pill { padding: 9px 12px; }
+    :host([ti]) button.pill { padding: 9px 12px; }
+    /* Icoon met de naam klein eronder, zoals een tabbalk in een app (v0.227.0). */
+    :host([onder]) button.pill { flex-direction: column; gap: 2px; padding: 6px 8px 5px; font-size: 11px; line-height: 1.1; }
+    :host([onder]) button.pill .icon { width: 18px; height: 18px; }
+    :host([rijen][onder]) button.pill, :host([rijen][ti]) button.pill { flex: 1 1 0; justify-content: center; }
+    /* Zonder tekst ernaast geen pil maar kleur en een streep eronder bij het actieve tabblad. */
+    :host([onder]) .pill-bg, :host([ti]) .pill-bg { display: none; }
+    :host([onder]) button.pill[aria-current="page"], :host([ti]) button.pill[aria-current="page"] { color: var(--dac-accent-hi); }
+    :host([onder]) button.pill[aria-current="page"]::after, :host([ti]) button.pill[aria-current="page"]::after {
+      content: ""; position: absolute; left: 22%; right: 22%; bottom: 0; height: 2px; border-radius: 1px;
+      background: var(--dac-accent-hi);
+    }
     :host([rijen]) .bar {
       flex-wrap: wrap;
       padding: 10px max(16px, var(--dac-safe-r)) 0 max(16px, var(--dac-safe-l));
@@ -271,9 +286,7 @@ class DacHeader extends DacElement {
   set active(value) {
     if (this.active_ === value) return;
     this.active_ = value;
-    // Het actieve tabblad houdt zijn tekst (`ta`), dus de breedte verandert.
     this.syncActive_();
-    this.pas_();
   }
 
   get active() {
@@ -352,7 +365,7 @@ class DacHeader extends DacElement {
   render() {
     const pills = navItemsFor(this.isAdmin_).map(
       (item) => `
-        <button class="pill" type="button" data-id="${item.id}">
+        <button class="pill" type="button" data-id="${item.id}" title="${t(item.label)}" aria-label="${t(item.label)}">
           ${icons[item.icon]}<span>${t(item.label)}</span>
         </button>`
     ).join("");
@@ -420,7 +433,7 @@ class DacHeader extends DacElement {
   pas_() {
     if (!this.rendered_ || !this.isConnected) return;
     const zet = (stand) => {
-      for (const naam of ["ki", "ao", "ta", "ti", "rijen", "krap", "aw", "zn"]) this.toggleAttribute(naam, stand.includes(naam));
+      for (const naam of ["ki", "ao", "onder", "ti", "rijen", "krap", "aw", "zn"]) this.toggleAttribute(naam, stand.includes(naam));
     };
     const bar = this.$(".bar");
     const nav = this.$("nav");

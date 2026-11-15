@@ -42,6 +42,24 @@ export const icons = {
      <path d="M5.6 10.4h7.6M5.6 13.8h7.6"/>`
   ),
 
+  // De tabbladen van de kop (v0.227.0): elk een eigen icoon, en geen dat ook op een knop rechts staat. De eigenaar op
+  // 15-11-2026: "je hebt voor home en history hetzelfde icoontje".
+  tegels: svg(
+    `<rect x="3.5" y="3.5" width="7" height="7" rx="1.6"/>
+     <rect x="13.5" y="3.5" width="7" height="7" rx="1.6"/>
+     <rect x="3.5" y="13.5" width="7" height="7" rx="1.6"/>
+     <rect x="13.5" y="13.5" width="7" height="7" rx="1.6"/>`
+  ),
+  historie: svg(
+    `<path d="M3.6 12a8.4 8.4 0 1 0 2.5-6"/>
+     <path d="M3.4 4.6v4h4"/>
+     <path d="M12 7.6V12l3 1.9"/>`
+  ),
+  megafoon: svg(
+    `<path d="M4 10.2v3.6a1 1 0 0 0 1 1h2.2l5.8 4V5.2l-5.8 4H5a1 1 0 0 0-1 1Z"/>
+     <path d="M16.6 9.2a3.9 3.9 0 0 1 0 5.6"/>
+     <path d="M19.2 6.6a7.6 7.6 0 0 1 0 10.8"/>`
+  ),
   gauge: svg(
     `<path d="M3.6 17.4a9.2 9.2 0 1 1 16.8 0"/>
      <path d="M12 17.2 15.8 10"/>

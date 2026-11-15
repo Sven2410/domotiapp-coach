@@ -207,7 +207,7 @@ Proef in test_rapport.mjs.
 ## Twee kolommen op een telefoon (v0.206.0)
 
 Tot v0.206.0 stonden de aanstuurbare apparaten op het overzicht in één rij die
-opzij scrolde (`.steer-tabs`). Een bewoner met vijf apparaten zag op zijn iPhone
+opzij scrolde (`.steer-tabs`). Een bewoner met vijf apparaten zag op zijn telefoon
 (390 px) op 06-11-2026 er ruim één, met een half woord aan de rand, en niet
 welke er nog meer waren: "Bij mobiele weergave wordt dit lijstje
 horizontaal te lang. Idealiter maak je van apparaten 2 kolommen, en dan meerdere
@@ -445,7 +445,7 @@ de andere bollen.
 
 ## Datum en tijd op een iPhone (v0.141.2)
 
-De eigenaar op 21-10-2026, met schermafdrukken van Contract op zijn iPhone: "op telefoon zien de
+De eigenaar op 21-10-2026, met schermafdrukken van Contract op zijn telefoon: "op telefoon zien de
 velden er heel raar uit". De datumvelden ("ingegaan op", "loopt af op", "opnieuw uitrekenen
 vanaf") liepen rechts buiten de kaart, een leeg datumveld was hoger dan de rest, en de datum stond
 in het midden. iOS geeft een datumveld een eigen minimale breedte en zet de waarde neer met de
@@ -607,7 +607,7 @@ kreeg die regel erbij.
 
 ## Een venster open: de pagina erachter staat stil (v0.222.0)
 
-De eigenaar op 13-11-2026, met de DomotiTech Bot open op zijn iPhone: "ik kan de achtergrond scrollen als de bot
+De eigenaar op 13-11-2026, met de DomotiTech Bot open op zijn telefoon: "ik kan de achtergrond scrollen als de bot
 geopend is, dat moet ook niet". Een `<dialog>` met `showModal` maakt de pagina erachter onbruikbaar, maar niet stil:
 op iOS scrolt hij gewoon mee.
 
@@ -651,4 +651,22 @@ schoven ze. De eigenaar op 15-11-2026: "Ik wil dat alles past".
 
 De proef "de kop past op elke breedte" in test_rapport.mjs legt de volgorde en de keuze vast. Het meten zelf kan
 alleen in een browser.
+
+**Elk tabblad een eigen icoon, en altijd allemaal hetzelfde (v0.227.0).** De eigenaar op 15-11-2026 op zijn telefoon, met
+v0.226.0: "je hebt voor home en history hetzelfde icoontje" (Overzicht en Historie hadden allebei de meter), en
+"sommige icoontjes hebben wel tekst, sommige niet" (de stand `ta`, waarin alleen het actieve tabblad tekst had).
+
+- **De iconen:** Overzicht heeft nu tegels, Historie een klok met een pijl terug, en Meldingen een megafoon (de bel
+  is van Berichten). In de hele kop staat geen icoon twee keer.
+- **De stand `ta` is weg.** Daarvoor in de plaats komt `onder`: elk tabblad een icoon met de naam klein eronder,
+  zoals een tabbalk in een app.
+- **Zonder tekst ernaast** (`onder`, `ti`) heeft het actieve tabblad geen pil maar de accentkleur en een streep
+  eronder. Elk tabblad heeft zijn naam als `title` en `aria-label`.
+- **Nagemeten** van 320 tot 1920 px, voor de bewoner en de installateur, met en zonder het langste etiket. Overal past
+  het, nergens is het gemengd en geen naam is afgeknipt.
+  - De bewoner ziet op 390 px een icoon met de naam eronder.
+  - De installateur ziet op 390 px alleen iconen; zijn zeven namen passen daar niet.
+  - Op 768 en 1024 px staat er icoon met naam eronder op één rij.
+  - Vanaf 1440 px staat alles met tekst ernaast.
+- **De proef** houdt vast dat geen icoon twee keer in de kop staat en dat er geen stand `ta` meer is.
 
