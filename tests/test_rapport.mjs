@@ -938,14 +938,28 @@ proef("het pakket: wat er vandaag over is, dicht op nul, en om middernacht weer 
     "het paneel geeft het abonnement aan de kop en aan Contract, ook als Contract later opengaat");
 });
 
-proef("de kop past op elke breedte: stap voor stap kleiner in plaats van schuiven (v0.226.0)", async () => {
+proef("de kop past op elke breedte, met tabbladen die allemaal hetzelfde zijn en elk een eigen icoon (v0.226.0, v0.227.0)", async () => {
   // De eigenaar op 15-11-2026: "Ik wil dat alles past". Het meten zelf gebeurt in de browser (`pas_`); hier de volgorde
   // en de keuze, en dat er geen vaste breekpunten meer zijn die er langs kunnen.
-  const { STANDEN, kiesStand } = await import("../custom_components/domotiapp_coach/frontend/src/header.js");
+  const { STANDEN, kiesStand, NAV_ITEMS } = await import("../custom_components/domotiapp_coach/frontend/src/header.js");
+  const { icons } = await import("../custom_components/domotiapp_coach/frontend/src/icons.js");
+  const bron0 = () => readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/header.js", import.meta.url), "utf8");
+  // Elk tabblad een eigen icoon, en geen dat ook op een knop rechts staat (v0.227.0): "je hebt voor home en history
+  // hetzelfde icoontje".
+  const rechts = [...bron0().matchAll(/class="ghost[^"]*"[^>]*>\s*\$\{icons\.(\w+)\}/g)].map((m) => m[1]);
+  const tabs = NAV_ITEMS.map((item) => item.icon);
+  assert.deepEqual(rechts, ["chat", "bell", "home"], "de knoppen rechts gevonden");
+  assert.equal(new Set([...tabs, ...rechts]).size, tabs.length + rechts.length, `geen icoon twee keer in de kop: ${tabs} ${rechts}`);
+  assert.ok(tabs.every((naam) => icons[naam]), "elk icoon bestaat");
+  assert.ok(bron0().includes('title="${t(item.label)}" aria-label="${t(item.label)}"'), "een tabblad zonder tekst heeft zijn naam als title en aria-label");
   assert.deepEqual(STANDEN[0], [], "eerst alles met tekst");
   assert.deepEqual(STANDEN[1], ["ki"], "dan de knoppen rechts alleen een icoon");
   assert.deepEqual(STANDEN[2], ["ki", "ao"], "dan het abonnement onder COACH");
-  assert.deepEqual(STANDEN[3], ["ki", "ao", "ta"], "dan de tabbladen een icoon, de actieve met tekst");
+  assert.deepEqual(STANDEN[3], ["ki", "ao", "onder"], "dan elk tabblad een icoon met de naam eronder (v0.227.0)");
+  // Nooit één tabblad met tekst en de rest zonder (v0.227.0): de eigenaar op zijn telefoon, "sommige icoontjes hebben
+  // wel tekst, sommige niet".
+  assert.ok(STANDEN.every((s) => !s.includes("ta")) && !/\[ta\]|aria-current="page"\]\)? > span/.test(bron0()),
+    "geen stand meer waarin alleen het actieve tabblad tekst heeft");
   assert.ok(STANDEN.findIndex((s) => s.includes("rijen")) > STANDEN.findIndex((s) => s.includes("ti")),
     "pas daarna de tabbladen op een eigen rij, zoals op een telefoon");
   assert.deepEqual(kiesStand(STANDEN, (s) => s.length >= 2), ["ki", "ao"], "de eerste die past");
