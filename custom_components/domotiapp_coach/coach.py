@@ -447,6 +447,17 @@ LEVERT_NIET_W = 100.0
 LEVERT_NIET_NET_W = 1000.0
 LEVERT_NIET_BOVEN = 15.0
 LEVERT_NIET_RONDEN = 10
+# Een batterij die niets opneemt terwijl dat hoort (v0.228.0). In een klantwoning nam de Growatt vanaf 13-11-2026 21:58
+# niets meer op: 's nachts een netlaadvak tot 100% waar niets in ging, overdag 3 tot 4 kW zon naar het net met de accu op
+# 15% en daarna 0%, en op 15-11 om 13:15 een accuspanning van 0 V. 44 uur lang kwam er geen melding. Gemiddeld over
+# hetzelfde venster als `_levert_niet`: minder dan `NEEMT_NIET_W` erin, en in nul of zonneladen meer dan
+# `NEEMT_NIET_NET_W` naar het net, met de accu onder `NEEMT_NIET_ONDER` (of onder de stopgrens van het vak min
+# `NEEMT_NIET_MARGE`), zodat een volle accu en de afbouw bovenin niet meetellen. `NEEMT_WEER_W` is laden dat telt.
+NEEMT_NIET_W = 100.0
+NEEMT_NIET_NET_W = 1000.0
+NEEMT_NIET_ONDER = 95.0
+NEEMT_NIET_MARGE = 5.0
+NEEMT_WEER_W = 300.0
 ZELF_ZEKERING_W = 500.0
 ZELF_MARGE = 1.0
 # Stopt de laadpaal, dan telt hij voor de batterij nog als ladend tot de meter
@@ -9405,6 +9416,7 @@ class ChargerCoach:
             if stuurt:
                 # Een Growatt doet zelf nul; of hij dat ook echt doet, ziet de coach hier (v0.202.0).
                 await self._async_volgt_niet(now, settings, device, sessie, besluit, b)
+                await self._async_neemt_niet_op(now, settings, device, sessie, besluit, b)
             return
 
         if stuurt and not sessie.get("stuurt"):
@@ -9444,6 +9456,7 @@ class ChargerCoach:
             self.state[device_id]["setpoint_w"] = None
         if stuurt:
             await self._async_volgt_niet(now, settings, device, sessie, besluit, b)
+            await self._async_neemt_niet_op(now, settings, device, sessie, besluit, b)
 
     def _volgt_niet(self, now: datetime, settings: dict[str, Any], device: dict[str, Any], sessie: dict[str, Any],
                     besluit: Besluit, b: Batterij) -> str | None:
@@ -9500,6 +9513,74 @@ class ChargerCoach:
         eruit = -sum(m[1] for m in venster) / len(venster)
         erin = sum(m[2] for m in venster) / len(venster)
         return eruit < LEVERT_NIET_W and erin > LEVERT_NIET_NET_W
+
+    def _neemt_niet_op(
+        self, now: datetime, settings: dict[str, Any], device: dict[str, Any], sessie: dict[str, Any],
+        besluit: Besluit, b: Batterij,
+    ) -> bool | None:
+        """Of de batterij een half uur niets opneemt terwijl dat hoort (v0.228.0); None als het nu niet te zeggen is.
+
+        Twee gevallen. In een vak van het net (bij een Growatt het vak van het geschreven laadschema, anders de stand
+        netladen of max laden), met de accu onder de stopgrens. En in nul of zonneladen, terwijl er gemiddeld meer dan
+        `NEEMT_NIET_NET_W` naar het net gaat en de accu niet vol is. Niet bij stand-by of vasthouden, en niet als er
+        een paal laadt die de batterij niet helpt: dan wil de coach zelf geen zon in de accu. Gemiddeld over
+        `LEVERT_NIET_VENSTER`, met minstens `LEVERT_NIET_RONDEN` rondes; het venster gaat mee over een herstart
+        (`_batterij_onthouden`). In een klantwoning op 13-11-2026: 44 uur niets opgenomen, zonder melding.
+        """
+        watt = self._batterij_w(device)
+        schema = device.get("brand") in BATTERIJ_SCHEMA
+        net_w = self._net_nu(settings)[0]
+        geschreven: GrowattSchema | None = sessie.get("growatt_geschreven")
+        if schema:
+            in_vak = bool(geschreven is not None and geschreven.net and not geschreven.houden
+                          and self._growatt_in_vak(geschreven, now))
+            grens = float(geschreven.stop_soc) if in_vak else NEEMT_NIET_ONDER
+        else:
+            in_vak = besluit.stand in (NETLADEN, MAX_LADEN)
+            grens = min(float(b.soc_max or 100.0), 100.0) if in_vak else NEEMT_NIET_ONDER
+        zon = besluit.stand in (NUL, ZONNELADEN) and not in_vak
+        if (
+            watt is None or net_w is None or b.soc is None or sessie.get("bezig")
+            or not sessie.get("growatt_stuurt" if schema else "stuurt")
+            or not (in_vak or zon) or b.soc >= min(grens - NEEMT_NIET_MARGE, NEEMT_NIET_ONDER if zon else 100.0)
+            or (zon and self._paal_laadt(settings) and not sessie.get("helpt"))
+        ):
+            sessie.pop("neemt_venster", None)
+            return None
+        soort = "vak" if in_vak else "zon"
+        venster = [m for m in sessie.get("neemt_venster") or []
+                   if m[0] <= now and now - m[0] <= LEVERT_NIET_VENSTER and m[3] == soort]
+        venster.append((now, float(watt), float(net_w), soort))
+        sessie["neemt_venster"] = venster
+        if now - venster[0][0] < LEVERT_NIET_VENSTER or len(venster) < LEVERT_NIET_RONDEN:
+            return None
+        erin = sum(m[1] for m in venster) / len(venster)
+        naar_net = -sum(m[2] for m in venster) / len(venster)
+        return erin < NEEMT_NIET_W and (in_vak or naar_net > NEEMT_NIET_NET_W)
+
+    async def _async_neemt_niet_op(self, now: datetime, settings: dict[str, Any], device: dict[str, Any],
+                                   sessie: dict[str, Any], besluit: Besluit, b: Batterij) -> None:
+        """Eén kritieke melding als de batterij niets opneemt (`_neemt_niet_op`, v0.228.0), en één regel in de
+        geschiedenis als hij weer laadt. Wat er gemeld is gaat mee over een herstart (`_BATTERIJ_VLAGGEN`)."""
+        naam = device.get("name") or t("De batterij")
+        if sessie.get("neemt_niet_gemeld"):
+            watt = self._batterij_w(device)
+            if watt is not None and watt > NEEMT_WEER_W:
+                sessie.pop("neemt_niet_gemeld", None)
+                await self._async_tell(t("{naam} laadt weer.", naam=naam), telefoon=False)
+            return
+        if not self._neemt_niet_op(now, settings, device, sessie, besluit, b):
+            return
+        sessie["neemt_niet_gemeld"] = True
+        _LOGGER.warning("%s neemt niets op: stand %s, accu %s%%, batterij %.0f W, net %s W",
+                        device.get("id", ""), besluit.stand, b.soc, self._batterij_w(device) or 0.0,
+                        None if (n := self._net_nu(settings)[0]) is None else round(n))
+        if (stand := self.state.get(device.get("id", ""))) is not None:
+            stand["reason"] = t("{naam} neemt niets op, ook niet als hij zou moeten laden.", naam=naam)
+        await self._async_tell(
+            t("{naam} neemt niets op. Laat hem nakijken: hij staat misschien uit of in storing.", naam=naam),
+            kritiek=True,
+        )
 
     async def _async_volgt_niet(self, now: datetime, settings: dict[str, Any], device: dict[str, Any],
                                 sessie: dict[str, Any], besluit: Besluit, b: Batterij) -> None:
@@ -17899,7 +17980,7 @@ class ChargerCoach:
     # van een Growatt weigerde. Zonder dit nam de coach hem na een herstart meteen weer over,
     # en kwam dezelfde kritieke melding opnieuw.
     _BATTERIJ_MOMENTEN = ("vreemd", "growatt_houden_mis", "growatt_vreemd", "growatt_laat")
-    _BATTERIJ_VLAGGEN = ("volgt_niet_gemeld", "growatt_gemeld")
+    _BATTERIJ_VLAGGEN = ("volgt_niet_gemeld", "growatt_gemeld", "neemt_niet_gemeld")
 
     def _batterij_sessie(self, device_id: str) -> dict[str, Any]:
         """De sessie van een batterij, bij de eerste keer met wat er voor de herstart stond."""
@@ -17927,6 +18008,16 @@ class ChargerCoach:
                 continue
         if venster:
             sessie["levert_venster"] = venster
+        neemt = []
+        for m in (self._geheugen_terug.pop(f"batterij-neemt:{device_id}", None) or {}).get("venster") or []:
+            try:
+                moment = _uit_geheugen(m[0])
+                if moment is not None and m[3] in ("vak", "zon"):
+                    neemt.append((moment, float(m[1]), float(m[2]), m[3]))
+            except (TypeError, ValueError, IndexError):
+                continue
+        if neemt:
+            sessie["neemt_venster"] = neemt
         self._batterij[device_id] = sessie
         return sessie
 
@@ -17948,6 +18039,9 @@ class ChargerCoach:
         # Het venster van `_levert_niet` verandert elke ronde: met de gewone slag naar schijf, niet meteen.
         venster = [[_naar_geheugen(m[0]), round(m[1]), round(m[2])] for m in sessie.get("levert_venster") or []]
         self._onthoud(f"batterij-venster:{device_id}", {"venster": venster} if venster else None)
+        # En dat van `_neemt_niet_op` (v0.228.0), op dezelfde manier.
+        neemt = [[_naar_geheugen(m[0]), round(m[1]), round(m[2]), m[3]] for m in sessie.get("neemt_venster") or []]
+        self._onthoud(f"batterij-neemt:{device_id}", {"venster": neemt} if neemt else None)
 
     def _meldingen_onthouden(self) -> None:
         """Welke meldingen er al gedaan zijn, zodat ze na een herstart niet nog eens komen (v0.173.0).

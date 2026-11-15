@@ -58,4 +58,6 @@ while True:
     print(f"{tijd}  {laden} {amps} A  regel={regel}  {tekst}", flush=True)
     rest = {k: v for k, v in d.items() if k not in kort and k != "device"}
     if rest:
-        print(f"          overig: {json.dumps(rest, ensure_ascii=False)[:300]}", flush=True)
+        # Heel, niet afgekapt (v0.228.0): het geschreven laadschema van een Growatt stond voorbij de 300 tekens, en was
+        # achteraf niet na te lezen.
+        print(f"          overig: {json.dumps(rest, ensure_ascii=False)}", flush=True)

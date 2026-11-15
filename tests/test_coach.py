@@ -19051,6 +19051,129 @@ controle("over de websocket, na een herstart: een aanvraag niet, een storing wel
          [c for _, c in bewoner268.fouten[voor268g:]] == ["geen_coach_assist", "pakket_op"]
          and storing268w is not None and storing268w["soort"] == "storing", f"{bewoner268.fouten[voor268g:]}")
 
+
+print("=== 269. een batterij die niets opneemt: één kritieke melding (v0.228.0) ===")
+# In een klantwoning nam de Growatt vanaf 13-11-2026 21:58 niets meer op: een netlaadvak tot 100% waar niets in ging,
+# overdag 3 tot 4 kW zon naar het net met de accu op 15% en daarna 0%, en op 15-11 een accuspanning van 0 V. In 44 uur
+# kwam er geen enkele melding.
+sys.modules["homeassistant.helpers.entity_registry"] = register192
+T269 = dt.datetime(2026, 11, 14, 12, 0)
+
+
+def bouw269(soc=15, laden="0", terug="4000", afname="0"):
+    hass, store, coach, inst, apparaat = bouw243(soc=soc, ontladen="0", afname=afname)
+    hass.states.zet("sensor.growatt_laden", {"state": laden, "attributes": {"unit_of_measurement": "kW"}})
+    hass.states.zet("sensor.teruglevering", terug)
+    return hass, store, coach, inst, apparaat
+
+
+def sessie269(coach, vak=False, houden=False, stop=100):
+    sessie = coach._batterij_sessie("dev-growatt")
+    sessie["growatt_stuurt"] = True
+    sessie["growatt_geschreven"] = coachmod.GrowattSchema(
+        net=vak, houden=houden, vakken=[("01:00", "23:00")] if vak else [], stop_soc=stop, vermogen_pct=50)
+    return sessie
+
+
+def meet269(coach, inst, apparaat, sessie, stand, soc=15.0, van=0, tot=31, soc_max=100.0):
+    besluit = types.SimpleNamespace(stand=stand)
+    b = types.SimpleNamespace(soc=soc, soc_max=soc_max)
+    uit = None
+    for m in range(van, tot):
+        uit = coach._neemt_niet_op(T269 + dt.timedelta(minutes=m), inst, apparaat, sessie, besluit, b)
+    return uit
+
+
+# 1. Zon over in nul, de accu op 15%, niets erin: na het half uur ja.
+h269, s269, c269, i269, a269 = bouw269()
+controle("zon over in nul, niets erin: na het half uur ja, eerder niet",
+         meet269(c269, i269, a269, sessie269(c269), coachmod.NUL, tot=20) is None
+         and meet269(c269, i269, a269, sessie269(c269), coachmod.NUL, van=20, tot=31) is True, "")
+# 2. In een netlaadvak met de accu onder de stopgrens: ja, ook zonder zon.
+h269v, s269v, c269v, i269v, a269v = bouw269(terug="0", afname="2000")
+controle("in een netlaadvak, niets erin: ja", meet269(c269v, i269v, a269v, sessie269(c269v, vak=True), coachmod.NETLADEN) is True, "")
+# 3. Waar het niet hoort: vol, afbouw bovenin, stand-by, vasthouden, weinig zon over, een paal die laadt, en laden.
+gevallen269 = []
+for naam269, kw269, vak269, houden269, stand269, soc269 in (
+        ("vol (96%)", {}, False, False, coachmod.NUL, 96.0),
+        ("afbouw bovenin het vak (97% bij een stopgrens van 100)", {"terug": "0", "afname": "2000"}, True, False, coachmod.NETLADEN, 97.0),
+        ("stand-by", {}, False, False, coachmod.STANDBY, 15.0),
+        ("vasthouden in een vak", {"terug": "0"}, True, True, coachmod.NUL, 15.0),
+        ("weinig zon over (600 W)", {"terug": "600"}, False, False, coachmod.NUL, 15.0),
+        ("hij laadt (2 kW)", {"laden": "2.0"}, False, False, coachmod.NUL, 15.0)):
+    hx, sx, cx, ix, ax = bouw269(**kw269)
+    uit269 = meet269(cx, ix, ax, sessie269(cx, vak=vak269, houden=houden269), stand269, soc=soc269)
+    gevallen269.append((naam269, uit269))
+controle("niet bij vol, afbouw, stand-by, vasthouden, weinig zon of een batterij die laadt",
+         all(not u for _, u in gevallen269), f"{gevallen269}")
+hp269, sp269, cp269, ip269, ap269 = bouw269()
+cp269._paal_laadt = lambda settings: True
+controle("niet als er een paal laadt die de batterij niet helpt (zon in de auto)",
+         not meet269(cp269, ip269, ap269, sessie269(cp269), coachmod.NUL), "")
+# Een batterij met een regelaar: netladen of max laden is het vak, tot zijn eigen bovengrens.
+hr269, sr269, cr269, ir269, ar269 = bouw269(terug="0", afname="2000")
+sr = cr269._batterij_sessie("dev-growatt")
+ar269 = dict(ar269, brand="anker")
+sr["stuurt"] = True
+controle("een batterij met een regelaar in netladen: ja; vlak onder haar bovengrens niet",
+         meet269(cr269, ir269, ar269, sr, coachmod.NETLADEN) is True
+         and not meet269(cr269, ir269, ar269, cr269._batterij_sessie("dev-growatt"), coachmod.MAX_LADEN, soc=92.0,
+                         van=40, tot=80, soc_max=95.0), "")
+
+# 4. De melding: één keer kritiek, zonder entiteit-id; terug in één regel, niet op de telefoon.
+h269m, s269m, c269m, i269m, a269m = bouw269()
+g269 = []
+tell243(c269m, g269)
+sm = sessie269(c269m)
+b269 = types.SimpleNamespace(soc=15.0, soc_max=100.0)
+nul269 = types.SimpleNamespace(stand=coachmod.NUL)
+for m in range(0, 45):
+    asyncio.run(c269m._async_neemt_niet_op(T269 + dt.timedelta(minutes=m), i269m, a269m, sm, nul269, b269))
+neemt269 = [g for g in g269 if "neemt niets op" in g[0]]
+print(f"  {neemt269}")
+controle("één kritieke melding, zonder entiteit-id", len(neemt269) == 1 and neemt269[0][1] is True
+         and "sensor." not in neemt269[0][0], f"{g269}")
+h269m.states.zet("sensor.growatt_laden", {"state": "1.5", "attributes": {"unit_of_measurement": "kW"}})
+asyncio.run(c269m._async_neemt_niet_op(T269 + dt.timedelta(minutes=46), i269m, a269m, sm, nul269, b269))
+controle("hij laadt weer: één regel, niet op de telefoon", any("laadt weer" in g[0] and g[2] is False for g in g269)
+         and len([g for g in g269 if "neemt niets op" in g[0]]) == 1, f"{g269}")
+
+# 5. Een herstart halverwege het venster en een na de melding: de melding op tijd, en één keer.
+h269h, s269h, c269h, i269h, a269h = bouw269()
+asyncio.run(c269h._async_geheugen_laden())
+g269h = []
+tell243(c269h, g269h)
+sh = sessie269(c269h)
+for m in range(0, 20):
+    asyncio.run(c269h._async_neemt_niet_op(T269 + dt.timedelta(minutes=m), i269h, a269h, sh, nul269, b269))
+    c269h._batterij_onthouden("dev-growatt")
+c269n = herstart213(h269h)
+asyncio.run(c269n._async_geheugen_laden())
+tell243(c269n, g269h)
+sn = sessie269(c269n)
+controle("na de herstart is het venster er nog", len(sn.get("neemt_venster") or []) == 20, f"{len(sn.get('neemt_venster') or [])}")
+for m in range(20, 32):
+    asyncio.run(c269n._async_neemt_niet_op(T269 + dt.timedelta(minutes=m), i269h, a269h, sn, nul269, b269))
+    c269n._batterij_onthouden("dev-growatt")
+controle("de melding op tijd na de herstart", len([g for g in g269h if "neemt niets op" in g[0]]) == 1, f"{g269h}")
+c269m2 = herstart213(h269h)
+asyncio.run(c269m2._async_geheugen_laden())
+tell243(c269m2, g269h)
+sm2 = sessie269(c269m2)
+for m in range(32, 80):
+    asyncio.run(c269m2._async_neemt_niet_op(T269 + dt.timedelta(minutes=m), i269h, a269h, sm2, nul269, b269))
+controle("en na nog een herstart niet opnieuw", len([g for g in g269h if "neemt niets op" in g[0]]) == 1, f"{g269h}")
+
+# 6. De hele ronde: een Growatt op 15% die met 4 kW zon over niets opneemt.
+h269r, s269r, c269r, i269r, a269r = bouw269()
+g269r = []
+gang243(c269r, i269r, a269r, 0, 1, g269r)
+c269r._batterij["dev-growatt"]["growatt_stuurt"] = True
+standen269 = gang243(c269r, i269r, a269r, 1, 50, g269r)
+print(f"  ronde: standen {sorted(set(str(s) for s in standen269))}, {[g[0] for g in g269r if g[1]][:2]}")
+controle("in de ronde: één kritieke melding dat hij niets opneemt",
+         len([g for g in g269r if "neemt niets op" in g[0] and g[1]]) == 1, f"{set(standen269)} {g269r}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
