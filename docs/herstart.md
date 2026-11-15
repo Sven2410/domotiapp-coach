@@ -173,6 +173,34 @@ een `None` in `startup_learned`. Een entry met `disabled_by` slaat de meting nu 
 herladen, zoals `_async_online_herladen` dat al deed. Een integratie die niet laadt zonder dat iemand hem uitzette
 (`setup_retry`, `setup_error`) telt wel, want die hoort in die waarschuwing. Proef 261.
 
+**Een omvormer die slaapt en wat al weg was tellen niet mee (v0.223.2).** In een klantwoning op 13-11-2026 om 07:34
+en 20:01, en op 15-11 om 04:19, steeds na een herstart in het donker:
+
+```
+na de opstart: ..., <omvormer> niet binnen 15 min, ..., <stekkers> niet binnen 15 min, ...
+```
+
+De omvormer sliep: de zon kwam die ochtend pas om 07:52 op. En één stekker was sinds de avond ervoor weg; de
+sensorwacht had dat om 21:36 al gemeld. Geen van beide zegt iets over hoe lang een integratie na een opstart nodig
+heeft, en de wachter gaf elke keer alarm. Nu (`_opstart_waarom`):
+
+- **was al weg**: alles wat de coach van die entry gebruikt had de sensorwacht vóór de start al als stil gemeld
+  (`sensor_quiet` in de opslag, dus ook na een herstart). Van `last_changed` is dat niet af te lezen: na een
+  herstart is dat de herstart zelf.
+- **sliep**: het zijn allemaal omvormers (`zon_entiteiten`, eventueel naast wat al weg was) en de zon staat onder
+  `ZON_SLAAPT_ONDER`.
+
+Zo'n entry blijft de rest van de meting buiten de telling, ook als hij halverwege terugkomt of wakker wordt: dat zegt
+iets over het apparaat of de zon, niet over de opstart. Hij houdt de meting niet open, komt met dat woord in de
+regel als de hele integratie zo is, en staat niet in `startup_learned`. Van twee entries van dezelfde integratie telt
+de andere gewoon. Een omvormer die na het wakker worden niet komt, zien de sensorwacht en `_async_stil_herladen`,
+vanaf het moment dat de zon hoog genoeg staat, zoals altijd. Overdag, en voor alles wat geen omvormer is, blijft
+de waarschuwing. Proef 267.
+
+```
+na de opstart: accumerk na 0 s, omvormermerk sliep, paalmerk na 0 s, stekkermerk was al weg
+```
+
 ## Wat er nog open staat
 
 Zie de werkbon van 28-10-2026 in de privénotities:

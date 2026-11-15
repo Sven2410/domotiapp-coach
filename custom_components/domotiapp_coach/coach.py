@@ -1925,6 +1925,8 @@ class ChargerCoach:
         self._opstart_entries: dict[str, dict[str, Any]] = {}
         self._opstart_zon: float | None = None
         self._opstart_gemeten = False
+        # Wat de sensorwacht bij de start al als stil gemeld had (v0.223.2, `_opstart_waarom`).
+        self._opstart_al_weg: set[str] | None = None
         self._herladen_om: dict[str, datetime] = {}
         # De eerste ronde na het starten, voor de rust na een opstart (v0.203.0, `_opstart_rust`).
         self._opstart: datetime | None = None
@@ -3832,6 +3834,9 @@ class ChargerCoach:
 
         In een klantwoning op 12-11-2026: de zonvoorspeller na ongeveer anderhalve minuut, de
         batterij pas na een herladen, zestien minuten later.
+
+        Sinds v0.223.2 telt niet mee wat niet door de opstart wegbleef (`_opstart_waarom`): een omvormer
+        die slaapt, en wat al weg was. Het staat met een eigen woord in de regel en hij leert er niets van.
         """
         if self._opstart is None:
             return
@@ -3866,6 +3871,8 @@ class ChargerCoach:
 
         if not self._opstart_gemeten:
             start = self._opstart
+            if self._opstart_al_weg is None:
+                self._opstart_al_weg = set(self._sensor_gemeld)
             for entry_id, ids in per_entry.items():
                 entry = self.hass.config_entries.async_get_entry(entry_id)
                 # Een integratie die iemand uitzette komt niet (v0.217.1), zoals bij `_async_online_herladen`. Thuis
@@ -3875,18 +3882,24 @@ class ChargerCoach:
                     self._opstart_entries.pop(entry_id, None)
                     continue
                 rij = self._opstart_entries.setdefault(entry_id, {"bron": entry.domain, "s": None})
-                if rij["s"] is None:
+                if rij["s"] is None and not rij.get("waarom"):
                     terug = self._terug_sinds(ids, start)
                     if terug is not None:
                         rij["s"] = round((min(terug, now) - start).total_seconds())
+                    else:
+                        rij["waarom"] = self._opstart_waarom(settings, ids)
             if self._zon_voorspeller and self._opstart_zon is None and not self._zon_geschat:
                 self._opstart_zon = round((now - start).total_seconds())
             zon_open = bool(self._zon_voorspeller) and self._opstart_zon is None
-            open_ = zon_open or any(r["s"] is None for r in self._opstart_entries.values())
+            open_ = zon_open or any(r["s"] is None and not r.get("waarom") for r in self._opstart_entries.values())
             if not open_ or now - start >= INTEGRATIE_OPSTART:
                 self._opstart_gemeten = True
                 per_bron: dict[str, float | None] = {}
+                waarom: dict[str, str] = {}
                 for rij in self._opstart_entries.values():
+                    if rij.get("waarom"):
+                        waarom.setdefault(rij["bron"], rij["waarom"])
+                        continue
                     # Twee entries van dezelfde integratie: de traagste telt.
                     bron, s = rij["bron"], rij["s"]
                     if bron in per_bron:
@@ -3895,15 +3908,40 @@ class ChargerCoach:
                     per_bron[bron] = s
                 if self._zon_voorspeller:
                     per_bron["zon:" + "+".join(sorted(set(self._zon_voorspeller)))] = self._opstart_zon
-                delen = [
-                    f"{bron} na {s} s" if s is not None else f"{bron} niet binnen {round(INTEGRATIE_OPSTART.total_seconds() / 60)} min"
-                    for bron, s in sorted(per_bron.items())
-                ]
+                regel = {bron: f"{bron} {w}" for bron, w in waarom.items()}
+                regel.update({
+                    bron: f"{bron} na {s} s" if s is not None else f"{bron} niet binnen {round(INTEGRATIE_OPSTART.total_seconds() / 60)} min"
+                    for bron, s in per_bron.items()
+                })
+                delen = [regel[bron] for bron in sorted(regel)]
                 if delen:
                     (_LOGGER.warning if None in per_bron.values() else _LOGGER.info)(
                         "na de opstart: %s", ", ".join(delen))
                 geleerd.extend((bron, "startup", s) for bron, s in per_bron.items())
         return geleerd
+
+    def _opstart_waarom(self, settings: dict[str, Any], ids: list[str]) -> str | None:
+        """Waarom een integratie die nog niets gaf niet meetelt na de opstart, of None (v0.223.2).
+
+        "was al weg": alles wat de coach ervan gebruikt had de sensorwacht vóór de start al als stil
+        gemeld (`sensor_quiet` in de opslag). "sliep": het zijn omvormers (`zon_entiteiten`) en de zon
+        staat onder `ZON_SLAAPT_ONDER`. Dat blijft zo tot de meting klaar is: wat daarna terugkomt of
+        wakker wordt zegt iets over het apparaat of de zon, niet over hoe lang de integratie na een
+        opstart nodig heeft. Komt hij niet, dan zien de sensorwacht en `_async_stil_herladen` dat, zoals
+        altijd: een omvormer vanaf het moment dat de zon hoog genoeg staat.
+
+        In een klantwoning op 13-11-2026 om 07:34 en 20:01, en op 15-11 om 04:19: na een herstart in
+        het donker de omvormer "niet binnen 15 min", en de integratie van een stekker die sinds de avond
+        ervoor weg was ook, elke keer met een alarm van de wachter.
+        """
+        al_weg = self._opstart_al_weg or set()
+        if not ids:
+            return None
+        if set(ids) <= al_weg:
+            return "was al weg"
+        if set(ids) <= zon_entiteiten(settings) | al_weg and self._zon_slaapt():
+            return "sliep"
+        return None
 
     async def _async_opstart_leren(self, settings: dict[str, Any], geleerd: list[tuple[str, str, float | None]]) -> None:
         """Wat `_async_opstart_meten` zag in de instellingen (`startup_learned`), per integratie de laatste

@@ -18700,6 +18700,138 @@ c266h._watch_phases(inst266k, True)
 controle("na een herstart (geen historie, geen tempo) telt de meting zelf: voorzichtig",
          c266h._gladde_fase("sensor.l3", 26.0, NU266) == 26.0, "")
 
+
+print("=== 267. na een opstart in het donker: een omvormer die slaapt en wat al weg was (v0.223.2) ===")
+# In een klantwoning op 13-11-2026 om 07:34 en 20:01, en op 15-11 om 04:19: na een herstart in het donker de omvormer
+# "niet binnen 15 min", en de integratie van een stekker die sinds de avond ervoor weg was ook.
+import copy as _copy267  # noqa: E402
+
+bij267 = {**bij259, "sensor.pv_w": "e-pv", "sensor.pv_kwh": "e-pv", "sensor.stekker_w": "e-stekker"}
+entries267 = {**entries259, "e-pv": types.SimpleNamespace(domain="omvormermerk"),
+              "e-stekker": types.SimpleNamespace(domain="stekkermerk")}
+er267 = types.ModuleType("homeassistant.helpers.entity_registry")
+er267.async_get = lambda hass: types.SimpleNamespace(
+    async_get=lambda eid: types.SimpleNamespace(config_entry_id=bij267[eid]) if eid in bij267 else None)
+inst267 = instellingen(devices=[*inst259m["devices"], {"id": "dev-stekker", "type": "smart_plug", "name": "Stekker",
+                                                       "entities": {"power": "sensor.stekker_w"}}])
+inst267["sources"]["solar"] = "sensor.pv_w"
+inst267["sources"]["meters"] = {"solar_total": "sensor.pv_kwh"}
+
+
+def zon267(hass, hoogte):
+    hass.states.zet("sun.sun", {"state": "below_horizon" if hoogte < 0 else "above_horizon",
+                                "attributes": {"elevation": hoogte}})
+
+
+def bouw267(hoogte, al_weg=(), hass=None, store=None):
+    """Een opstart om T259: de paal en het vermogen van de accu zijn er, de rest is `unavailable`."""
+    waarden = {**huis(), "sensor.bat_soc": "unavailable", "sensor.pv_w": "unavailable",
+               "sensor.pv_kwh": "unavailable", "sensor.stekker_w": "unavailable"}
+    if hass is None:
+        inst = _copy267.deepcopy(inst267)
+        inst["sensor_quiet"] = [{"entity": e, "at": (T259 - dt.timedelta(hours=8)).isoformat()} for e in al_weg]
+        hass, store, coach = bouw(waarden, inst)
+    else:
+        coach = coachmod.ChargerCoach(hass)
+    for entiteit, waarde in ((LAADPAAL["entities"]["status"], "disconnected"), ("sensor.bat_w", "0")):
+        hass.states.zet(entiteit, waarde, last_updated=(T259 - dt.timedelta(hours=3)).replace(tzinfo=dt.timezone.utc))
+    hass.config_entries = types.SimpleNamespace(async_get_entry=lambda eid: entries267.get(eid))
+    zon267(hass, hoogte)
+    coach._restore(store.instellingen)
+    coach._opstart = T259
+    coach._zon_voorspeller = []
+    return hass, store, coach
+
+
+def meet267(hass, coach, store, van, tot, zon=None, pv_terug=None):
+    """Elke minuut een ronde zoals de echte: eerst de zon bijhouden, dan meten. `zon`: {minuut: hoogte}."""
+    oud = sys.modules.get("homeassistant.helpers.entity_registry")
+    sys.modules["homeassistant.helpers.entity_registry"] = er267
+    try:
+        for m in range(van, tot):
+            nu = T259 + dt.timedelta(minutes=m)
+            if zon and m in zon:
+                zon267(hass, zon[m])
+            if pv_terug is not None and m == pv_terug:
+                hass.states.zet("sensor.pv_w", "35", last_updated=nu.replace(tzinfo=dt.timezone.utc))
+            coach._zon_wakker_bijhouden(nu)
+            asyncio.run(coach._async_opstart_meten(store.instellingen, nu))
+    finally:
+        if oud is None:
+            sys.modules.pop("homeassistant.helpers.entity_registry", None)
+        else:
+            sys.modules["homeassistant.helpers.entity_registry"] = oud
+
+
+log267 = Log259()
+coachmod._LOGGER.addHandler(log267)
+coachmod._LOGGER.setLevel(logging.INFO)
+logging.disable(logging.NOTSET)
+try:
+    # In het donker, met de stekker en de accustand al gemeld van voor de herstart. Na vijf minuten staat de zon
+    # hoog genoeg en na acht is de omvormer wakker: dat is de zon, niet de opstart. De zonvoorspeller houdt de
+    # meting tien minuten open.
+    h267, s267, c267 = bouw267(-4.0, al_weg=("sensor.stekker_w", "sensor.bat_soc"))
+    c267._zon_voorspeller, c267._zon_geschat = ["voorspeller"], True
+    meet267(h267, c267, s267, 0, 10, zon={5: 11.0}, pv_terug=8)
+    c267._zon_geschat = False
+    meet267(h267, c267, s267, 10, 17)
+    geleerd267 = {r["source"]: r for r in s267.instellingen.get("startup_learned") or []}
+    print(f"  {log267.regels}")
+    controle("in het donker: de omvormer sliep, de stekker was al weg, en geen waarschuwing",
+             log267.regels == [("INFO", "na de opstart: accumerk na 0 s, omvormermerk sliep, paalmerk na 0 s, "
+                                        "stekkermerk was al weg, zon:voorspeller na 600 s")], f"{log267.regels}")
+    controle("hij leert er niets van, ook niet van de omvormer die binnen de meting wakker werd; de accu telt met wat er wel was",
+             "omvormermerk" not in geleerd267 and "stekkermerk" not in geleerd267
+             and geleerd267.get("accumerk", {}).get("startup") == [0], f"{geleerd267}")
+
+    # Overdag, en niets was al weg: de omvormer en de stekker die niet komen geven de waarschuwing.
+    log267.regels.clear()
+    h267d, s267d, c267d = bouw267(30.0)
+    meet267(h267d, c267d, s267d, 0, 17)
+    geleerd267 = {r["source"]: r for r in s267d.instellingen.get("startup_learned") or []}
+    controle("overdag: een omvormer en een stekker die niet komen geven de waarschuwing, zoals altijd",
+             log267.regels == [("WARNING", "na de opstart: accumerk niet binnen 15 min, omvormermerk niet binnen 15 min, "
+                                           "paalmerk na 0 s, stekkermerk niet binnen 15 min")]
+             and geleerd267["omvormermerk"]["startup"] == [None] and geleerd267["stekkermerk"]["startup"] == [None],
+             f"{log267.regels} {geleerd267}")
+
+    # In het donker telt alleen de omvormer niet: een stekker en een accu die niet komen wel.
+    log267.regels.clear()
+    h267s, s267s, c267s = bouw267(-4.0)
+    meet267(h267s, c267s, s267s, 0, 17)
+    controle("in het donker: een stekker en een accu die niet komen geven nog steeds de waarschuwing",
+             log267.regels == [("WARNING", "na de opstart: accumerk niet binnen 15 min, omvormermerk sliep, "
+                                           "paalmerk na 0 s, stekkermerk niet binnen 15 min")], f"{log267.regels}")
+
+    # In het donker, alles meteen behalve de omvormer: de meting is klaar zodra de rest er is.
+    log267.regels.clear()
+    h267v, s267v, c267v = bouw267(-4.0, al_weg=("sensor.stekker_w",))
+    h267v.states.zet("sensor.bat_soc", "60", last_updated=(T259 - dt.timedelta(hours=1)).replace(tzinfo=dt.timezone.utc))
+    meet267(h267v, c267v, s267v, 0, 2)
+    controle("wat slaapt of al weg was houdt de meting niet open",
+             c267v._opstart_gemeten and log267.regels == [
+                 ("INFO", "na de opstart: accumerk na 0 s, omvormermerk sliep, paalmerk na 0 s, stekkermerk was al weg")],
+             f"{log267.regels}")
+
+    # Een herstart midden in het meten: de nieuwe coach weet uit de opslag nog wat al weg was.
+    log267.regels.clear()
+    h267h, s267h, c267h = bouw267(30.0, al_weg=("sensor.stekker_w",))
+    meet267(h267h, c267h, s267h, 0, 6)
+    hass267n = NepHass({**huis(), "sensor.bat_soc": "unavailable", "sensor.pv_w": "unavailable",
+                        "sensor.pv_kwh": "unavailable", "sensor.stekker_w": "unavailable"})
+    hass267n.data["domotiapp_coach"] = {"store": s267h}
+    _, _, c267n = bouw267(30.0, hass=hass267n, store=s267h)
+    meet267(hass267n, c267n, s267h, 6, 23)
+    controle("na een herstart halverwege: één regel, de stekker nog steeds al weg, de omvormer overdag niet gekomen",
+             not c267h._opstart_gemeten and log267.regels == [
+                 ("WARNING", "na de opstart: accumerk niet binnen 15 min, omvormermerk niet binnen 15 min, "
+                             "paalmerk na 0 s, stekkermerk was al weg")], f"{log267.regels}")
+finally:
+    coachmod._LOGGER.removeHandler(log267)
+    coachmod._LOGGER.setLevel(oudniveau259)
+    logging.disable(logging.WARNING)
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
