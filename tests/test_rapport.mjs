@@ -769,7 +769,7 @@ proef("iedereen ziet alle personen (v0.114.0, was: een bewoner alleen zichzelf)"
     "een nieuwe persoon krijgt alles behalve de besluiten, net als op de server");
 });
 // De DomotiTech Bot (v0.220.0): het venster toont, de coach bewaart. Tekst is tekst, nooit html.
-const { ongelezenTickets, ticketNieuw, ticketsHtml, gesprekHtml, TICKET_SOORTEN, GESPREK, afzender } = await import(
+const { ongelezenTickets, ticketNieuw, ticketsHtml, gesprekHtml, TICKET_SOORTEN, GESPREK, afzender, eigen, dagTekst } = await import(
   "../custom_components/domotiapp_coach/frontend/src/tickets-sheet.js"
 );
 proef("de DomotiTech Bot: de stip, de lijst, het gesprek en de foto, en tekst als tekst (v0.220.0)", () => {
@@ -800,6 +800,81 @@ proef("de DomotiTech Bot: de stip, de lijst, het gesprek en de foto, en tekst al
   assert.ok(gesprekHtml({ id: GESPREK, berichten: [] }).includes("vraag"), "een leeg gesprek zegt wat je kunt vragen");
   assert.deepEqual(TICKET_SOORTEN.map((s) => s.id), ["storing", "aanvraag"], "een ticket is een storing of een aanvraag");
   assert.ok(ticketsHtml([], "u-1").includes("Nieuw ticket"), "zonder tickets een zin die zegt wat je kunt doen");
+});
+
+proef("het gesprek zoals WhatsApp: eigen rechts, de rest links met de naam, per dag, eerdere dagen in een keuzelijst (v0.224.0)", () => {
+  // De eigenaar op 15-11-2026: "Blokken rechts van je eigen tekst, blokken links van de antwoorden. En duidelijk aangeven
+  // of het de gebruiker is met de naam of de coach", "standaard naar het laatste bericht scrollen", "Evt de historische
+  // dagen ingevouwen? Tot een week max".
+  const nu = new Date("2026-11-15T12:00:00");
+  const b = (id, van, at, extra = {}) => ({ id, van, naam: van === "domotitech" ? "Coach Assist" : "Bewoner", tekst: `bericht ${id}`, at, ...extra });
+  const zelf = { user_id: "u-1" };
+  const gesprek = { id: GESPREK, gelezen: { "u-1": 6 }, berichten: [
+    b(1, "klant", "2026-11-06T09:00:00", zelf), b(2, "domotitech", "2026-11-06T09:05:00"),
+    b(3, "klant", "2026-11-13T20:00:00", zelf), b(4, "domotitech", "2026-11-13T20:01:00"),
+    b(5, "klant", "2026-11-14T08:00:00", { user_id: "u-2", naam: "Huisgenoot" }), b(6, "domotitech", "2026-11-14T08:02:00"),
+    b(7, "klant", "2026-11-15T09:00:00", zelf), b(8, "domotitech", "2026-11-15T09:03:00"),
+  ] };
+  assert.equal(eigen(gesprek.berichten[6], "u-1"), true, "eigen: geschreven door wie kijkt");
+  assert.equal(eigen(gesprek.berichten[4], "u-1"), false, "een huisgenoot staat links");
+  assert.equal(eigen(gesprek.berichten[7], "u-1"), false, "een antwoord staat links");
+  assert.equal(eigen({ van: "klant" }, "u-1"), true, "een bericht zonder user_id telt als eigen, zoals tot nu");
+  assert.equal(eigen({ van: "klant", user_id: "u-2" }, ""), true, "zonder gebruiker die kijkt ook");
+  const html = gesprekHtml(gesprek, nu, { userId: "u-1" });
+  const blok = (id) => html.slice(html.lastIndexOf('<div class="bericht', html.indexOf(`bericht ${id}<`)), html.indexOf(`bericht ${id}<`));
+  assert.ok(blok(7).includes('class="bericht wij"'), "het eigen bericht rechts");
+  assert.ok(blok(8).includes('class="bericht zij"') && blok(8).includes('class="b-logo"') && blok(8).includes("<strong>Coach Assist</strong>"),
+    "het antwoord links, met het logo en Coach Assist");
+  const metGisteren = gesprekHtml(gesprek, nu, { userId: "u-1", gekozen: "2026-11-14" });
+  const huisgenoot = metGisteren.slice(metGisteren.lastIndexOf('<div class="bericht', metGisteren.indexOf("bericht 5<")), metGisteren.indexOf("bericht 5<"));
+  assert.ok(huisgenoot.includes('class="bericht ander"') && huisgenoot.includes("<strong>Huisgenoot</strong>"), "een huisgenoot links, met zijn naam");
+  assert.ok(blok(7).includes("<strong>Bewoner</strong>"), "ook boven het eigen bericht de naam");
+  assert.ok(html.includes('<span class="b-tijd">09:03</span>'), "de tijd klein in het blok");
+  // Per dag: de laatste dag open; de eerdere dagen in één keuzelijst bovenaan, nieuwste eerst, en wat meer dan een week
+  // voor het laatste bericht ligt als één keuze. De eigenaar op 15-11-2026: "Bij datum een dropdown niet zo veel datums
+  // laten zien ivm ruimtegebrek".
+  const keuzes = (h) => [...h.matchAll(/<option value="([^"]*)"[^>]*>([^<]*)<\/option>/g)].map((m) => [m[1], m[2]]);
+  assert.ok(html.includes('<div class="dag" data-dag="2026-11-15"><span>Vandaag</span></div>'), "vandaag open");
+  assert.deepEqual(keuzes(html), [["", "Eerdere dagen"], ["2026-11-14", "Gisteren · 2 berichten"],
+    ["2026-11-13", "Vrijdag 13 november · 2 berichten"], ["ouder", "Oudere berichten · 2 berichten"]],
+  "de eerdere dagen in één keuzelijst, binnen een week met de weekdag");
+  assert.ok(html.indexOf("data-dagkeuze") < html.indexOf("bericht 7<"), "de keuzelijst boven het gesprek");
+  assert.ok(!html.includes("bericht 1<") && !html.includes("bericht 3<") && !html.includes("bericht 5<"), "eerdere dagen niet in beeld");
+  assert.ok(html.indexOf("bericht 7<") < html.indexOf("bericht 8<"), "de volgorde blijft");
+  // Een gekozen dag staat op zijn plek; oudere berichten in één keer.
+  const gisteren = gesprekHtml(gesprek, nu, { userId: "u-1", gekozen: "2026-11-14" });
+  assert.ok(gisteren.includes("bericht 5<") && !gisteren.includes("bericht 3<") && gisteren.indexOf("bericht 5<") < gisteren.indexOf("bericht 7<")
+    && gisteren.includes('<option value="2026-11-14" selected>'), "de gekozen dag op zijn plek, en gekozen in de lijst");
+  const ouder = gesprekHtml(gesprek, nu, { userId: "u-1", gekozen: "ouder" });
+  assert.ok(ouder.includes("bericht 1<") && ouder.includes("bericht 2<") && !ouder.includes("bericht 5<"), "oudere berichten in één keer");
+  // Een antwoord dat hij nog niet zag houdt zijn dag in beeld, en dan staat die dag niet in de lijst.
+  const ongezien = gesprekHtml({ ...gesprek, gelezen: { "u-1": 3 } }, nu, { userId: "u-1" });
+  assert.ok(ongezien.includes("bericht 4<") && ongezien.includes("bericht 6<")
+    && !keuzes(ongezien).some(([w]) => w === "2026-11-13" || w === "2026-11-14"), "dagen met een nieuw antwoord in beeld");
+  // Een stil gesprek: de laatste dag met berichten staat open, ook als dat niet vandaag is.
+  const stil = gesprekHtml({ ...gesprek, berichten: gesprek.berichten.slice(0, 6) }, nu, { userId: "u-1" });
+  assert.ok(stil.includes("bericht 6<") && stil.includes("<span>Gisteren</span>"));
+  assert.ok(!gesprekHtml({ ...gesprek, berichten: gesprek.berichten.slice(6) }, nu, { userId: "u-1" }).includes("<select"),
+    "alleen vandaag: geen keuzelijst");
+  // Een ticket is kort: wel de scheiding, niets dicht.
+  const ticket = gesprekHtml({ id: 5, gelezen: { "u-1": 9 }, berichten: gesprek.berichten.slice(0, 4) }, nu, { userId: "u-1" });
+  assert.ok(!ticket.includes("<select") && ticket.includes("bericht 1<") && ticket.includes('<div class="dag" data-dag="2026-11-06">'),
+    "een ticket: scheiding, niets weg");
+  assert.equal(dagTekst("2025-12-31", nu), "31 december 2025", "een ander jaar met het jaar erbij");
+  // Safari op iOS zoomt in op een keuzelijst of tekstvak onder de 16 px.
+  const stijl = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/tickets-sheet.js", import.meta.url), "utf8");
+  assert.ok(/\.dagkeuze select \{[^}]*font-size: 16px/.test(stijl) && /textarea \{[^}]*font-size: 16px/.test(stijl),
+    "de keuzelijst en het tekstvak op 16 px");
+  // Bij openen, bij een tabblad en een ticket, en na het eigen bericht naar onderen; pas na `openSheet`, want een
+  // verborgen gesprek kan niet scrollen.
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/tickets-sheet.js", import.meta.url), "utf8");
+  const open = bron.slice(bron.indexOf("  open() {"), bron.indexOf("  kiesTab_(tab) {"));
+  assert.ok(open.indexOf("openSheet(dialog)") < open.indexOf("this.naarOnder_()"), "naar onderen nadat het venster open is");
+  for (const stuk of ["  kiesTab_(tab) {", "  openTicket_(id) {", '  this.$("#stuur-vraag")', '  this.$("#stuur-reactie")']) {
+    const begin = bron.indexOf(stuk);
+    const eind = stuk.includes("$(") ? bron.indexOf("\n    });", begin) : bron.indexOf("\n  }", begin + 10);
+    assert.ok(begin > 0 && bron.slice(begin, eind).includes("this.naarOnder_()"), `${stuk.trim()}: naar onderen`);
+  }
 });
 
 proef("de namen: COACH en Coach Assist, alleen wat een mens leest (v0.223.0)", () => {
