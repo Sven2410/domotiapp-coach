@@ -239,3 +239,21 @@ De eigenaar op 15-11-2026: "de coach staat los snap je? Dus niks van domotiapp n
 - **De proef** "nergens DomotiApp" in test_rapport.mjs leest elke .js, .py en .json van de integratie zonder
   commentaar. Hij valt om op elke DomotiApp in tekst, behalve een klassenaam.
 
+## Tikken op de melding opent Coach Assist (v0.229.0)
+
+De eigenaar op 15-11-2026: "als ik op de notificatie klik van coach assist gaat hij niet naar de coach toe snap je?
+Dan opent hij gewoon HA". In de pushmelding na een antwoord stond `"url": "/"`, de startpagina van Home Assistant.
+
+- **De melding** (`melding_data` in websocket.py) gaat nu naar `/<PANEL_URL_PATH>?coach_assist=<ticket>`, als
+  `url` voor iOS en als `clickAction` voor Android. Er gaat ook een `tag` `coach-assist-<ticket>` mee, zodat een nieuw
+  antwoord op hetzelfde ticket de oude melding vervangt.
+- **Het paneel leest het adres** (`openUitAdres_`) bij het openen, bij een nieuwe route, en bij `location-changed` of
+  `popstate`. Dat laatste is voor als de app het paneel hergebruikt terwijl het al open staat. Het haalt eerst de
+  parameter weg (`history.replaceState`, zodat verversen het niet opnieuw opent) en opent dan Coach Assist
+  (`openOp`).
+  - 0 opent Vragen.
+  - Een ander nummer opent dat ticket, ook zonder Coach Assist in het abonnement (een storing).
+  - Zijn de tickets er nog niet, dan komt het ticket in beeld zodra ze er zijn.
+- **Nagemeten** in Chrome op het venster, voor het gesprek, voor een ticket, voor tickets die later binnenkomen, en
+  zonder Coach Assist. Of tikken in de app van Home Assistant het paneel zo opent, kan alleen op een echte telefoon.
+

@@ -34,6 +34,18 @@ const STANDEN = {
 const FOTOS_MAX = 4;
 const soortLabel = (id) => t(TICKET_SOORTEN.find((s) => s.id === id)?.label ?? id);
 
+/**
+ * Het ticket uit het adres van een pushmelding (`?coach_assist=<id>`, v0.229.0), en de rest van de zoekstring zonder
+ * die parameter; `id` is null als er geen (geldige) is.
+ */
+export function uitAdres(zoekstring) {
+  const zoek = new URLSearchParams(zoekstring ?? "");
+  const waarde = zoek.get("coach_assist");
+  zoek.delete("coach_assist");
+  const rest = zoek.toString();
+  return { id: waarde != null && /^\d+$/.test(waarde) ? Number(waarde) : null, rest: rest ? `?${rest}` : "" };
+}
+
 /** Of er in dit ticket of het gesprek een antwoord van DomotiTech staat dat deze gebruiker nog niet zag. */
 export function ticketNieuw(ticket, userId) {
   const gezien = Number((ticket?.gelezen ?? {})[userId] ?? 0);
@@ -504,6 +516,20 @@ export class DacTicketsSheet extends DacElement {
     // Pas nu staat het gesprek in beeld; zolang het verborgen was, kon het niet naar onderen (v0.224.0).
     this.naarOnder_();
     if (this.tab_ === "vragen") this.leesGesprek_();
+  }
+
+  /**
+   * Openen op één ticket, vanuit een pushmelding (v0.229.0): 0 is het vragengesprek, een ander nummer dat ticket onder
+   * Tickets, ook zonder Coach Assist in het abonnement (een storing). Het gesprek valt dan terug op de tickets
+   * (`kiesTab_`). Zijn de tickets er nog niet, dan komt het ticket in beeld zodra ze er zijn (`paint_`).
+   */
+  openOp(id) {
+    this.tab_ = id === GESPREK ? "vragen" : "tickets";
+    this.open();
+    if (id !== GESPREK) {
+      this.openTicket_(id);
+      this.naarOnder_();
+    }
   }
 
   kiesTab_(tab) {

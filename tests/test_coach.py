@@ -19173,6 +19173,31 @@ standen269 = gang243(c269r, i269r, a269r, 1, 50, g269r)
 print(f"  ronde: standen {sorted(set(str(s) for s in standen269))}, {[g[0] for g in g269r if g[1]][:2]}")
 controle("in de ronde: één kritieke melding dat hij niets opneemt",
          len([g for g in g269r if "neemt niets op" in g[0] and g[1]]) == 1, f"{set(standen269)} {g269r}")
+print("=== 270. tikken op de melding van Coach Assist opent Coach Assist op dat ticket (v0.229.0) ===")
+# De eigenaar op 15-11-2026: "als ik op de notificatie klik van coach assist gaat hij niet naar de coach toe snap je? Dan
+# opent hij gewoon HA". Tot dan stond er "/" in de melding.
+inst270 = instellingen()
+inst270["notifications"]["people"] = [
+    {"id": "p-1", "name": "Bewoner", "target": "mobile_app_bewoner", "user_id": "u-1", "kinds": {}}]
+hass270, _, _ = bouw(huis(), inst270)
+hass270.bus = _Bus264()
+bewoner270 = _Verbinding264("u-1", "Bewoner")
+beheer270 = _Verbinding264("u-9", "Beheer", admin=True)
+for functie, verbinding, velden in (
+        (ws139.async_tickets_reply, bewoner270, {"ticket_id": 0, "tekst": "Hoe vol is mijn accu?"}),
+        (ws139.async_tickets_new, bewoner270, {"soort": "storing", "tekst": "De paal laadt niet"}),
+        (ws139.async_tickets_answer, beheer270, {"ticket_id": 0, "tekst": "Op 64%."}),
+        (ws139.async_tickets_answer, beheer270, {"ticket_id": 1, "tekst": "We komen langs."})):
+    asyncio.run(functie(hass270, verbinding, {"id": 50, **velden}))
+data270 = [d.get("data") for dom, dienst, d in hass270.services.verstuurd if dom == "notify"]
+print(f"  {data270}")
+controle("de melding opent het paneel met Coach Assist op het ticket, voor iOS en Android, met een tag per ticket",
+         data270 == [
+             {"url": "/domotiapp-coach?coach_assist=0", "clickAction": "/domotiapp-coach?coach_assist=0", "tag": "coach-assist-0"},
+             {"url": "/domotiapp-coach?coach_assist=1", "clickAction": "/domotiapp-coach?coach_assist=1", "tag": "coach-assist-1"},
+         ], f"{data270}")
+controle("het adres volgt het paneel", ws139.melding_data(7)["url"] == f"/{coachmod_const.PANEL_URL_PATH}?coach_assist=7"
+         if (coachmod_const := sys.modules.get("domotiapp_coach.const")) else False, "")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

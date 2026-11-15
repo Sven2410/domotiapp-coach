@@ -21,6 +21,7 @@ from homeassistant.util import dt as dt_util
 
 from . import report
 from .const import (
+    PANEL_URL_PATH,
     EVENT_BERICHTEN,
     EVENT_TICKET,
     EVENT_TICKET_BIJGEWERKT,
@@ -1889,6 +1890,12 @@ def async_subscribe(
 # alleen een beheerder; een systeemgebruiker stelt geen vragen.
 
 
+def melding_data(ticket_id: int) -> dict[str, str]:
+    """Waar tikken op de pushmelding van Coach Assist heen gaat: het paneel, met het venster op dit ticket (v0.229.0)."""
+    adres = f"/{PANEL_URL_PATH}?coach_assist={int(ticket_id)}"
+    return {"url": adres, "clickAction": adres, "tag": f"coach-assist-{int(ticket_id)}"}
+
+
 def _ticket_fout(connection: websocket_api.ActiveConnection, msg: dict[str, Any], fout: Exception) -> None:
     connection.send_error(msg["id"], getattr(fout, "code", "fout"), str(fout))
 
@@ -2085,8 +2092,11 @@ async def async_tickets_answer(
                 "title": "Coach Assist",
                 "message": t("Coach Assist heeft je vraag beantwoord") if ticket["id"] == 0
                 else t("Coach Assist heeft geantwoord op ticket #{nr}", nr=ticket["id"]),
-                # Tikken opent het dashboard: `url` voor iOS, `clickAction` voor Android.
-                "data": {"url": "/", "clickAction": "/"},
+                # Tikken opent Coach Assist op dit ticket in het paneel (v0.229.0; tot dan de startpagina): `url`
+                # voor iOS, `clickAction` voor Android. De eigenaar op 15-11-2026: "als ik op de notificatie klik
+                # van coach assist gaat hij niet naar de coach toe". Met een `tag` per ticket vervangt een nieuw
+                # antwoord de oude melding.
+                "data": melding_data(ticket["id"]),
             }, blocking=False)
         except Exception:  # noqa: BLE001 - één slechte ontvanger is niet alle
             continue
