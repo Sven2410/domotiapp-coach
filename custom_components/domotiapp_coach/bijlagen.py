@@ -19,6 +19,7 @@ import logging
 import pathlib
 import re
 import secrets
+from datetime import timedelta
 from aiohttp import web
 
 from homeassistant.components.http import HomeAssistantView
@@ -27,7 +28,7 @@ from homeassistant.util import dt as dt_util
 
 from .const import DOMAIN
 from .taal import t
-from .tickets import BIJLAGE_MAX, TicketFout, bijlage_erbij, opruimen, soort_van
+from .tickets import BIJLAGE_MAX, TicketFout, bijlage_erbij, opruimen, opruimen_gesloten, soort_van
 
 try:  # Home Assistant 2024.6 en nieuwer
     from homeassistant.components.http import KEY_HASS
@@ -37,6 +38,8 @@ except ImportError:  # pragma: no cover - oudere uitvoeringen
 _LOGGER = logging.getLogger(__name__)
 
 URL = "/api/domotiapp_coach/tickets/bijlage"
+# Hoe vaak de tickets opgeruimd worden (v0.230.0, `async_opruimen`).
+OPRUIMEN_ELK = timedelta(hours=1)
 MAP = "domotiapp_coach_bijlagen"
 _ID = re.compile(r"^[0-9a-f]{32}$")
 
@@ -59,16 +62,27 @@ def _weg(map_: pathlib.Path, ids: list[str]) -> None:
             (map_ / bijlage_id).unlink(missing_ok=True)
 
 
-async def async_opruimen(hass: HomeAssistant) -> None:
-    """Foto's die al een uur nergens aan hangen weghalen, uit de opslag en van de schijf."""
+async def async_opruimen(hass: HomeAssistant, gesloten: bool = False) -> None:
+    """Foto's die al een uur nergens aan hangen weghalen, uit de opslag en van de schijf. Met `gesloten` ook wat er van
+    gesloten tickets en het gesprek weg mag (`opruimen_gesloten`, v0.230.0), met de aantallen in het log."""
     from .storage import async_get_tickets
 
     try:
-        weg = await async_get_tickets(hass).async_wijzig(lambda data: opruimen(data, dt_util.now()))
+        nu = dt_util.now()
+
+        def wijzig(data: dict) -> tuple[list[str], dict | None]:
+            los = opruimen(data, nu)
+            oud = opruimen_gesloten(data, nu) if gesloten else None
+            return los + (oud["ids"] if oud else []), oud
+
+        weg, oud = await async_get_tickets(hass).async_wijzig(wijzig)
         if weg:
             await hass.async_add_executor_job(_weg, map_van(hass), weg)
+        if oud and (oud["fotos"] or oud["tickets"] or oud["berichten"]):
+            _LOGGER.info("tickets opgeruimd: %d foto's, %d gesloten tickets, %d berichten uit het gesprek",
+                         oud["fotos"], oud["tickets"], oud["berichten"])
     except Exception:  # noqa: BLE001 - opruimen mag een upload of een vraag niet kosten
-        _LOGGER.exception("kon de losse foto's van de tickets niet opruimen")
+        _LOGGER.exception("kon de foto's en tickets niet opruimen")
 
 
 class BijlageUploadView(HomeAssistantView):
@@ -144,3 +158,9 @@ def async_register(hass: HomeAssistant) -> None:
     hass.http.register_view(BijlageUploadView())
     hass.http.register_view(BijlageView())
     domain_data["bijlage_views"] = True
+    # Opruimen (v0.230.0): elk uur, en één keer nu, zodat het na een herstart of een uitgevallen dag ook klopt.
+    from homeassistant.helpers.event import async_track_time_interval
+
+    async_track_time_interval(hass, lambda _nu: hass.async_create_task(async_opruimen(hass, gesloten=True)),
+                              OPRUIMEN_ELK)
+    hass.async_create_task(async_opruimen(hass, gesloten=True))

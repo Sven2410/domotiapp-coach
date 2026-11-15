@@ -1015,6 +1015,38 @@ proef("tikken op de melding opent Coach Assist op dat ticket, en het adres is da
     && op.includes("this.openTicket_(id);"), "0 is Vragen, een ander nummer dat ticket, ook zonder Coach Assist");
 });
 
+proef("gesloten is gesloten: Open en Gesloten apart, en een gesloten ticket zonder typveld (v0.230.0)", () => {
+  // De eigenaar op 15-11-2026: "als een ticket gesloten is moet je niet meer opnieuw kunnen typen en de klant moet ook
+  // goed kunnen zien wat open staat en gesloten is". Gelijk aan de kaart van DomotiApp Lovelace.
+  const tk = (id, stand, extra = {}) => ({ id, soort: "storing", stand, onderwerp: `ticket ${id}`, bijgewerkt: `2026-11-15T1${id}:00:00`,
+    berichten: [{ id: 1, van: "klant", naam: "B", user_id: "u-1", tekst: "x", at: "2026-11-15T10:00:00" }], gelezen: { "u-1": 1 }, ...extra });
+  const lijst = [tk(1, "nieuw"), tk(2, "in_behandeling"), tk(3, "bij_beheerder"), tk(4, "klaar"), tk(5, "klaar")];
+  const html = ticketsHtml(lijst, "u-1");
+  assert.ok(html.indexOf("Open · 3") < html.indexOf("#3") && html.indexOf("#1") < html.indexOf("Gesloten · 2"), "eerst Open, dan Gesloten");
+  assert.ok(/<details class="gesloten-groep" data-groep="gesloten">/.test(html), "Gesloten ingeklapt");
+  assert.ok(html.includes('<span class="etiket open">Open</span>') && html.includes('<span class="etiket bezig">In behandeling</span>')
+    && html.includes('<span class="etiket dicht">Gesloten</span>'), "een etiket per stand");
+  assert.equal((html.match(/etiket bezig/g) ?? []).length, 2, "bij de beheerder is ook In behandeling");
+  assert.ok(ticketsHtml([tk(6, "raar")], "u-1").includes('<span class="etiket bezig">In behandeling</span>'), "een onbekende stand ook");
+  const ongelezen = ticketsHtml([tk(1, "nieuw"), tk(4, "klaar", { berichten: [...tk(4, "klaar").berichten, { id: 2, van: "domotitech", naam: "", tekst: "y", at: "2026-11-15T11:00:00" }] })], "u-1");
+  assert.ok(/data-groep="gesloten" open>/.test(ongelezen), "open als er een antwoord in staat dat hij nog niet las");
+  assert.ok(!/data-groep="gesloten" open>/.test(ticketsHtml(lijst, "u-1", undefined, { geslotenOpen: false }))
+    && /data-groep="gesloten" open>/.test(ticketsHtml(lijst, "u-1", undefined, { geslotenOpen: true })), "zelf open- of dichtklappen blijft");
+  assert.ok(gesprekHtml({ id: 4, berichten: [{ id: 1, van: "klant", naam: "B", tekst: "", at: "", bijlagen_weg: true }] })
+    .includes('<p class="weg">Foto verwijderd</p>'), "een foto die na 30 dagen weg is");
+  const venster = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/tickets-sheet.js", import.meta.url), "utf8");
+  const paint = venster.slice(venster.indexOf("  paint_() {"));
+  assert.ok(paint.includes('const dicht = ticket?.stand === "klaar";') && paint.includes('this.$("#t-gesprek .schrijf").hidden = dicht;')
+    && paint.includes('this.$("#dicht-blok").hidden = !dicht;'), "een gesloten ticket zonder typveld, met de zin en Nieuw ticket");
+  const knop = venster.slice(venster.indexOf('this.$("#nieuw-na-dicht").addEventListener'), venster.indexOf('this.$("#stuur-reactie").addEventListener'));
+  assert.ok(knop.includes('this.soort_ = this.zonderCare_() ? "storing" : (ticket?.soort ?? this.soort_);') && knop.includes('this.toon_("nieuw");'),
+    "Nieuw ticket met de soort van het gesloten ticket, en de getypte tekst gaat mee");
+  const fout = venster.slice(venster.indexOf("  ticketGesloten(tekst) {"), venster.indexOf("  /** Een fout van de coach"));
+  assert.ok(fout.includes("veld.value = this.laatsteReactie_"), "na ticket_gesloten blijft de getypte tekst");
+  const paneel = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/domotiapp-coach-panel.js", import.meta.url), "utf8");
+  assert.ok(paneel.includes('else if (error?.code === "ticket_gesloten") sheet.ticketGesloten(error.message);'));
+});
+
 proef("de namen: COACH en Coach Assist, alleen wat een mens leest (v0.223.0)", () => {
   // Een antwoord heet Coach Assist, ook een oud antwoord dat met de naam DomotiTech in de opslag staat.
   assert.equal(afzender({ van: "domotitech", naam: "DomotiTech" }), "Coach Assist");

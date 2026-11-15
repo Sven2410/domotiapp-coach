@@ -257,3 +257,42 @@ Dan opent hij gewoon HA". In de pushmelding na een antwoord stond `"url": "/"`, 
 - **Nagemeten** in Chrome op het venster, voor het gesprek, voor een ticket, voor tickets die later binnenkomen, en
   zonder Coach Assist. Of tikken in de app van Home Assistant het paneel zo opent, kan alleen op een echte telefoon.
 
+## Gesloten is gesloten, en tickets opruimen (v0.230.0)
+
+De eigenaar op 15-11-2026: "als een ticket gesloten is moet je niet meer opnieuw kunnen typen en de klant moet ook goed
+kunnen zien wat open staat en gesloten is". En: "wanneer worden de tickets verwijderd? Mij lijkt me een dag na gesloten
+verwijderen goed?"; op het voorstel (een dag uit het zicht, na 30 dagen de foto's weg, na 90 dagen alles weg) zei hij
+"prima".
+
+**Gesloten is gesloten:**
+- `reply` en `answer` op een ticket met stand `klaar` geven de fout `ticket_gesloten`, met "Dit ticket is gesloten.
+  Is het er weer? Maak dan een nieuw ticket." Er wordt niets bewaard en er gaat geen gebeurtenis af. Tot v0.230.0
+  ging een reactie het ticket terug op `nieuw` zetten.
+- Een beheerder kan het ticket weer openen met `set_state`. Het vragengesprek sluit niet.
+- Bij het sluiten komt de tijd in het ticket (`gesloten`), via `set_state` of een antwoord met stand `klaar`. Bij
+  heropenen gaat die weer weg. Een ticket dat al gesloten was zonder die tijd, telt vanaf `bijgewerkt`
+  (`gesloten_sinds`).
+
+**In het venster**, gelijk aan de kaart van lovelace 0.129.0:
+- Tickets staan in twee groepen. Bovenaan "Open · n". Daaronder "Gesloten · n", ingeklapt, behalve als er een antwoord
+  in staat dat de gebruiker nog niet las, of als hij de groep zelf openklapte. Gesloten rijen zijn wat minder
+  opvallend.
+- Per ticket staat er een etiket: Open (accent) bij `nieuw`, In behandeling (`--dac-warn`) bij `in_behandeling`,
+  `bij_beheerder` en een onbekende stand, en Gesloten (grijs) bij `klaar`.
+- Een gesloten ticket is om terug te lezen, zonder veld om te typen. In plaats daarvan staat er "Dit ticket is
+  gesloten. Is het er weer? Maak een nieuw ticket." met een knop Nieuw ticket, met de soort van het gesloten ticket
+  al gekozen en de getypte tekst erin. Op de grens van het pakket staat die knop er niet.
+- Bij de fout `ticket_gesloten` blijft de getypte tekst staan (`ticketGesloten`).
+
+**Opruimen** (`opruimen_gesloten` in tickets.py, `async_opruimen` in bijlagen.py, elk uur en één keer bij het starten):
+- Een ticket dat langer dan een dag gesloten is, staat niet meer in `list` en `subscribe`, maar blijft in de opslag.
+  Een beheerder ziet het nog met `list` en `oud: true`.
+- Na 30 dagen gesloten gaan de foto's weg, uit de opslag en van de schijf. Het bericht krijgt `bijlagen_weg: true`, en
+  het venster zegt "Foto verwijderd".
+- Na 90 dagen gesloten gaat het hele ticket weg.
+- Van het vragengesprek gaan berichten ouder dan 90 dagen weg.
+- Een open ticket en zijn foto's gaan nooit weg. Wat er weg is, staat met de aantallen in het log, zonder tekst van
+  klanten.
+
+Proef 271, met de grenzen, een herstart en heropenen. De proef "gesloten is gesloten" in test_rapport.mjs.
+

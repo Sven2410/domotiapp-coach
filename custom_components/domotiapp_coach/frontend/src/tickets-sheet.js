@@ -25,12 +25,17 @@ export const TICKET_SOORTEN = [
   { id: "storing", label: nt("Storing") },
   { id: "aanvraag", label: nt("Aanvraag") },
 ];
+// Het etiket per stand (v0.230.0), gelijk aan de kaart van DomotiApp Lovelace: Open, In behandeling (ook bij de
+// beheerder en een onbekende stand) en Gesloten. De eigenaar op 15-11-2026: "de klant moet ook goed kunnen zien wat open
+// staat en gesloten is".
 const STANDEN = {
-  nieuw: nt("Ontvangen"),
+  nieuw: nt("Open"),
   in_behandeling: nt("In behandeling"),
-  bij_beheerder: nt("Wacht op een beslissing"),
-  klaar: nt("Klaar"),
+  bij_beheerder: nt("In behandeling"),
+  klaar: nt("Gesloten"),
 };
+const standKleur = (stand) => (stand === "nieuw" ? "open" : stand === "klaar" ? "dicht" : "bezig");
+const GESLOTEN = nt("Dit ticket is gesloten. Is het er weer? Maak een nieuw ticket.");
 const FOTOS_MAX = 4;
 const soortLabel = (id) => t(TICKET_SOORTEN.find((s) => s.id === id)?.label ?? id);
 
@@ -57,14 +62,28 @@ export const ongelezenTickets = (tickets, userId, gesprek = null) =>
   (tickets ?? []).filter((tk) => ticketNieuw(tk, userId)).length + (gesprek && ticketNieuw(gesprek, userId) ? 1 : 0);
 
 /** De lijst met tickets als html: nieuwste eerst, met nummer, soort, stand en tijd. */
-export function ticketsHtml(tickets, userId, nu = huisNu()) {
+/**
+ * De lijst met tickets als html: eerst Open, daarna Gesloten, elk nieuwste eerst, met nummer, soort, een etiket per stand
+ * en tijd (v0.230.0). Gesloten is ingeklapt, behalve als er een antwoord in staat dat de gebruiker nog niet zag, of als
+ * hij hem zelf openvouwde (`geslotenOpen`).
+ */
+export function ticketsHtml(tickets, userId, nu = huisNu(), { geslotenOpen = null } = {}) {
   const lijst = [...(tickets ?? [])].sort((a, b) => String(b.bijgewerkt).localeCompare(String(a.bijgewerkt)));
   if (!lijst.length) return `<p class="leeg">${t("Nog geen tickets. Een storing of een aanvraag maak je met Nieuw ticket.")}</p>`;
-  return lijst.map((tk) => `
-    <button type="button" class="ticket${ticketNieuw(tk, userId) ? " nieuw" : ""}" data-ticket="${esc(tk.id)}">
+  const rij = (tk) => `
+    <button type="button" class="ticket${ticketNieuw(tk, userId) ? " nieuw" : ""}${tk.stand === "klaar" ? " gesloten" : ""}" data-ticket="${esc(tk.id)}">
       <span class="t-kop"><strong>#${esc(tk.id)} ${esc(tk.onderwerp)}</strong><span class="t-wanneer">${esc(wanneerTekst(tk.bijgewerkt, nu))}</span></span>
-      <span class="t-sub">${esc(soortLabel(tk.soort))} · ${esc(t(STANDEN[tk.stand] ?? tk.stand))}${ticketNieuw(tk, userId) ? ` · <b>${t("nieuw antwoord")}</b>` : ""}</span>
-    </button>`).join("");
+      <span class="t-sub"><span class="etiket ${standKleur(tk.stand)}">${esc(t(STANDEN[tk.stand] ?? STANDEN.in_behandeling))}</span>${esc(soortLabel(tk.soort))}${ticketNieuw(tk, userId) ? ` · <b>${t("nieuw antwoord")}</b>` : ""}</span>
+    </button>`;
+  const open = lijst.filter((tk) => tk.stand !== "klaar");
+  const dicht = lijst.filter((tk) => tk.stand === "klaar");
+  let html = `<div class="groep-kop">${t("Open")} · ${open.length}</div>${open.map(rij).join("")}`;
+  if (dicht.length) {
+    const uitgeklapt = geslotenOpen ?? dicht.some((tk) => ticketNieuw(tk, userId));
+    html += `<details class="gesloten-groep" data-groep="gesloten"${uitgeklapt ? " open" : ""}>
+      <summary>${t("Gesloten")} · ${dicht.length}</summary><div class="lijst">${dicht.map(rij).join("")}</div></details>`;
+  }
+  return html;
 }
 
 /**
@@ -116,6 +135,7 @@ function berichtHtml(b, userId) {
       <div class="b-naam">${coach ? `<img class="b-logo" src="${LOGO_URL}" alt="" draggable="false">` : ""}<strong>${esc(afzender(b))}</strong></div>
       ${b.tekst ? `<p>${esc(b.tekst)}</p>` : ""}
       ${(b.bijlagen ?? []).length ? `<div class="fotos">${b.bijlagen.map((f) => `<img alt="${t("Foto")}" data-foto="${esc(f.id)}">`).join("")}</div>` : ""}
+      ${b.bijlagen_weg ? `<p class="weg">${t("Foto verwijderd")}</p>` : ""}
       ${klok ? `<span class="b-tijd">${klok}</span>` : ""}
     </div>`;
 }
@@ -244,6 +264,23 @@ const css = /* css */ `
     border: 1px solid var(--dac-border); background: rgba(var(--dac-veil),0.02); color: var(--dac-ink); cursor: pointer;
   }
   .ticket.nieuw { border-color: rgba(25,143,217,0.45); background: rgba(2,111,161,0.08); }
+  /* Open en Gesloten (v0.230.0). */
+  .ticket.gesloten { opacity: 0.72; }
+  .groep-kop { font-size: 12px; font-weight: 600; color: var(--dac-ink-3); margin: 2px 0; }
+  .gesloten-groep > summary {
+    list-style: none; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--dac-ink-3); padding: 6px 0;
+  }
+  .gesloten-groep > summary::-webkit-details-marker { display: none; }
+  .gesloten-groep > .lijst { margin-top: 6px; }
+  .t-sub { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .etiket { font-size: 11px; font-weight: 600; padding: 1px 7px; border-radius: 999px; }
+  .etiket.open { color: var(--dac-accent-hi); background: var(--dac-accent-soft); }
+  .etiket.bezig { color: var(--dac-warn); background: color-mix(in srgb, var(--dac-warn) 14%, transparent); }
+  .etiket.dicht { color: var(--dac-ink-3); background: rgba(var(--dac-veil),0.08); }
+  .bericht .weg { font-style: italic; color: var(--dac-ink-3); }
+  .dicht-blok { display: grid; gap: 8px; margin-top: 12px; }
+  .dicht-blok p { margin: 0; font-size: 13px; color: var(--dac-ink-2); }
+  .dicht-blok[hidden] { display: none; }
   .t-kop { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
   .t-kop strong { font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
   .t-wanneer, .t-sub { font-size: 12px; color: var(--dac-ink-3); }
@@ -328,6 +365,9 @@ export class DacTicketsSheet extends DacElement {
     this.opnieuwKlok_ = null;
     this.laatsteVraag_ = "";
     this.laatsteTicket_ = "";
+    this.laatsteReactie_ = "";
+    // Of de gebruiker Gesloten zelf open- of dichtklapte (v0.230.0); null is: open als er iets ongelezens in staat.
+    this.geslotenOpen_ = null;
   }
 
   render() {
@@ -375,6 +415,10 @@ export class DacTicketsSheet extends DacElement {
               <button type="button" class="knop" data-foto-kies>${icons.plus}<span>${t("Foto toevoegen")}</span></button>
               <span class="gekozen" data-gekozen></span>
               <button type="button" class="knop hoofd" id="stuur-reactie">${t("Versturen")}</button>
+            </div>
+            <div class="dicht-blok" id="dicht-blok" hidden>
+              <p>${t(GESLOTEN)}</p>
+              <button type="button" class="knop hoofd" id="nieuw-na-dicht">${icons.plus}<span>${t("Nieuw ticket")}</span></button>
             </div>
           </div>
           <div id="t-nieuw" hidden>
@@ -451,9 +495,21 @@ export class DacTicketsSheet extends DacElement {
       this.toon_("lijst");
       this.meld_(t("Ontvangen, we kijken ernaar."));
     });
+    this.$("#lijst").addEventListener("toggle", (event) => {
+      if (event.target?.dataset?.groep === "gesloten") this.geslotenOpen_ = event.target.open;
+    }, true);
+    this.$("#nieuw-na-dicht").addEventListener("click", () => {
+      // Een nieuw ticket met de soort van het gesloten ticket, en wat er al getypt was.
+      const ticket = this.tickets_.find((tk) => tk.id === this.open_);
+      const tekst = this.$("#reactie").value.trim();
+      this.soort_ = this.zonderCare_() ? "storing" : (ticket?.soort ?? this.soort_);
+      this.toon_("nieuw");
+      if (tekst && !this.$("#ticket-tekst").value.trim()) this.$("#ticket-tekst").value = tekst;
+    });
     this.$("#stuur-reactie").addEventListener("click", () => {
       const tekst = this.$("#reactie").value.trim();
       if ((!tekst && !this.fotos_.length) || this.open_ == null) return;
+      this.laatsteReactie_ = tekst;
       this.fire("dac-ticket-reageer", { id: this.open_, tekst, bijlagen: this.fotos_.map((f) => f.id) });
       this.$("#reactie").value = "";
       this.fotos_ = [];
@@ -503,6 +559,17 @@ export class DacTicketsSheet extends DacElement {
     if (!this.pakket_) this.meld_(String(tekst || t(ticket ? TICKETS_OP : PAKKET_OP)), true);
   }
 
+  /** De coach weigerde een reactie: het ticket is gesloten (v0.230.0). Het venster gaat dicht voor typen, en de
+   * getypte tekst blijft, voor een nieuw ticket. */
+  ticketGesloten(tekst) {
+    this.tickets_ = this.tickets_.map((tk) => (tk.id === this.open_ ? { ...tk, stand: "klaar" } : tk));
+    if (!this.rendered_) return;
+    const veld = this.$("#reactie");
+    if (!veld.value.trim()) veld.value = this.laatsteReactie_;
+    this.paint_();
+    this.meld_(String(tekst || t(GESLOTEN)), true);
+  }
+
   /** Een fout van de coach, met zijn eigen zin. */
   set fout(tekst) {
     if (tekst) this.meld_(String(tekst), true);
@@ -510,6 +577,7 @@ export class DacTicketsSheet extends DacElement {
 
   open() {
     this.gekozenDag_ = "";
+    this.geslotenOpen_ = null;
     this.kiesTab_(this.tab_);
     const dialog = this.$("dialog");
     openSheet(dialog);
@@ -632,11 +700,15 @@ export class DacTicketsSheet extends DacElement {
     vragen.innerHTML = gesprekHtml(this.gesprek_ ?? { id: GESPREK, berichten: [] }, huisNu(),
       { userId: this.userId_, gekozen: this.gekozenDag_ });
     if (vragenOnder) vragen.scrollTop = vragen.scrollHeight;
-    this.$("#lijst").innerHTML = ticketsHtml(this.tickets_, this.userId_);
+    this.$("#lijst").innerHTML = ticketsHtml(this.tickets_, this.userId_, huisNu(), { geslotenOpen: this.geslotenOpen_ });
     const ticket = this.tickets_.find((tk) => tk.id === this.open_);
     const vak = this.$("#gesprek-ticket");
     const ticketOnder = onderaan(vak);
     vak.innerHTML = ticket ? gesprekHtml(ticket, huisNu(), { userId: this.userId_ }) : "";
+    // Een gesloten ticket is om terug te lezen: geen veld om te typen, wel de weg naar een nieuw ticket (v0.230.0).
+    const dicht = ticket?.stand === "klaar";
+    this.$("#t-gesprek .schrijf").hidden = dicht;
+    this.$("#dicht-blok").hidden = !dicht;
     if (ticketOnder) vak.scrollTop = vak.scrollHeight;
     this.vulFotos_(vak);
     for (const knop of this.$$("[data-soort]")) knop.setAttribute("aria-pressed", String(knop.dataset.soort === this.soort_));
@@ -661,6 +733,7 @@ export class DacTicketsSheet extends DacElement {
     if (tickets === 0) this.$("#nieuw").hidden = true;
     this.$("#stuur-nieuw").hidden = tickets === 0;
     this.$("#meld-storing").hidden = tickets === 0;
+    this.$("#nieuw-na-dicht").hidden = tickets === 0;
     const gekozen = this.fotos_.length ? t("{n} foto('s) erbij", { n: this.fotos_.length }) : "";
     for (const plek of this.$$("[data-gekozen]")) plek.textContent = gekozen;
     for (const knop of this.$$("[data-foto-kies]")) knop.hidden = !this.uploader || this.fotos_.length >= FOTOS_MAX;

@@ -18330,8 +18330,13 @@ _, antw264 = tk264.antwoord(d264, 2, "We kijken ernaar.", T264)
 controle("een antwoord zet de stand op in behandeling", d264["tickets"][-1]["stand"] == "in_behandeling"
          and antw264["van"] == "domotitech", f"{d264['tickets'][-1]['stand']}")
 tk264.zet_stand(d264, 2, "klaar", T264)
-tk264.reageer(d264, 2, "Hij doet het weer niet", "u-1", "Bewoner", T264)
-controle("een reactie op een ticket dat klaar was: terug naar nieuw", d264["tickets"][-1]["stand"] == "nieuw", "")
+try:
+    tk264.reageer(d264, 2, "Hij doet het weer niet", "u-1", "Bewoner", T264)
+    dicht264 = None
+except tk264.TicketFout as fout:
+    dicht264 = fout.code
+controle("een reactie op een ticket dat klaar was: blijft dicht (v0.230.0; tot dan terug naar nieuw)",
+         dicht264 == "ticket_gesloten" and d264["tickets"][-1]["stand"] == "klaar", f"{dicht264}")
 d264b = tk264.leeg()
 for i in range(20):
     tk264.nieuw(d264b, "storing", f"storing {i}", "u-1", "Bewoner", T264 + dt.timedelta(minutes=i))
@@ -18490,9 +18495,15 @@ lijst264 = ws264(ws139.async_tickets_list, bewoner264, type="domotiapp_coach/tic
 controle("read zet gelezen voor deze gebruiker, ook in het gesprek; list met het contract", lijst264["contract"] == 1
          and lijst264["tickets"][0]["gelezen"]["u-1"] == 2 and lijst264["gesprek"]["gelezen"]["u-1"] == 2, f"{lijst264}")
 ws264(ws139.async_tickets_set_state, beheer264, ticket_id=1, stand="klaar")
+voor264 = len(gebeurd264())
 ws264(ws139.async_tickets_reply, bewoner264, ticket_id=1, tekst="Nog een vraag")
-controle("reply op een ticket dat klaar is: terug naar nieuw, met de gebeurtenis",
-         ws264(ws139.async_tickets_list, bewoner264)["tickets"][0]["stand"] == "nieuw"
+controle("reply op een ticket dat klaar is: ticket_gesloten, zonder gebeurtenis (v0.230.0)",
+         bewoner264.fouten[-1][1] == "ticket_gesloten" and len(gebeurd264()) == voor264
+         and ws264(ws139.async_tickets_list, bewoner264)["tickets"][0]["stand"] == "klaar", f"{bewoner264.fouten}")
+ws264(ws139.async_tickets_set_state, beheer264, ticket_id=1, stand="in_behandeling")
+ws264(ws139.async_tickets_reply, bewoner264, ticket_id=1, tekst="Nog een vraag")
+controle("een beheerder heropent hem, en dan kan reply weer, met de gebeurtenis",
+         ws264(ws139.async_tickets_list, bewoner264)["tickets"][0]["stand"] == "in_behandeling"
          and gebeurd264()[-1]["bericht_id"] == 3, "")
 ws264(ws139.async_tickets_reply, bewoner264, ticket_id=99, tekst="x")
 controle("een ticket dat niet bestaat: een nette fout", bewoner264.fouten[-1][1] == "niet_gevonden", f"{bewoner264.fouten}")
@@ -19198,6 +19209,101 @@ controle("de melding opent het paneel met Coach Assist op het ticket, voor iOS e
          ], f"{data270}")
 controle("het adres volgt het paneel", ws139.melding_data(7)["url"] == f"/{coachmod_const.PANEL_URL_PATH}?coach_assist=7"
          if (coachmod_const := sys.modules.get("domotiapp_coach.const")) else False, "")
+
+
+print("=== 271. gesloten is gesloten, en opruimen na een dag, 30 en 90 dagen (v0.230.0) ===")
+# De eigenaar op 15-11-2026: "als een ticket gesloten is moet je niet meer opnieuw kunnen typen en de klant moet ook goed
+# kunnen zien wat open staat en gesloten is", en "Mij lijkt me een dag na gesloten verwijderen goed?"; op het voorstel
+# (een dag uit het zicht, foto's na 30 dagen, alles na 90 dagen): "prima".
+T271 = dt.datetime(2026, 11, 15, 12, 0, tzinfo=dt.timezone(dt.timedelta(hours=1)))
+d271 = tk264.leeg()
+een271 = tk264.nieuw(d271, "storing", "een", "u-1", "Bewoner", T271)[0]
+tk264.antwoord(d271, een271["id"], "Opgelost.", T271 + dt.timedelta(hours=1), stand="klaar")
+fouten271 = []
+for doe in (lambda: tk264.reageer(d271, een271["id"], "nog eens", "u-1", "Bewoner", T271 + dt.timedelta(hours=2)),
+            lambda: tk264.antwoord(d271, een271["id"], "toch nog", T271 + dt.timedelta(hours=2))):
+    try:
+        doe()
+    except tk264.TicketFout as fout:
+        fouten271.append(fout)
+controle("reply en answer op een gesloten ticket: ticket_gesloten, met de zin, en niets bewaard",
+         [f.code for f in fouten271] == ["ticket_gesloten"] * 2
+         and str(fouten271[0]) == "Dit ticket is gesloten. Is het er weer? Maak dan een nieuw ticket."
+         and len(d271["tickets"][0]["berichten"]) == 2, f"{fouten271}")
+controle("sluiten met een antwoord legt de tijd vast", d271["tickets"][0]["gesloten"] == "2026-11-15T13:00:00+01:00",
+         f"{d271['tickets'][0].get('gesloten')}")
+tk264.zet_stand(d271, een271["id"], "in_behandeling", T271 + dt.timedelta(hours=3))
+controle("heropenen haalt de tijd weg", "gesloten" not in d271["tickets"][0], "")
+tk264.zet_stand(d271, een271["id"], "klaar", T271 + dt.timedelta(hours=4))
+controle("en opnieuw sluiten zet hem opnieuw", d271["tickets"][0]["gesloten"] == "2026-11-15T16:00:00+01:00", "")
+# Uit het zicht na een dag; een beheerder ziet hem nog met oud.
+dicht271 = T271 + dt.timedelta(hours=4)
+controle("tot een dag na het sluiten in de lijst, daarna niet",
+         len(tk264.lijst(d271, dicht271 + dt.timedelta(hours=23, minutes=59))) == 1
+         and tk264.lijst(d271, dicht271 + dt.timedelta(days=1, minutes=1)) == []
+         and len(tk264.lijst(d271, dicht271 + dt.timedelta(days=2), oud=True)) == 1, "")
+# Een ticket van voor deze versie, al gesloten zonder `gesloten`: telt vanaf bijgewerkt.
+oud271 = {"id": 9, "soort": "storing", "stand": "klaar", "bijgewerkt": "2026-10-01T10:00:00+02:00", "berichten": [], "gelezen": {}}
+controle("een oud gesloten ticket telt vanaf bijgewerkt", tk264.gesloten_sinds(oud271) == dt.datetime(
+    2026, 10, 1, 10, 0, tzinfo=dt.timezone(dt.timedelta(hours=2))), "")
+# Opruimen: foto's na 30 dagen, het ticket na 90, open tickets nooit, het gesprek na 90 dagen.
+d271b = tk264.leeg()
+for bid in ("a" * 32, "b" * 32, "c" * 32):
+    tk264.bijlage_erbij(d271b, bid, "image/jpeg", 100, T271)
+dicht271b = tk264.nieuw(d271b, "storing", "dicht", "u-1", "Bewoner", T271, bijlagen=["a" * 32])[0]
+open271b = tk264.nieuw(d271b, "storing", "open", "u-1", "Bewoner", T271, bijlagen=["b" * 32])[0]
+lang271b = tk264.nieuw(d271b, "aanvraag", "lang dicht", "u-1", "Bewoner", T271, bijlagen=["c" * 32])[0]
+tk264.zet_stand(d271b, dicht271b["id"], "klaar", T271)
+tk264.zet_stand(d271b, lang271b["id"], "klaar", T271 - dt.timedelta(days=60))
+tk264.reageer(d271b, 0, "een oude vraag", "u-1", "Bewoner", T271 - dt.timedelta(days=91))
+tk264.reageer(d271b, 0, "een nieuwe vraag", "u-1", "Bewoner", T271 - dt.timedelta(days=89))
+r271a = tk264.opruimen_gesloten(d271b, T271)
+controle("nu: de vraag van 91 dagen weg, die van 89 niet, en de foto van het ticket dat 60 dagen dicht is",
+         r271a == {"ids": ["c" * 32], "fotos": 1, "tickets": 0, "berichten": 1}
+         and [b["tekst"] for b in d271b["gesprek"]["berichten"]] == ["een nieuwe vraag"], f"{r271a}")
+r271b = tk264.opruimen_gesloten(d271b, T271 + dt.timedelta(days=29, hours=23))
+controle("na 29 dagen en 23 uur: geen foto en geen ticket weg", r271b["ids"] == [] and r271b["tickets"] == 0
+         and "a" * 32 in d271b["bijlagen"], f"{r271b}")
+r271c = tk264.opruimen_gesloten(d271b, T271 + dt.timedelta(days=30, minutes=1))
+bericht271 = next(t for t in d271b["tickets"] if t["id"] == dicht271b["id"])["berichten"][0]
+controle("na 30 dagen dicht de foto weg, het bericht met bijlagen_weg; 90 dagen dicht het ticket weg; open blijft heel",
+         r271c["ids"] == ["a" * 32] and r271c["tickets"] == 1 and bericht271.get("bijlagen_weg") is True
+         and "bijlagen" not in bericht271 and "b" * 32 in d271b["bijlagen"] and "a" * 32 not in d271b["bijlagen"]
+         and sorted(t["id"] for t in d271b["tickets"]) == sorted([dicht271b["id"], open271b["id"]])
+         and next(t for t in d271b["tickets"] if t["id"] == open271b["id"])["berichten"][0]["bijlagen"][0]["id"] == "b" * 32,
+         f"{r271c} {bericht271}")
+r271d = tk264.opruimen_gesloten(d271b, T271 + dt.timedelta(days=90, minutes=1))
+controle("na 90 dagen ook het andere gesloten ticket weg; het open ticket nooit",
+         r271d["tickets"] == 1 and [t["id"] for t in d271b["tickets"]] == [open271b["id"]] and "b" * 32 in d271b["bijlagen"],
+         f"{r271d}")
+# Over de websocket, met de ronde in bijlagen.py en een herstart: een gesloten ticket van twee dagen weg uit list.
+hass271, _, _ = bouw(huis(), instellingen())
+map271 = _tmp265.mkdtemp()
+hass271.config.path = lambda *delen: str(pathlib.Path(map271, *delen))
+hass271.bus = _Bus264()
+bewoner271 = _Verbinding264("u-1", "Bewoner")
+beheer271 = _Verbinding264("u-9", "Beheer", admin=True)
+asyncio.run(opslag264.async_get_tickets(hass271).async_wijzig(lambda d: (
+    tk264.nieuw(d, "storing", "oud", "u-1", "Bewoner", coachmod.dt_util.now() - dt.timedelta(days=3)),
+    tk264.zet_stand(d, 1, "klaar", coachmod.dt_util.now() - dt.timedelta(days=2)),
+    tk264.nieuw(d, "storing", "nieuw", "u-1", "Bewoner", coachmod.dt_util.now()))))
+schijf271 = opslag264.async_get_tickets(hass271)._store._data
+hass271.data["domotiapp_coach"]["tickets"] = opslag264.TicketsStore(hass271)
+hass271.data["domotiapp_coach"]["tickets"]._store._data = schijf271
+asyncio.run(ws139.async_tickets_list(hass271, bewoner271, {"id": 1, "type": "domotiapp_coach/tickets/list"}))
+asyncio.run(ws139.async_tickets_list(hass271, bewoner271, {"id": 2, "type": "domotiapp_coach/tickets/list", "oud": True}))
+asyncio.run(ws139.async_tickets_list(hass271, beheer271, {"id": 3, "type": "domotiapp_coach/tickets/list", "oud": True}))
+lijsten271 = [[t["id"] for t in r[1]["tickets"]] for r in bewoner271.resultaten + beheer271.resultaten]
+controle("na een herstart: list zonder het ticket dat twee dagen dicht is; oud alleen voor een beheerder",
+         lijsten271 == [[2], [2], [2, 1]], f"{lijsten271}")
+asyncio.run(bij265.async_opruimen(hass271, gesloten=True))
+controle("de ronde in bijlagen.py ruimt op zonder fout, en wat twee dagen dicht is blijft nog", len(
+    opslag264.async_get_tickets(hass271)._store._data["tickets"]) == 2, "")
+bron271 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components/domotiapp_coach/bijlagen.py").read_text()
+controle("de ronde draait elk uur en één keer bij het starten",
+         "async_track_time_interval(hass, lambda _nu: hass.async_create_task(async_opruimen(hass, gesloten=True))," in bron271
+         and "    hass.async_create_task(async_opruimen(hass, gesloten=True))" in bron271
+         and bij265.OPRUIMEN_ELK == dt.timedelta(hours=1), "")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

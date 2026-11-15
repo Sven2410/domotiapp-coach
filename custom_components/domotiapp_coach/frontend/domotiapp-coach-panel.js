@@ -257,6 +257,7 @@ class DomotiAppCoachPanel extends DacElement {
       // vragen, en de getypte tekst blijft (v0.225.0).
       const sheet = this.$("dac-tickets-sheet");
       if (error?.code === "pakket_op") sheet.pakketOp(error.message, soort);
+      else if (error?.code === "ticket_gesloten") sheet.ticketGesloten(error.message);
       else sheet.fout = error?.message || t("Versturen lukte niet.");
     }
   }
