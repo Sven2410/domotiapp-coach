@@ -13,9 +13,9 @@
 
 import { DacElement, define, openSheet } from "./base.js";
 import { icons } from "./icons.js";
-import { huisNu } from "./format.js";
+import { huisNu, huisTijd, metHoofdletter } from "./format.js";
 import { LOGO_URL, sheetCss } from "./theme.js";
-import { nt, t } from "./i18n.js";
+import { datum, nt, t } from "./i18n.js";
 import { wanneerTekst } from "./berichten-sheet.js";
 
 const esc = (s) => String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -62,18 +62,103 @@ export function ticketsHtml(tickets, userId, nu = huisNu()) {
 export const afzender = (b) =>
   b?.van === "domotitech" && (!b.naam || b.naam === "DomotiTech") ? "Coach Assist" : String(b?.naam ?? "");
 
-/** De berichten als html; een foto als plaatje met `data-foto`, het adres zet het paneel erin. */
-export function gesprekHtml(ticket, nu = huisNu()) {
+/**
+ * Of een bericht van de gebruiker zelf is (v0.224.0): rechts, zoals WhatsApp in een groep. Een antwoord en een bericht van
+ * een huisgenoot staan links. Een bericht van een bewoner zonder `user_id`, of zonder gebruiker die kijkt, telt als eigen.
+ */
+export const eigen = (b, userId = "") =>
+  b?.van !== "domotitech" && (!userId || !b?.user_id || b.user_id === userId);
+
+/** De dag van een bericht in de tijd van het huis, als "2026-11-13", of "" zonder tijd. */
+function dagVan(iso) {
+  const d = huisTijd(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+const middag = (dag) => new Date(`${dag}T12:00:00`);
+const dagenTussen = (van, tot) => Math.round((middag(tot) - middag(van)) / 86400000);
+
+/** "Vandaag", "Gisteren", binnen een week "Vrijdag 13 november", daarna de datum, met het jaar als dat een ander is. */
+export function dagTekst(dag, nu = huisNu()) {
+  const vandaag = `${nu.getFullYear()}-${String(nu.getMonth() + 1).padStart(2, "0")}-${String(nu.getDate()).padStart(2, "0")}`;
+  const verschil = dagenTussen(dag, vandaag);
+  const d = middag(dag);
+  if (verschil === 0) return t("Vandaag");
+  if (verschil === 1) return t("Gisteren");
+  const jaar = d.getFullYear() !== nu.getFullYear() ? { year: "numeric" } : {};
+  return metHoofdletter(datum(d, { ...(verschil < 7 ? { weekday: "long" } : {}), day: "numeric", month: "long", ...jaar }));
+}
+
+const aantal = (n) => (n === 1 ? t("1 bericht") : t("{n} berichten", { n }));
+// Hoeveel dagen voor het laatste bericht het gesprek nog per dag laat zien; wat ouder is staat achter één knop.
+const GESPREK_DAGEN = 7;
+
+function berichtHtml(b, userId) {
+  const zelf = eigen(b, userId);
+  const coach = b.van === "domotitech";
+  const d = huisTijd(b.at);
+  const klok = Number.isNaN(d.getTime()) ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return `
+    <div class="bericht ${coach ? "zij" : zelf ? "wij" : "ander"}">
+      <div class="b-naam">${coach ? `<img class="b-logo" src="${LOGO_URL}" alt="" draggable="false">` : ""}<strong>${esc(afzender(b))}</strong></div>
+      ${b.tekst ? `<p>${esc(b.tekst)}</p>` : ""}
+      ${(b.bijlagen ?? []).length ? `<div class="fotos">${b.bijlagen.map((f) => `<img alt="${t("Foto")}" data-foto="${esc(f.id)}">`).join("")}</div>` : ""}
+      ${klok ? `<span class="b-tijd">${klok}</span>` : ""}
+    </div>`;
+}
+
+/**
+ * De berichten als html, zoals WhatsApp (v0.224.0): de eigen rechts, Coach Assist en huisgenoten links, elk met de naam
+ * erboven, en per dag een scheiding. De eigenaar op 15-11-2026: "kijk even goed hoe whatsapp het doet. Blokken rechts van
+ * je eigen tekst, blokken links van de antwoorden. En duidelijk aangeven of het de gebruiker is met de naam of de coach",
+ * en "Evt de historische dagen ingevouwen? Tot een week max".
+ *
+ * Alleen in het gesprek (id 0) gaan dagen dicht: de laatste dag met berichten staat open, net als elke dag met een
+ * antwoord dat de gebruiker nog niet zag. De eerdere dagen staan in één keuzelijst bovenaan, met het aantal berichten;
+ * wat meer dan `GESPREK_DAGEN` voor het laatste bericht ligt is daarin één keuze "Oudere berichten". De eigenaar op
+ * 15-11-2026: "Bij datum een dropdown niet zo veel datums laten zien ivm ruimtegebrek". `gekozen` is de dag (of "ouder")
+ * die de gebruiker koos; die staat dan op zijn plek in het gesprek. Een ticket is kort: daar alleen de scheiding.
+ * Een foto als plaatje met `data-foto`, het adres zet het paneel erin.
+ */
+export function gesprekHtml(ticket, nu = huisNu(), { userId = "", gekozen = "" } = {}) {
   const berichten = ticket?.berichten ?? [];
   if (!berichten.length && ticket?.id === GESPREK) {
     return `<p class="leeg">${t("Stel hier je vraag over je installatie, bijvoorbeeld hoe vol je accu is.")}</p>`;
   }
-  return berichten.map((b) => `
-    <div class="bericht ${b.van === "domotitech" ? "zij" : "wij"}">
-      <div class="b-kop"><strong>${esc(afzender(b))}</strong><span>${esc(wanneerTekst(b.at, nu))}</span></div>
-      ${b.tekst ? `<p>${esc(b.tekst)}</p>` : ""}
-      ${(b.bijlagen ?? []).length ? `<div class="fotos">${b.bijlagen.map((f) => `<img alt="${t("Foto")}" data-foto="${esc(f.id)}">`).join("")}</div>` : ""}
-    </div>`).join("");
+  const dagen = [];
+  for (const b of berichten) {
+    const dag = dagVan(b.at);
+    if (!dagen.length || dagen[dagen.length - 1].dag !== dag) dagen.push({ dag, berichten: [] });
+    dagen[dagen.length - 1].berichten.push(b);
+  }
+  const scheiding = (dag) => (dag ? `<div class="dag" data-dag="${esc(dag)}"><span>${esc(dagTekst(dag, nu))}</span></div>` : "");
+  const blok = (d) => `<div class="dag-berichten">${d.berichten.map((b) => berichtHtml(b, userId)).join("")}</div>`;
+  if (ticket?.id !== GESPREK) return dagen.map((d) => scheiding(d.dag) + blok(d)).join("");
+
+  const gezien = Number((ticket?.gelezen ?? {})[userId] ?? 0);
+  const laatste = dagen[dagen.length - 1].dag;
+  const oud = (d) => Boolean(d.dag && laatste && dagenTussen(d.dag, laatste) > GESPREK_DAGEN);
+  const vast = (d) => d.dag === laatste || !d.dag
+    || d.berichten.some((b) => b?.van === "domotitech" && Number(b.id) > gezien);
+  const toon = (d) => vast(d) || (oud(d) ? gekozen === "ouder" : gekozen === d.dag);
+  // De keuzelijst: de dagen die dicht zijn, nieuwste eerst, en alles van voor de week als één keuze.
+  const keuzes = [];
+  for (const d of [...dagen].reverse()) {
+    if (vast(d)) continue;
+    if (oud(d)) {
+      const rij = keuzes.find((k) => k.waarde === "ouder");
+      if (rij) rij.n += d.berichten.length;
+      else keuzes.push({ waarde: "ouder", tekst: t("Oudere berichten"), n: d.berichten.length });
+    } else {
+      keuzes.push({ waarde: d.dag, tekst: dagTekst(d.dag, nu), n: d.berichten.length });
+    }
+  }
+  const lijst = keuzes.length ? `<label class="dagkeuze"><select data-dagkeuze aria-label="${t("Eerdere dagen")}">
+      <option value="">${t("Eerdere dagen")}</option>
+      ${keuzes.map((k) => `<option value="${esc(k.waarde)}"${k.waarde === gekozen ? " selected" : ""}>${esc(k.tekst)} · ${esc(aantal(k.n))}</option>`).join("")}
+    </select></label>` : "";
+  return lijst + dagen.filter(toon).map((d) => scheiding(d.dag) + blok(d)).join("");
 }
 
 /** Een foto verkleind tot een JPEG van hoogstens 2000 px, zoals de kaart; lukt dat niet, dan het bestand zelf. */
@@ -91,12 +176,16 @@ async function verklein(bestand) {
   }
 }
 
+/** Of een gesprek (bijna) onderaan staat; een verborgen vak staat dat altijd. */
+const onderaan = (vak) => vak.scrollHeight - vak.scrollTop - vak.clientHeight < 40;
+
 const css = /* css */ `
   ${sheetCss}
   .sheet-head .logo { width: 38px; height: 38px; flex: 0 0 auto; object-fit: contain; }
   .tabs { display: flex; gap: 6px; margin: 14px 0 12px; }
   .tabs button[aria-selected="true"] { border-color: rgba(25,143,217,0.55); background: var(--dac-accent-soft); }
-  .lijst, .gesprek { display: grid; gap: 8px; }
+  .lijst { display: grid; gap: 8px; }
+  .gesprek, .dag-berichten { display: grid; gap: 6px; align-content: start; }
   .gesprek { max-height: 52vh; overflow-y: auto; overscroll-behavior: contain; }
   .balk { display: flex; gap: 8px; align-items: center; margin: 0 0 12px; flex-wrap: wrap; }
   .knop {
@@ -115,18 +204,40 @@ const css = /* css */ `
   .t-kop { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
   .t-kop strong { font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
   .t-wanneer, .t-sub { font-size: 12px; color: var(--dac-ink-3); }
-  .bericht { padding: 10px 12px; border-radius: var(--dac-radius-sm); border: 1px solid var(--dac-border); }
-  .bericht.zij { background: rgba(2,111,161,0.08); border-color: rgba(25,143,217,0.35); margin-right: 24px; }
-  .bericht.wij { background: rgba(var(--dac-veil),0.03); margin-left: 24px; }
-  .b-kop { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: var(--dac-ink-3); }
-  .b-kop strong { color: var(--dac-ink); font-size: 13px; }
-  .bericht p { margin: 4px 0 0; font-size: 13px; line-height: 1.5; color: var(--dac-ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* Zoals WhatsApp (v0.224.0): de eigen berichten rechts in de accenttint, Coach Assist en huisgenoten links. */
+  .bericht {
+    max-width: 80%; min-width: 0; box-sizing: border-box; padding: 7px 10px 5px; border-radius: 12px;
+    border: 1px solid var(--dac-border); background: rgba(var(--dac-veil),0.04); justify-self: start;
+    border-bottom-left-radius: 4px;
+  }
+  .bericht.wij {
+    justify-self: end; background: var(--dac-accent-soft); border-color: rgba(25,143,217,0.35);
+    border-bottom-left-radius: 12px; border-bottom-right-radius: 4px;
+  }
+  .b-naam { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--dac-ink-3); }
+  .b-naam strong { color: var(--dac-ink); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+  .bericht.zij .b-naam strong { color: rgb(25,143,217); }
+  .b-logo { width: 16px; height: 16px; flex: 0 0 auto; object-fit: contain; }
+  .bericht p { margin: 2px 0 0; font-size: 13px; line-height: 1.45; color: var(--dac-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .b-tijd { display: block; text-align: right; font-size: 11px; color: var(--dac-ink-3); margin-top: 2px; }
+  .dag { display: flex; justify-content: center; margin: 6px 0 2px; }
+  .dag span {
+    font-size: 12px; color: var(--dac-ink-3); padding: 3px 10px; border-radius: 999px; background: rgba(var(--dac-veil),0.07);
+  }
+  .dagkeuze { display: flex; justify-content: center; }
+  .dagkeuze select {
+    /* 16px: met minder zoomt Safari op iOS in zodra je hem aantikt, net als bij een tekstvak. */
+    font: inherit; font-size: 16px; color: var(--dac-ink-2); padding: 4px 12px; max-width: 100%;
+    border-radius: 999px; border: 1px solid var(--dac-border); background: rgba(var(--dac-veil),0.07); cursor: pointer;
+    color-scheme: var(--dac-scheme);
+  }
+  select option { background: var(--dac-bg-raise); color: var(--dac-ink); }
   .fotos { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
   .fotos img { width: 96px; height: 96px; object-fit: cover; border-radius: var(--dac-radius-sm); background: rgba(var(--dac-veil),0.06); }
   .soorten { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 10px; }
   .soorten button[aria-pressed="true"] { border-color: rgba(25,143,217,0.55); background: var(--dac-accent-soft); }
   textarea {
-    width: 100%; box-sizing: border-box; min-height: 80px; font: inherit; font-size: 14px; padding: 10px;
+    width: 100%; box-sizing: border-box; min-height: 80px; font: inherit; font-size: 16px; padding: 10px;
     border-radius: var(--dac-radius-sm); border: 1px solid var(--dac-border); background: rgba(var(--dac-veil),0.03);
     color: var(--dac-ink); resize: vertical;
   }
@@ -153,6 +264,8 @@ export class DacTicketsSheet extends DacElement {
     this.tab_ = "vragen";
     this.scherm_ = "lijst";
     this.fotos_ = [];
+    // Welke eerdere dag de gebruiker in de keuzelijst koos, zodat een nieuw bericht hem niet weer weghaalt.
+    this.gekozenDag_ = "";
     this.uploader = null;
     this.fotoAdres = null;
   }
@@ -219,6 +332,16 @@ export class DacTicketsSheet extends DacElement {
       if (event.target === dialog) dialog.close();
     });
     for (const knop of this.$$("[data-tab]")) knop.addEventListener("click", () => this.kiesTab_(knop.dataset.tab));
+    // Een eerdere dag kiezen: die komt op zijn plek in het gesprek, en het gesprek gaat naar het begin ervan. Hij blijft
+    // staan tot het venster weer opengaat.
+    this.$("#gesprek-vragen").addEventListener("change", (event) => {
+      if (!event.target?.matches?.("[data-dagkeuze]")) return;
+      this.gekozenDag_ = event.target.value;
+      this.paint_();
+      const vak = this.$("#gesprek-vragen");
+      const eerste = vak.querySelector(this.gekozenDag_ === "ouder" ? ".dag" : `.dag[data-dag="${this.gekozenDag_}"]`);
+      vak.scrollTop = this.gekozenDag_ && eerste ? eerste.offsetTop - vak.offsetTop - 4 : vak.scrollHeight;
+    });
     this.$("#terug").addEventListener("click", () => this.toon_("lijst"));
     this.$("#nieuw").addEventListener("click", () => this.toon_("nieuw"));
     this.$("#lijst").addEventListener("click", (event) => {
@@ -238,6 +361,7 @@ export class DacTicketsSheet extends DacElement {
       if (!tekst) return;
       this.fire("dac-ticket-reageer", { id: GESPREK, tekst, bijlagen: [] });
       this.$("#vraag").value = "";
+      this.naarOnder_();
     });
     this.$("#stuur-nieuw").addEventListener("click", () => {
       const tekst = this.$("#ticket-tekst").value.trim();
@@ -255,6 +379,7 @@ export class DacTicketsSheet extends DacElement {
       this.$("#reactie").value = "";
       this.fotos_ = [];
       this.paint_();
+      this.naarOnder_();
     });
     this.paint_();
   }
@@ -281,16 +406,26 @@ export class DacTicketsSheet extends DacElement {
   }
 
   open() {
+    this.gekozenDag_ = "";
     this.kiesTab_(this.tab_);
     const dialog = this.$("dialog");
     openSheet(dialog);
+    // Pas nu staat het gesprek in beeld; zolang het verborgen was, kon het niet naar onderen (v0.224.0).
+    this.naarOnder_();
     if (this.tab_ === "vragen") this.leesGesprek_();
   }
 
   kiesTab_(tab) {
     this.tab_ = tab;
     this.toon_("lijst");
+    this.naarOnder_();
     if (tab === "vragen") this.leesGesprek_();
+  }
+
+  /** Elk gesprek dat in beeld staat naar het laatste bericht, zoals WhatsApp opent (v0.224.0). */
+  naarOnder_() {
+    if (!this.rendered_) return;
+    for (const vak of this.$$(".gesprek")) vak.scrollTop = vak.scrollHeight;
   }
 
   leesGesprek_() {
@@ -300,6 +435,7 @@ export class DacTicketsSheet extends DacElement {
   openTicket_(id) {
     this.open_ = id;
     this.toon_("gesprek");
+    this.naarOnder_();
     if (ticketNieuw(this.tickets_.find((tk) => tk.id === id), this.userId_)) this.fire("dac-ticket-gelezen", { id });
   }
 
@@ -335,7 +471,10 @@ export class DacTicketsSheet extends DacElement {
     for (const img of houder.querySelectorAll("img[data-foto]")) {
       if (img.src || !this.fotoAdres) continue;
       try {
-        img.src = await this.fotoAdres(img.dataset.foto);
+        const adres = await this.fotoAdres(img.dataset.foto);
+        // Een plaatje dat laadt maakt het gesprek langer; stond hij onderaan, dan blijft hij daar.
+        if (onderaan(houder)) img.addEventListener("load", () => { houder.scrollTop = houder.scrollHeight; }, { once: true });
+        img.src = adres;
       } catch {
         // Zonder adres blijft het vlak leeg; de rest van het gesprek staat er gewoon.
       }
@@ -352,14 +491,19 @@ export class DacTicketsSheet extends DacElement {
     this.$("#t-nieuw").hidden = this.scherm_ !== "nieuw";
     this.$("#terug").hidden = this.scherm_ === "lijst";
     this.$("#nieuw").hidden = this.scherm_ === "nieuw";
+    // Een antwoord dat binnenkomt: alleen naar onderen als hij daar al (bijna) stond.
     const vragen = this.$("#gesprek-vragen");
-    const onderaan = vragen.scrollHeight - vragen.scrollTop - vragen.clientHeight < 40;
-    vragen.innerHTML = gesprekHtml(this.gesprek_ ?? { id: GESPREK, berichten: [] });
-    if (onderaan) vragen.scrollTop = vragen.scrollHeight;
+    const vragenOnder = onderaan(vragen);
+    vragen.innerHTML = gesprekHtml(this.gesprek_ ?? { id: GESPREK, berichten: [] }, huisNu(),
+      { userId: this.userId_, gekozen: this.gekozenDag_ });
+    if (vragenOnder) vragen.scrollTop = vragen.scrollHeight;
     this.$("#lijst").innerHTML = ticketsHtml(this.tickets_, this.userId_);
     const ticket = this.tickets_.find((tk) => tk.id === this.open_);
-    this.$("#gesprek-ticket").innerHTML = ticket ? gesprekHtml(ticket) : "";
-    this.vulFotos_(this.$("#gesprek-ticket"));
+    const vak = this.$("#gesprek-ticket");
+    const ticketOnder = onderaan(vak);
+    vak.innerHTML = ticket ? gesprekHtml(ticket, huisNu(), { userId: this.userId_ }) : "";
+    if (ticketOnder) vak.scrollTop = vak.scrollHeight;
+    this.vulFotos_(vak);
     for (const knop of this.$$("[data-soort]")) knop.setAttribute("aria-pressed", String(knop.dataset.soort === this.soort_));
     const gekozen = this.fotos_.length ? t("{n} foto('s) erbij", { n: this.fotos_.length }) : "";
     for (const plek of this.$$("[data-gekozen]")) plek.textContent = gekozen;

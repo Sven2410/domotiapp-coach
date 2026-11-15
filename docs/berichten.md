@@ -133,3 +133,44 @@ in een gewone zin blijft het "de coach".
   `@2x` op 512) voor Integraties in Home Assistant. Ook bovenaan de README en als `hacs-icon.png`. Het merkteken
   van DomotiTech is uit het paneel. De zijbalk van Home Assistant kent alleen een mdi-icoon; dat blijft
   `mdi:home-lightning-bolt`, al een bliksem.
+
+## Het gesprek zoals WhatsApp (v0.224.0)
+
+De eigenaar op 15-11-2026, nadat een bewoner het vragengesprek een paar keer gebruikte: "kijk even goed hoe whatsapp het
+doet. Blokken rechts van je eigen tekst, blokken links van de antwoorden. En duidelijk aangeven of het de gebruiker is met
+de naam of de coach snap je", "standaard naar het laatste bericht scrollen, ipv bovenaan beginnen", en "Evt de
+historische dagen ingevouwen? Tot een week max".
+
+- **Rechts** staat wat de gebruiker die kijkt zelf schreef (`eigen` in tickets-sheet.js: `user_id` gelijk aan de zijne).
+  Een bericht van een bewoner zonder `user_id`, of zonder gebruiker die kijkt, telt als eigen, zoals tot dan.
+  **Links** staan Coach Assist en elke huisgenoot, zoals WhatsApp in een groep.
+- **De naam** staat boven elk blok, ook boven het eigen. Een antwoord heet Coach Assist (`afzender`), met het logo klein
+  ervoor; Coach Assist is wie praat, niet COACH.
+- **Een blok** is hoogstens 80% breed: het eigen in de accenttint, links het gewone vlak. De tijd staat klein onderaan in
+  het blok (alleen uu:mm); de dag staat in de scheiding.
+- **Per dag een scheiding** in het midden (`dagTekst`): "Vandaag", "Gisteren", binnen een week de weekdag met de datum
+  ("Vrijdag 13 november"), daarna de datum, met het jaar als dat een ander is.
+- **Eerdere dagen in een keuzelijst, alleen in het gesprek (id 0)**. Eerst waren het knoppen per dag; de eigenaar op
+  15-11-2026: "Bij datum een dropdown niet zo veel datums laten zien ivm ruimtegebrek".
+  - De laatste dag met berichten staat open. Dat is niet per se vandaag: anders zag je bij een stil gesprek niets.
+  - Elke dag met een antwoord dat de gebruiker nog niet zag staat ook open.
+  - De andere dagen staan bovenaan in één keuzelijst "Eerdere dagen", nieuwste eerst, met het aantal berichten
+    ("Gisteren · 3 berichten"). Wat meer dan een week (`GESPREK_DAGEN`) voor het laatste bericht ligt, is daarin één
+    keuze "Oudere berichten". Weg is het niet.
+  - Een gekozen dag komt op zijn plek in het gesprek, en het gesprek schuift naar het begin ervan. Hij blijft staan tot
+    het venster weer opengaat (`gekozenDag_`), ook als er intussen een bericht bijkomt. Alleen vandaag: geen lijst.
+  - De keuzelijst en het tekstvak staan op 16 px: met minder zoomt Safari op iOS in zodra je ze aantikt (de
+    lovelace-sessie op 15-11-2026).
+  - Een ticket is kort: daar alleen de scheiding.
+- **Naar onderen** (`naarOnder_`): bij openen, bij een ander tabblad of ticket, en na het eigen bericht. Een antwoord dat
+  binnenkomt alleen als het gesprek al (bijna, 40 px) onderaan stond, en na het laden van een foto ook.
+  - Tot v0.224.0 opende het venster bovenaan. `paint_` zette `scrollTop` terwijl het gesprek nog verborgen was, en dan
+    doet dat niets. Nu scrolt `open()` pas na `openSheet`.
+
+**Gelijk aan de kaart van DomotiApp Lovelace** (`bot-scherm.js`, `bot-logica.js`, lovelace 0.127.0): de zijden, de namen,
+de scheiding, wat open staat, de keuzelijst en wanneer hij naar onderen gaat, zoals op 15-11-2026 met die sessie
+afgesproken. Het
+contract met de kaart verandert er niet door.
+
+Op het scherm nagemeten op 390, 320 en 280 px. De proef "het gesprek zoals WhatsApp" in test_rapport.mjs.
+
