@@ -211,6 +211,9 @@ const css = /* css */ `
   ${sheetCss}
   .sheet-head .logo { width: 38px; height: 38px; flex: 0 0 auto; object-fit: contain; }
   .tabs { display: flex; gap: 6px; margin: 14px 0 12px; }
+  .tabs[hidden], .soorten [hidden] { display: none; }
+  /* Zonder Coach Assist alleen tickets (v0.226.0): wat de tabbladen innamen, als ruimte boven de lijst. */
+  .zonder-care .balk { margin-top: 14px; }
   .tabs button[aria-selected="true"] { border-color: rgba(25,143,217,0.55); background: var(--dac-accent-soft); }
   .lijst { display: grid; gap: 8px; }
   .gesprek, .dag-berichten { display: grid; gap: 6px; align-content: start; }
@@ -328,7 +331,7 @@ export class DacTicketsSheet extends DacElement {
           </div>
           <button class="sheet-close" type="button" id="bot-dicht" aria-label="${t("Sluiten")}">${icons.close}</button>
         </div>
-        <div class="tabs" role="tablist">
+        <div class="tabs" id="tabs" role="tablist">
           <button type="button" class="knop" role="tab" data-tab="vragen">${t("Vragen")}</button>
           <button type="button" class="knop" role="tab" data-tab="tickets">${t("Tickets")}</button>
         </div>
@@ -504,10 +507,19 @@ export class DacTicketsSheet extends DacElement {
   }
 
   kiesTab_(tab) {
-    this.tab_ = tab;
+    // Zonder Coach Assist alleen Tickets (v0.226.0).
+    this.tab_ = this.zonderCare_() ? "tickets" : tab;
     this.toon_("lijst");
     this.naarOnder_();
-    if (tab === "vragen") this.leesGesprek_();
+    if (this.tab_ === "vragen") this.leesGesprek_();
+  }
+
+  /**
+   * Of het abonnement geen Coach Assist heeft (v0.226.0). De eigenaar op 15-11-2026: "Ja zonder care wel een storing
+   * melden". Dan alleen Tickets, en een nieuw ticket alleen als storing; vragen en aanvragen kunnen niet.
+   */
+  zonderCare_() {
+    return this.pakket_?.coach_assist === false;
   }
 
   /** Elk gesprek dat in beeld staat naar het laatste bericht, zoals WhatsApp opent (v0.224.0). */
@@ -571,6 +583,15 @@ export class DacTicketsSheet extends DacElement {
 
   paint_() {
     if (!this.rendered_) return;
+    const zonderCare = this.zonderCare_();
+    if (zonderCare) {
+      this.tab_ = "tickets";
+      this.soort_ = "storing";
+    }
+    this.$("dialog").classList.toggle("zonder-care", zonderCare);
+    this.$("#tabs").hidden = zonderCare;
+    this.$("#bot-titel").textContent = zonderCare ? t("Meld een storing") : t("Vraag het Coach Assist");
+    for (const knop of this.$$("[data-soort]")) knop.hidden = zonderCare && knop.dataset.soort !== "storing";
     for (const knop of this.$$("[data-tab]")) knop.setAttribute("aria-selected", String(knop.dataset.tab === this.tab_));
     this.$("#s-vragen").hidden = this.tab_ !== "vragen";
     this.$("#s-tickets").hidden = this.tab_ !== "tickets";
@@ -596,7 +617,7 @@ export class DacTicketsSheet extends DacElement {
     // Het pakket: de naam, wat er vandaag over is, en op nul het veld dicht met de weg naar een storing.
     const over = vragenOver(this.pakket_);
     const boven = this.$("#bovenschrift");
-    boven.innerHTML = this.pakket_?.naam ? `<span class="pakket">${esc(this.pakket_.naam)}</span>` : "COACH";
+    boven.innerHTML = this.pakket_?.naam && !zonderCare ? `<span class="pakket">${esc(this.pakket_.naam)}</span>` : "COACH";
     const regel = this.$("#over");
     regel.textContent = vragenOverTekst(over);
     regel.hidden = !over;

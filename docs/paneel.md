@@ -622,3 +622,33 @@ Dezelfde dag, over de bot: "dat oranje vind ik niet mooi, moet de kleuren zijn v
 `--warn`, de kleur voor een waarschuwing. De gekozen tab en soort, de hoofdknop, een ticket met een nieuw antwoord en
 een bericht van DomotiTech hebben nu het accent, zoals de knoppen in Instellen (`--dac-accent-soft`, de rand in het
 blauw van `--dac-accent-hi`). De kaart van DomotiApp Lovelace krijgt hetzelfde, zodat ze gelijk blijven.
+
+## De kop past op elke breedte (v0.226.0)
+
+Tot v0.226.0 had de kop vaste breekpunten. Bij 1200 px pasten de zeven tabbladen van de installateur al niet, en dan
+schoven ze. De eigenaar op 15-11-2026: "Ik wil dat alles past".
+
+- **Stappen in plaats van breekpunten** (`STANDEN` in header.js): eerst de knoppen rechts alleen een icoon (`ki`,
+  met de naam in `title`), dan het abonnement onder COACH (`ao`), dan de tabbladen alleen een icoon behalve het
+  actieve (`ta`), dan alle tabbladen een icoon (`ti`). Daarna komen de tabbladen op een eigen rij (`rijen`), net als
+  eerder op een telefoon, en dan minder ruimte (`krap`). Dan het abonnement weg naast COACH (`aw`); het staat ook bij
+  Coach Assist en op Contract. Als laatste alleen het logo (`zn`).
+- **Gemeten, niet geraden** (`pas_`): een `ResizeObserver` op de kop en de navigatie probeert de standen van ruim
+  naar krap en houdt de eerste die past (`kiesStand`). Opnieuw meten gebeurt ook als de letters binnen zijn
+  (`document.fonts.ready`), als het abonnement verandert of het actieve tabblad, en als de naam van de knop
+  verandert. Past is:
+  - geen schuiven in de balk of de navigatie;
+  - COACH niet afgeknipt;
+  - het logo en de knoppen op één rij.
+- **Nagemeten in Chrome** op 320, 390, 768, 1024, 1200, 1280, 1440 en 1920 px. Voor de bewoner en de installateur,
+  zonder etiket en met het langste etiket, met en zonder Coach Assist: overal past het, en niets valt over iets
+  anders.
+  - Vanaf 1440 px staat alles met tekst.
+  - Op 768 en 1024 px hebben de tabbladen een icoon en houdt het actieve zijn tekst.
+  - Op 320 px staan de tabbladen op een eigen rij, allemaal als icoon, en het etiket valt weg naast COACH.
+- **Let op bij meten met headless Chrome**: met `--dump-dom` is het venster minstens 500 px breed, wat je ook vraagt.
+  Meet een smalle kop in een blok met een vaste breedte, of met een schermafdruk.
+
+De proef "de kop past op elke breedte" in test_rapport.mjs legt de volgorde en de keuze vast. Het meten zelf kan
+alleen in een browser.
+

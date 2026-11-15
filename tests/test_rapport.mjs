@@ -914,11 +914,17 @@ proef("het pakket: wat er vandaag over is, dicht op nul, en om middernacht weer 
   assert.equal(ticketsOverTekst(3), "", "bij meer dan 2 niets");
   // Het abonnement in het paneel (de eigenaar: "ja maar ook in de coach zelf"): het bovenschrift van het venster, een
   // etiket naast COACH, en een kaart op Contract; zonder Coach Assist geen knop.
-  assert.ok(paint.includes('boven.innerHTML = this.pakket_?.naam ? `<span class="pakket">${esc(this.pakket_.naam)}</span>` : "COACH";'),
-    "het bovenschrift: de naam als etiket, anders COACH");
+  assert.ok(paint.includes('boven.innerHTML = this.pakket_?.naam && !zonderCare ? `<span class="pakket">${esc(this.pakket_.naam)}</span>` : "COACH";'),
+    "het bovenschrift: de naam als etiket, anders COACH, en zonder Coach Assist ook COACH");
+  // Zonder Coach Assist wel een storing (v0.226.0, de eigenaar: "Ja zonder care wel een storing melden").
+  assert.ok(paint.includes('this.$("#tabs").hidden = zonderCare;') && paint.includes('this.soort_ = "storing";')
+    && paint.includes('knop.hidden = zonderCare && knop.dataset.soort !== "storing";')
+    && paint.includes('zonderCare ? t("Meld een storing") : t("Vraag het Coach Assist")'),
+  "zonder Coach Assist: alleen Tickets, alleen Storing, en de titel Meld een storing");
   const kop = bron("src/header.js");
-  assert.ok(kop.includes('<span class="abo" id="abo" hidden></span>') && kop.includes("abo.hidden = !this.pakket_?.naam;")
-    && kop.includes('this.$("#bot").hidden = this.pakket_?.coach_assist === false;'), "de kop: etiket, en geen knop zonder Coach Assist");
+  assert.ok(kop.includes('<span class="abo" id="abo" hidden></span>') && kop.includes("abo.hidden = !naam;")
+    && kop.includes('const naamKnop = this.pakket_?.coach_assist === false ? t("Meld een storing") : t("Vraag het Coach Assist");')
+    && !kop.includes('this.$("#bot").hidden'), "de kop: etiket, en zonder Coach Assist heet de knop Meld een storing");
   const contract = bron("src/views/contract.js");
   assert.ok(contract.includes('this.$("#abonnement").hidden = !p?.naam;') && contract.includes('regel(t("Vragen per dag"), p.vragen_per_dag, vragenOver(p))')
     && contract.includes('regel(t("Tickets per dag"), p.tickets_per_dag, pakketOver(p, "tickets"))'), "Contract: het abonnement, per dag en wat er over is");
@@ -930,6 +936,25 @@ proef("het pakket: wat er vandaag over is, dicht op nul, en om middernacht weer 
   "het paneel geeft het pakket en de fout door");
   assert.ok(paneel.includes('this.$("dac-header").pakket = this.pakket_ ?? null;') && paneel.includes('if ("pakket" in el) el.pakket = this.pakket_ ?? null;'),
     "het paneel geeft het abonnement aan de kop en aan Contract, ook als Contract later opengaat");
+});
+
+proef("de kop past op elke breedte: stap voor stap kleiner in plaats van schuiven (v0.226.0)", async () => {
+  // De eigenaar op 15-11-2026: "Ik wil dat alles past". Het meten zelf gebeurt in de browser (`pas_`); hier de volgorde
+  // en de keuze, en dat er geen vaste breekpunten meer zijn die er langs kunnen.
+  const { STANDEN, kiesStand } = await import("../custom_components/domotiapp_coach/frontend/src/header.js");
+  assert.deepEqual(STANDEN[0], [], "eerst alles met tekst");
+  assert.deepEqual(STANDEN[1], ["ki"], "dan de knoppen rechts alleen een icoon");
+  assert.deepEqual(STANDEN[2], ["ki", "ao"], "dan het abonnement onder COACH");
+  assert.deepEqual(STANDEN[3], ["ki", "ao", "ta"], "dan de tabbladen een icoon, de actieve met tekst");
+  assert.ok(STANDEN.findIndex((s) => s.includes("rijen")) > STANDEN.findIndex((s) => s.includes("ti")),
+    "pas daarna de tabbladen op een eigen rij, zoals op een telefoon");
+  assert.deepEqual(kiesStand(STANDEN, (s) => s.length >= 2), ["ki", "ao"], "de eerste die past");
+  assert.deepEqual(kiesStand(STANDEN, () => false), STANDEN[STANDEN.length - 1], "past niets, dan de krapste");
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/header.js", import.meta.url), "utf8");
+  assert.ok(!/@media \(max-width/.test(bron), "geen vaste breekpunten meer");
+  assert.ok(bron.includes("new ResizeObserver(() => this.pas_())") && bron.includes("this.observer_.observe(this);"),
+    "gemeten op de breedte van de kop");
+  for (const knop of ['id="bot" title=', 'id="berichten" title=', 'id="home" title=']) assert.ok(bron.includes(knop), `${knop}: met title als het een icoon is`);
 });
 
 proef("nergens DomotiApp in wat een mens van COACH ziet, alleen in technische namen (v0.225.0)", async () => {

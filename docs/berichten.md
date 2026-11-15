@@ -203,8 +203,12 @@ pakket in de code. De afspraak staat in de privénotities, bij de afspraak over 
   per uur per gebruiker blijven.
 - **Geen Coach Assist** (`coach_assist` onwaar; de eigenaar: "Dan moet er geen AI assistant in
   zitten etc"): een vraag, een nieuw ticket en een reactie geven de fout `geen_coach_assist`. Er wordt niets bewaard.
-  Wat er al was blijft in `list` staan, en de knop Coach Assist verdwijnt uit de kop. `coach_assist` mag ontbreken,
-  dan is hij waar.
+  Wat er al was blijft in `list` staan. `coach_assist` mag ontbreken,
+  dan is hij waar. **Sinds v0.226.0 wel een storing** (de eigenaar: "Ja zonder care wel een storing melden"): een
+  nieuw ticket als storing en een reactie op een ticket kunnen, met de grens `tickets_per_dag` (de mini-pc stuurt er
+  dan 3). Een vraag en een aanvraag niet, met de zin "Coach Assist zit niet in je abonnement. Een storing melden kan
+  altijd." De knop in de kop heet dan Meld een storing. Het venster heeft dan alleen Tickets, en Nieuw ticket alleen
+  Storing, zonder etiket. Contract laat de grens op tickets zien.
 - **Het abonnement in het paneel** (de eigenaar: "ja maar ook in de coach zelf"), alleen als er een pakket is:
   - het bovenschrift van het venster wordt de naam als etiket (zonder pakket staat er COACH);
   - een klein etiket naast COACH in de kop, dat op een telefoon net als COACH zelf wegvalt;

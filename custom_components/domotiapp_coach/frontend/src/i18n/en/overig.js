@@ -221,7 +221,7 @@ export const OVERIG = {
   "Tickets per dag": "Tickets per day",
   "onbeperkt": "unlimited",
   "{per}, nog {over} vandaag": "{per}, {over} left today",
-  "Coach Assist zit niet in je abonnement.": "Coach Assist is not part of your subscription.",
+  "Coach Assist zit niet in je abonnement. Een storing melden kan altijd.": "Coach Assist is not part of your subscription. You can always report a fault.",
   "Nog 1 ticket vandaag": "1 ticket left today",
   "Nog {n} tickets vandaag": "{n} tickets left today",
   "Je hebt vandaag al het maximum aantal tickets gemaakt. Morgen kan het weer. Is het dringend? Neem dan contact op met je installateur.": "You have already opened the maximum number of tickets today. You can open one again tomorrow. Is it urgent? Then contact your installer.",

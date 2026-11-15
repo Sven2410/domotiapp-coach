@@ -23,7 +23,8 @@ Het pakket (v0.225.0): een huis kan een grens hebben op het aantal vragen per da
 wordt het ook niet overvol en kan ik alles managen", en "elk abbo heeft geen maandlimiet". Een vraag in het gesprek
 telt bij de vragen, een nieuw ticket bij de tickets ("ook om spammen te voorkomen max aantal per dag snap je?"); een
 reactie op een ticket telt niet. Een pakket zonder Coach Assist ("Dan moet er geen AI assistant in zitten etc") laat
-geen vraag en geen ticket meer toe; wat er al was blijft. Welk pakket het is zet een beheerder (`zet_pakket`); zonder
+geen vraag en geen aanvraag toe, wel een storing en een reactie op een ticket (sinds v0.226.0: "Ja zonder care wel een
+storing melden"); wat er al was blijft. Welk pakket het is zet een beheerder (`zet_pakket`); zonder
 pakket is er geen grens.
 """
 
@@ -220,7 +221,8 @@ def nieuw(
     heel(data)
     if soort not in SOORTEN:
         raise TicketFout("soort", t("Onbekende soort: {soort}.", soort=soort))
-    _zonder_coach_assist(data, at)
+    if soort != "storing":
+        _zonder_coach_assist(data, at)
     if (pakket_stand(data, at) or {}).get("tickets_over") == 0:
         raise TicketFout("pakket_op", t("Je hebt vandaag al het maximum aantal tickets gemaakt. Morgen kan het weer. "
                                         "Is het dringend? Neem dan contact op met je installateur."))
@@ -255,7 +257,8 @@ def reageer(
     """Een bericht van de bewoner: een vraag in het gesprek (0), of een reactie op een ticket. Een ticket dat klaar
     was gaat terug naar `nieuw`. In het gesprek hoogstens `GESPREK_PER_UUR` berichten per gebruiker."""
     ticket = zoek(data, ticket_id)
-    _zonder_coach_assist(data, at)
+    if ticket_id == GESPREK:
+        _zonder_coach_assist(data, at)
     schoon = _tekst(tekst, mag_leeg=bool(bijlagen) and ticket_id != GESPREK)
     if ticket_id == GESPREK and (pakket_stand(data, at) or {}).get("vragen_over") == 0:
         raise TicketFout("pakket_op", t("Je hebt je vragen voor vandaag gesteld. Morgen kun je weer vragen stellen. "
@@ -355,9 +358,10 @@ def zet_pakket(data: dict[str, Any], naam: Any, vragen_per_dag: Any, tickets_per
 
 
 def _zonder_coach_assist(data: dict[str, Any], at: datetime) -> None:
-    """De fout `geen_coach_assist` als het pakket geen Coach Assist heeft (v0.225.0)."""
+    """De fout `geen_coach_assist` als het pakket geen Coach Assist heeft (v0.225.0): voor een vraag en een aanvraag.
+    Een storing en een reactie op een ticket kunnen wel (v0.226.0)."""
     if (pakket_stand(data, at) or {}).get("coach_assist") is False:
-        raise TicketFout("geen_coach_assist", t("Coach Assist zit niet in je abonnement."))
+        raise TicketFout("geen_coach_assist", t("Coach Assist zit niet in je abonnement. Een storing melden kan altijd."))
 
 
 def _zelfde_dag(moment: datetime, at: datetime) -> bool:

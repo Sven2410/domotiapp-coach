@@ -18922,17 +18922,31 @@ oud268g = tk264.nieuw(d268g, "storing", "van eerder", "u-1", "Bewoner", T268)[0]
 tk264.zet_pakket(d268g, "Geen abonnement", None, None, False)
 fouten268g = []
 for doe in (lambda: tk264.reageer(d268g, 0, "mag niet", "u-1", "Bewoner", T268),
-            lambda: tk264.nieuw(d268g, "storing", "mag niet", "u-1", "Bewoner", T268),
-            lambda: tk264.reageer(d268g, oud268g["id"], "mag niet", "u-1", "Bewoner", T268)):
+            lambda: tk264.nieuw(d268g, "aanvraag", "mag niet", "u-1", "Bewoner", T268)):
     try:
         doe()
     except tk264.TicketFout as fout:
-        fouten268g.append(fout.code)
+        fouten268g.append(fout)
 st268g = tk264.overzicht(d268g, T268)
-controle("zonder Coach Assist: vraag, ticket en reactie geven geen_coach_assist, en wat er was blijft",
-         fouten268g == ["geen_coach_assist"] * 3 and len(st268g["gesprek"]["berichten"]) == 1 and len(st268g["tickets"]) == 1
-         and len(st268g["tickets"][0]["berichten"]) == 1 and st268g["pakket"]["coach_assist"] is False,
-         f"{fouten268g} {st268g['pakket']}")
+controle("zonder Coach Assist: een vraag en een aanvraag geven geen_coach_assist, en wat er was blijft",
+         [f.code for f in fouten268g] == ["geen_coach_assist"] * 2
+         and str(fouten268g[0]) == "Coach Assist zit niet in je abonnement. Een storing melden kan altijd."
+         and len(st268g["gesprek"]["berichten"]) == 1 and len(st268g["tickets"]) == 1
+         and st268g["pakket"]["coach_assist"] is False, f"{fouten268g} {st268g['pakket']}")
+# Wel een storing en een reactie op een ticket (v0.226.0). De eigenaar: "Ja zonder care wel een storing melden"; de
+# mini-pc stuurt dan 3 tickets per dag.
+tk264.reageer(d268g, oud268g["id"], "een antwoord op de vraag van de installateur", "u-1", "Bewoner", T268)
+tk264.zet_pakket(d268g, "Geen abonnement", None, 3, False)
+storing268g = tk264.nieuw(d268g, "storing", "de paal laadt niet", "u-1", "Bewoner", T268 + dt.timedelta(minutes=1))[0]
+tk264.nieuw(d268g, "storing", "nog een", "u-1", "Bewoner", T268 + dt.timedelta(minutes=2))
+try:
+    tk264.nieuw(d268g, "storing", "de vierde", "u-1", "Bewoner", T268 + dt.timedelta(minutes=3))
+    vierde268g = None
+except tk264.TicketFout as fout:
+    vierde268g = fout.code
+controle("zonder Coach Assist: een storing en een reactie wel, met de grens van 3 tickets per dag",
+         storing268g["soort"] == "storing" and len(d268g["tickets"][0]["berichten"]) == 2 and vierde268g == "pakket_op"
+         and len(d268g["tickets"]) == 3, f"{vierde268g} {len(d268g['tickets'])}")
 try:
     tk264.zet_pakket(d268g, "x", 1, 1, "nee")
     ca268 = None
@@ -19021,6 +19035,21 @@ ws268(ws139.async_tickets_new, bewoner268, soort="aanvraag", tekst="nog een")
 controle("set_plan met een grens op tickets: het tweede ticket van vandaag geeft pakket_op",
          plan268t["tickets_per_dag"] == 1 and plan268t["tickets_over"] == 0 and bewoner268.fouten[-1][1] == "pakket_op"
          and len(ws268(ws139.async_tickets_list, bewoner268)["tickets"]) == 1, f"{plan268t} {bewoner268.fouten}")
+
+# Na een herstart: zonder Coach Assist een aanvraag niet, een storing wel, tot de grens; de telling uit de opslag.
+vandaag268g = ws268(ws139.async_tickets_list, bewoner268)["pakket"]["tickets_vandaag"]
+ws268(ws139.async_tickets_set_plan, beheer268, naam="Geen abonnement", vragen_per_dag=None,
+      tickets_per_dag=vandaag268g + 1, coach_assist=False)
+schijf268g = opslag264.async_get_tickets(hass268)._store._data
+hass268.data["domotiapp_coach"]["tickets"] = opslag264.TicketsStore(hass268)
+hass268.data["domotiapp_coach"]["tickets"]._store._data = schijf268g
+voor268g = len(bewoner268.fouten)
+ws268(ws139.async_tickets_new, bewoner268, soort="aanvraag", tekst="een wens")
+storing268w = ws268(ws139.async_tickets_new, bewoner268, soort="storing", tekst="de paal laadt niet")
+ws268(ws139.async_tickets_new, bewoner268, soort="storing", tekst="nog een")
+controle("over de websocket, na een herstart: een aanvraag niet, een storing wel, tot de grens",
+         [c for _, c in bewoner268.fouten[voor268g:]] == ["geen_coach_assist", "pakket_op"]
+         and storing268w is not None and storing268w["soort"] == "storing", f"{bewoner268.fouten[voor268g:]}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
