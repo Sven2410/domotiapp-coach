@@ -1022,7 +1022,7 @@ class DacViewNotifications extends DacElement {
       this.status_(statusId, t("Opgeslagen"), false);
       return true;
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de personen niet opslaan", error);
+      console.warn("[COACH] kon de personen niet opslaan", error);
       this.status_(statusId, t("Opslaan mislukt: {fout}", { fout: error?.message ?? error }), true);
       return false;
     } finally {
@@ -1062,7 +1062,7 @@ class DacViewNotifications extends DacElement {
       this.settings_ = settings;
       this.status_("#meter-status", t("Opgeslagen"), false);
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de herinnering niet opslaan", error);
+      console.warn("[COACH] kon de herinnering niet opslaan", error);
       this.status_("#meter-status", t("Opslaan mislukt: {fout}", { fout: error?.message ?? error }), true);
     }
     this.paintHerinnering_();
@@ -1115,7 +1115,7 @@ class DacViewNotifications extends DacElement {
       this.settings_ = settings;
       this.status_("#verbruik-status", t("Opgeslagen"), false);
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de verbruiksmelding niet opslaan", error);
+      console.warn("[COACH] kon de verbruiksmelding niet opslaan", error);
       this.status_("#verbruik-status", t("Opslaan mislukt: {fout}", { fout: error?.message ?? error }), true);
     }
     this.paintVerbruik_();
@@ -1178,7 +1178,7 @@ class DacViewNotifications extends DacElement {
       this.settings_ = settings;
       this.status_("#warmte-status", t("Opgeslagen"), false);
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de temperatuurmelding niet opslaan", error);
+      console.warn("[COACH] kon de temperatuurmelding niet opslaan", error);
       this.status_("#warmte-status", t("Opslaan mislukt: {fout}", { fout: error?.message ?? error }), true);
     }
     this.paintWarmte_();
@@ -1227,7 +1227,7 @@ class DacViewNotifications extends DacElement {
       this.settings_ = settings;
       this.status_("#stekker-status", t("Opgeslagen"), false);
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de melding over een apparaat dat uit staat niet opslaan", error);
+      console.warn("[COACH] kon de melding over een apparaat dat uit staat niet opslaan", error);
       this.status_("#stekker-status", t("Opslaan mislukt: {fout}", { fout: error?.message ?? error }), true);
     }
     this.paintStekker_();
@@ -1268,7 +1268,7 @@ class DacViewNotifications extends DacElement {
       this.settings_ = settings;
       this.status_("#belasting-status", t("Opgeslagen"), false);
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de zekeringmelding niet opslaan", error);
+      console.warn("[COACH] kon de zekeringmelding niet opslaan", error);
       this.status_("#belasting-status", t("Opslaan mislukt: {fout}", { fout: error?.message ?? error }), true);
     }
     this.paintBelasting_();
@@ -1286,7 +1286,7 @@ class DacViewNotifications extends DacElement {
       this.geladen_ = true;
       this.paint_();
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de meldingen niet laden", error);
+      console.warn("[COACH] kon de meldingen niet laden", error);
     }
   }
 
@@ -1299,7 +1299,7 @@ class DacViewNotifications extends DacElement {
         this.paint_();
       });
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de meldingen niet volgen", error);
+      console.warn("[COACH] kon de meldingen niet volgen", error);
     }
   }
 

@@ -877,7 +877,7 @@ export class DacScheduleSheet extends DacElement {
       this.fire("dac-settings-saved", { settings });
       this.paintVoorkeur_();
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de voorkeur niet opslaan", error);
+      console.warn("[COACH] kon de voorkeur niet opslaan", error);
       status.textContent = t("Dit is niet opgeslagen. Probeer het nog een keer.");
       status.classList.add("bad");
       // Terug naar wat er wel is opgeslagen.
@@ -900,7 +900,7 @@ export class DacScheduleSheet extends DacElement {
       this.fire("dac-settings-saved", { settings });
       this.paint_();
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon het schema niet opslaan", error);
+      console.warn("[COACH] kon het schema niet opslaan", error);
       status.textContent = t("Dit is niet opgeslagen. Probeer het nog een keer.");
       status.classList.add("bad");
       // Terugzetten wat er op het scherm al veranderd was, anders staat er iets

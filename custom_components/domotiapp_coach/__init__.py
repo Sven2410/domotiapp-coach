@@ -188,7 +188,7 @@ async def _async_register_static_path(hass: HomeAssistant, version: str) -> None
     )
     domain_data[_STATIC_PATH_KEY] = True
     _LOGGER.debug(
-        "Serving DomotiApp Coach frontend %s from %s", version, frontend_path
+        "Serving COACH frontend %s from %s", version, frontend_path
     )
 
 

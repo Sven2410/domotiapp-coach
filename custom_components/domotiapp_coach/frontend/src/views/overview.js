@@ -1889,7 +1889,7 @@ class DacViewOverview extends DacElement {
       this.coach_ = await this.hass.callWS({ type: "domotiapp_coach/coach/state" });
       if (this.rendered_) this.updateSteerable_(this.lastDevices_ ?? []);
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de stand van de coach niet ophalen", error);
+      console.warn("[COACH] kon de stand van de coach niet ophalen", error);
     }
     // De prijslijst waar de coach mee rekent, voor als de sensor zelf er geen
     // heeft of de reserve invalt (v0.101.3). Bij elk besluit opnieuw, hooguit
@@ -1907,7 +1907,7 @@ class DacViewOverview extends DacElement {
         this.haalVooruit_();
       });
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de coach niet volgen", error);
+      console.warn("[COACH] kon de coach niet volgen", error);
     }
   }
 
@@ -1959,7 +1959,7 @@ class DacViewOverview extends DacElement {
       });
       this.updateSteerable_(this.lastDevices_ ?? []);
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon het akkoord niet doorgeven", error);
+      console.warn("[COACH] kon het akkoord niet doorgeven", error);
     }
   }
 
@@ -1989,7 +1989,7 @@ class DacViewOverview extends DacElement {
       this.coach_ = await this.hass.callWS({ type: "domotiapp_coach/coach/state" });
       this.updateSteerable_(this.lastDevices_ ?? []);
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon snelladen niet omzetten", error);
+      console.warn("[COACH] kon snelladen niet omzetten", error);
     }
   }
 
@@ -2024,7 +2024,7 @@ class DacViewOverview extends DacElement {
         : { type: "domotiapp_coach/coach/drain", device_id: device.id, to_percent: pct });
       this.coach_ = await this.hass.callWS({ type: "domotiapp_coach/coach/state" });
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon vol of leeg laden niet omzetten", error);
+      console.warn("[COACH] kon vol of leeg laden niet omzetten", error);
     }
     this.updateSteerable_(this.lastDevices_ ?? []);
   }
@@ -2048,7 +2048,7 @@ class DacViewOverview extends DacElement {
       this.coach_ = await this.hass.callWS({ type: "domotiapp_coach/coach/state" });
       this.updateSteerable_(this.lastDevices_ ?? []);
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de laadmodus niet kiezen", error);
+      console.warn("[COACH] kon de laadmodus niet kiezen", error);
     }
   }
 
@@ -2071,7 +2071,7 @@ class DacViewOverview extends DacElement {
       const uit = await this.hass.callWS({ type: "domotiapp_coach/coach/wake", device_id: device.id });
       if (tekst) tekst.textContent = uit?.woken ? t("Opgevraagd, even geduld") : t("Geen wekknop");
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de auto niet wekken", error);
+      console.warn("[COACH] kon de auto niet wekken", error);
       if (tekst) tekst.textContent = t("Wekken mislukt");
     }
     setTimeout(() => { if (tekst) tekst.textContent = t("Accustand opvragen"); }, 8000);
@@ -2100,7 +2100,7 @@ class DacViewOverview extends DacElement {
       this.coach_ = await this.hass.callWS({ type: "domotiapp_coach/coach/state" });
       this.updateSteerable_(this.lastDevices_ ?? []);
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon het pauzeren niet omzetten", error);
+      console.warn("[COACH] kon het pauzeren niet omzetten", error);
     }
   }
 
@@ -2444,7 +2444,7 @@ class DacViewOverview extends DacElement {
         });
       }
     } catch (error) {
-      console.warn("[DomotiApp Coach] programma kiezen mislukt", error);
+      console.warn("[COACH] programma kiezen mislukt", error);
       this.paintProgramPick_(slot, device);
     }
   }
@@ -2462,7 +2462,7 @@ class DacViewOverview extends DacElement {
       });
       this.fire("dac-settings-saved", { settings });
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de auto niet onthouden", error);
+      console.warn("[COACH] kon de auto niet onthouden", error);
     }
   }
 
@@ -2479,7 +2479,7 @@ class DacViewOverview extends DacElement {
       this.coach_ = await this.hass.callWS({ type: "domotiapp_coach/coach/state" });
       this.updateSteerable_(this.lastDevices_ ?? []);
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon het laaddoel niet doorgeven", error);
+      console.warn("[COACH] kon het laaddoel niet doorgeven", error);
     }
   }
 
@@ -2512,7 +2512,7 @@ class DacViewOverview extends DacElement {
       delete field.dataset.bewerkt;
       this.fire("dac-settings-saved", { settings });
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de accustand niet doorgeven", error);
+      console.warn("[COACH] kon de accustand niet doorgeven", error);
     }
   }
 
@@ -3378,7 +3378,7 @@ class DacViewOverview extends DacElement {
       });
       this.fire("dac-settings-saved", { settings });
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon het schema niet opslaan", error);
+      console.warn("[COACH] kon het schema niet opslaan", error);
       // Terugdraaien wat er op het scherm al omging, anders staat er iets dat
       // nergens is opgeschreven.
       this.fillSteerable_(this.steerDevices_ ?? []);
@@ -3487,7 +3487,7 @@ class DacViewOverview extends DacElement {
         now,
       });
     } catch (error) {
-      console.warn("[DomotiApp Coach] kon de vrijgave niet opslaan", error);
+      console.warn("[COACH] kon de vrijgave niet opslaan", error);
       // Put it back: pretending it worked would have the customer believe the
       // machine is released when it is not.
       this.settings_ = { ...this.settings_, ...vorig };
@@ -3597,7 +3597,7 @@ class DacViewOverview extends DacElement {
       });
       this.setManualStatus_(t("Programma ingesteld."), "good");
     } catch (error) {
-      console.warn("[DomotiApp Coach] programma instellen mislukt", error);
+      console.warn("[COACH] programma instellen mislukt", error);
       this.setManualStatus_(
         t("Het programma instellen is niet gelukt: {fout}.", { fout: error?.message || t("het apparaat gaf geen antwoord") }),
         "bad"
@@ -3631,7 +3631,7 @@ class DacViewOverview extends DacElement {
       await this.hass.callService(domain, service, data);
       this.setManualStatus_(t("{opdracht} verstuurd.", { opdracht: action.label }), "good");
     } catch (error) {
-      console.warn("[DomotiApp Coach] opdracht mislukt", error);
+      console.warn("[COACH] opdracht mislukt", error);
       this.setManualStatus_(
         t("{opdracht} is niet gelukt: {fout}.", { opdracht: action.label, fout: error?.message || t("het apparaat gaf geen antwoord") }),
         "bad"

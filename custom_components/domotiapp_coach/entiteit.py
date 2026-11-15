@@ -8,7 +8,7 @@ een automatisering werken.
 
 De afspraak met de kaarten heet het contract (`CONTRACT`), en staat in
 docs/vaatwasser.md. Kort: per coach-apparaat één apparaat in Home Assistant
-(fabrikant "DomotiApp Coach", model de soort), elke entiteit met een vaste
+(fabrikant "COACH", tot v0.225.0 "DomotiApp Coach"; model de soort), elke entiteit met een vaste
 `translation_key`, en op de sensor van de coach de attributen `contract`,
 `type`, `stand` (vaste sleutels) en `entiteiten` (wat de klant bij de coach
 invulde). De toestand is tekst voor mensen en mag veranderen; de attributen
@@ -60,10 +60,10 @@ def apparaat_info(device: dict[str, Any]) -> DeviceInfo:
     return DeviceInfo(
         identifiers={(DOMAIN, str(device.get("id") or ""))},
         name=device.get("name") or MODELLEN.get(soort, "Apparaat"),
-        # Het systeem heet sinds v0.223.0 COACH, maar de fabrikant blijft zo: de kaarten van DomotiApp Lovelace
-        # zoeken de apparaten van de coach op deze naam (`COACH_FABRIKANT`). Omzetten pas als elke klant een
-        # lovelace heeft die beide namen kent; de uitrol installeert de twee los van elkaar.
-        manufacturer="DomotiApp Coach",
+        # COACH sinds v0.225.0 (tot dan "DomotiApp Coach"). De kaarten van DomotiApp Lovelace zoeken de apparaten
+        # van de coach op de fabrikant, en kennen sinds 0.125.0 allebei de namen; op 15-11-2026 had elke klant met
+        # een coach 0.126.0 of nieuwer. Dezelfde identifiers, dus hetzelfde apparaat met een nieuwe fabrikant.
+        manufacturer="COACH",
         model=MODELLEN.get(soort, "Apparaat"),
     )
 
@@ -305,9 +305,9 @@ def oude_coach_opruimen(hass: HomeAssistant, entry_id: str) -> None:
             if er.async_entries_for_device(er.async_get(hass), oud.id, include_disabled_entities=True):
                 return
             apparaten.async_remove_device(oud.id)
-            _LOGGER.info("het lege apparaat DomotiApp Coach van voor v0.110.0 is weggehaald")
+            _LOGGER.info("het lege apparaat van de coach van voor v0.110.0 is weggehaald")
         except Exception:  # noqa: BLE001 - een leeg apparaat in de lijst is geen reden om te stoppen
-            _LOGGER.exception("kon het oude apparaat DomotiApp Coach niet weghalen")
+            _LOGGER.exception("kon het oude apparaat van de coach niet weghalen")
 
     async_call_later(hass, 60, opruimen)
 

@@ -134,4 +134,4 @@ def async_register(hass: HomeAssistant) -> None:
 
     hass.http.register_view(ReportView())
     domain_data["report_view"] = True
-    _LOGGER.debug("DomotiApp Coach kan rapporten afleveren op %s", URL)
+    _LOGGER.debug("COACH kan rapporten afleveren op %s", URL)

@@ -110,6 +110,13 @@ class DacHeader extends DacElement {
       letter-spacing: 0.06em;
       color: var(--dac-accent-hi);
     }
+    /* Het abonnement naast COACH (v0.225.0), alleen als er een is. */
+    .abo {
+      align-self: center; font-size: 11px; font-weight: 600; letter-spacing: 0.02em; padding: 2px 8px;
+      border-radius: 999px; color: var(--dac-accent-hi); background: var(--dac-accent-soft);
+      border: 1px solid rgba(25,143,217,0.35); white-space: nowrap;
+    }
+    .abo[hidden], #bot[hidden] { display: none; }
 
     /* ---- nav ---- */
     nav {
@@ -269,9 +276,23 @@ class DacHeader extends DacElement {
     this.paintBot_();
   }
 
+  /**
+   * Het abonnement van dit huis (v0.225.0), uit de coach (`pakket` bij de tickets), of null: de naam als etiket naast
+   * COACH, en zonder Coach Assist in het abonnement geen knop. De eigenaar op 15-11-2026: "ja maar ook in de coach zelf",
+   * en "Dan moet er geen AI assistant in zitten etc".
+   */
+  set pakket(pakket) {
+    this.pakket_ = pakket && typeof pakket === "object" ? pakket : null;
+    this.paintBot_();
+  }
+
   paintBot_() {
     const teller = this.rendered_ ? this.$("#bot-teller") : null;
     if (!teller) return;
+    const abo = this.$("#abo");
+    abo.textContent = this.pakket_?.naam ?? "";
+    abo.hidden = !this.pakket_?.naam;
+    this.$("#bot").hidden = this.pakket_?.coach_assist === false;
     teller.hidden = !this.botOngelezen_;
     teller.textContent = this.botOngelezen_ > 9 ? "9+" : String(this.botOngelezen_ || "");
   }
@@ -306,6 +327,7 @@ class DacHeader extends DacElement {
           <img src="${LOGO_URL}" alt="" draggable="false">
           <div class="brand-text">
             <span class="brand-2">COACH</span>
+            <span class="abo" id="abo" hidden></span>
           </div>
         </div>
         <nav aria-label="${t("Dashboardsecties")}">

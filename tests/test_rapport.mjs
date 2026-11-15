@@ -769,7 +769,8 @@ proef("iedereen ziet alle personen (v0.114.0, was: een bewoner alleen zichzelf)"
     "een nieuwe persoon krijgt alles behalve de besluiten, net als op de server");
 });
 // De DomotiTech Bot (v0.220.0): het venster toont, de coach bewaart. Tekst is tekst, nooit html.
-const { ongelezenTickets, ticketNieuw, ticketsHtml, gesprekHtml, TICKET_SOORTEN, GESPREK, afzender, eigen, dagTekst } = await import(
+const { ongelezenTickets, ticketNieuw, ticketsHtml, gesprekHtml, TICKET_SOORTEN, GESPREK, afzender, eigen, dagTekst,
+  vragenOver, vragenOverTekst, pakketOver, ticketsOverTekst } = await import(
   "../custom_components/domotiapp_coach/frontend/src/tickets-sheet.js"
 );
 proef("de DomotiTech Bot: de stip, de lijst, het gesprek en de foto, en tekst als tekst (v0.220.0)", () => {
@@ -877,6 +878,84 @@ proef("het gesprek zoals WhatsApp: eigen rechts, de rest links met de naam, per 
   }
 });
 
+proef("het pakket: wat er vandaag over is, dicht op nul, en om middernacht weer open (v0.225.0)", () => {
+  // De eigenaar op 15-11-2026: een abonnement met 10 of 25 vragen per dag, of onbeperkt. Alleen een vraag telt.
+  const pakket = { naam: "Basis", vragen_per_dag: 10, vragen_vandaag: 3, vragen_over: 7, opnieuw: "2026-11-16T00:00:00+01:00" };
+  const voor = Date.parse("2026-11-15T22:00:00+01:00");
+  const na = Date.parse("2026-11-16T00:00:01+01:00");
+  assert.equal(vragenOver(null, voor), null, "zonder pakket geen grens");
+  assert.equal(vragenOver({ ...pakket, vragen_per_dag: null, vragen_over: null }, voor), null, "onbeperkt geen grens");
+  assert.equal(vragenOver(pakket, voor), 7);
+  assert.equal(vragenOver({ ...pakket, vragen_over: 0 }, voor), 0, "op");
+  assert.equal(vragenOver({ ...pakket, vragen_over: 0 }, na), 10, "na middernacht weer het hele pakket, ook zonder bericht van de coach");
+  assert.equal(vragenOverTekst(7), "Nog 7 vragen vandaag");
+  assert.equal(vragenOverTekst(1), "Nog 1 vraag vandaag");
+  assert.equal(vragenOverTekst(null), "", "niets bij onbeperkt of zonder pakket");
+  const bron = (pad) => readFileSync(new URL(`../custom_components/domotiapp_coach/frontend/${pad}`, import.meta.url), "utf8");
+  const venster = bron("src/tickets-sheet.js");
+  const paint = venster.slice(venster.indexOf("  paint_() {"));
+  assert.ok(paint.includes('this.$("#vraag").disabled = over === 0;') && paint.includes('this.$("#stuur-vraag").hidden = over === 0;')
+    && paint.includes('this.$("#op").hidden = over !== 0;'), "op nul het veld dicht, met de weg naar een storing");
+  assert.ok(/regel\.classList\.toggle\("weinig", over != null && over <= WEINIG\)/.test(paint) && /const WEINIG = 3;/.test(venster),
+    "bij 3 of minder opvallender");
+  const storing = venster.slice(venster.indexOf('this.$("#meld-storing")'), venster.indexOf('this.$("#stuur-vraag").addEventListener'));
+  assert.ok(storing.includes('this.soort_ = "storing"') && storing.includes('this.toon_("nieuw")') && storing.includes('#ticket-tekst'),
+    "Meld een storing: Nieuw ticket met Storing, en de vraag gaat mee");
+  const op = venster.slice(venster.indexOf("  pakketOp(tekst"), venster.indexOf("  /** Een fout van de coach"));
+  assert.ok(op.includes("veld.value = ticket ? this.laatsteTicket_ : this.laatsteVraag_"), "wat er getypt was blijft staan na pakket_op");
+  // Tickets (de eigenaar: "ook om spammen te voorkomen max aantal per dag"): op nul geen Nieuw ticket en geen Meld een
+  // storing; bij 2 of minder hoeveel nog.
+  const tk = { ...pakket, tickets_per_dag: 5, tickets_vandaag: 3, tickets_over: 2 };
+  assert.equal(pakketOver(tk, "tickets", voor), 2);
+  assert.equal(pakketOver({ ...tk, tickets_over: 0 }, "tickets", na), 5, "na middernacht weer");
+  assert.equal(pakketOver(pakket, "tickets", voor), null, "zonder grens op tickets geen grens");
+  assert.equal(ticketsOverTekst(2), "Nog 2 tickets vandaag");
+  assert.equal(ticketsOverTekst(1), "Nog 1 ticket vandaag");
+  assert.equal(ticketsOverTekst(3), "", "bij meer dan 2 niets");
+  // Het abonnement in het paneel (de eigenaar: "ja maar ook in de coach zelf"): het bovenschrift van het venster, een
+  // etiket naast COACH, en een kaart op Contract; zonder Coach Assist geen knop.
+  assert.ok(paint.includes('boven.innerHTML = this.pakket_?.naam ? `<span class="pakket">${esc(this.pakket_.naam)}</span>` : "COACH";'),
+    "het bovenschrift: de naam als etiket, anders COACH");
+  const kop = bron("src/header.js");
+  assert.ok(kop.includes('<span class="abo" id="abo" hidden></span>') && kop.includes("abo.hidden = !this.pakket_?.naam;")
+    && kop.includes('this.$("#bot").hidden = this.pakket_?.coach_assist === false;'), "de kop: etiket, en geen knop zonder Coach Assist");
+  const contract = bron("src/views/contract.js");
+  assert.ok(contract.includes('this.$("#abonnement").hidden = !p?.naam;') && contract.includes('regel(t("Vragen per dag"), p.vragen_per_dag, vragenOver(p))')
+    && contract.includes('regel(t("Tickets per dag"), p.tickets_per_dag, pakketOver(p, "tickets"))'), "Contract: het abonnement, per dag en wat er over is");
+  assert.ok(paint.includes('if (tickets === 0) this.$("#nieuw").hidden = true;') && paint.includes('this.$("#stuur-nieuw").hidden = tickets === 0;')
+    && paint.includes('this.$("#meld-storing").hidden = tickets === 0;'), "op nul geen nieuw ticket, ook niet via Meld een storing");
+  const paneel = bron("domotiapp-coach-panel.js");
+  assert.ok(paneel.includes('if (error?.code === "pakket_op") sheet.pakketOp(error.message, soort);')
+    && paneel.includes('if (data && "pakket" in data) this.pakket_ = data.pakket;') && paneel.includes("sheet.pakket = this.pakket_ ?? null;"),
+  "het paneel geeft het pakket en de fout door");
+  assert.ok(paneel.includes('this.$("dac-header").pakket = this.pakket_ ?? null;') && paneel.includes('if ("pakket" in el) el.pakket = this.pakket_ ?? null;'),
+    "het paneel geeft het abonnement aan de kop en aan Contract, ook als Contract later opengaat");
+});
+
+proef("nergens DomotiApp in wat een mens van COACH ziet, alleen in technische namen (v0.225.0)", async () => {
+  // De eigenaar op 15-11-2026: "de coach staat los snap je? Dus niks van domotiapp namen in de coach". Het domein, de
+  // repo, id's, events en bestandsnamen blijven; een uitspraak of geschiedenis in het commentaar ook.
+  const { readdirSync, statSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const wortel = new URL("../custom_components/domotiapp_coach/", import.meta.url).pathname;
+  const zonderCommentaar = (pad, s) => pad.endsWith(".py")
+    ? s.replace(/"""[\s\S]*?"""/g, "").replace(/#.*$/gm, "")
+    : s.replace(/\/\*[\s\S]*?\*\//g, "").replace(/<!--[\s\S]*?-->/g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
+  const vind = (pad, s) => zonderCommentaar(pad, s).split("\n").filter((r) => /DomotiApp(?!Coach(Panel|ConfigFlow))/.test(r));
+  // Eerst of de zoeker zelf werkt: een tekst wel, commentaar en een klassenaam niet.
+  assert.equal(vind("x.js", 'console.warn("[DomotiApp Coach] x");').length, 1);
+  assert.equal(vind("x.py", '_LOGGER.info("DomotiApp")\n# DomotiApp\n"""DomotiApp"""').length, 1);
+  assert.equal(vind("x.js", "// DomotiApp\n/* DomotiApp */\nclass DomotiAppCoachPanel {}").length, 0);
+  const bestanden = [];
+  const loop = (d) => { for (const n of readdirSync(d)) { const p = join(d, n); if (statSync(p).isDirectory()) { if (n !== "img") loop(p); } else if (/\.(js|py|json)$/.test(n)) bestanden.push(p); } };
+  loop(wortel);
+  assert.ok(bestanden.length > 80, `alle bestanden gelezen (${bestanden.length})`);
+  const gevonden = bestanden.flatMap((pad) => vind(pad, readFileSync(pad, "utf8")).map((r) => `${pad.slice(wortel.length)}: ${r.trim()}`));
+  assert.deepEqual(gevonden, [], "DomotiApp in tekst die een mens leest");
+  assert.ok(readFileSync(join(wortel, "frontend/src/tickets-sheet.js"), "utf8").includes('<div class="eyebrow" id="bovenschrift">COACH</div>'),
+    "het bovenschrift van Coach Assist: COACH, of de naam van het abonnement");
+});
+
 proef("de namen: COACH en Coach Assist, alleen wat een mens leest (v0.223.0)", () => {
   // Een antwoord heet Coach Assist, ook een oud antwoord dat met de naam DomotiTech in de opslag staat.
   assert.equal(afzender({ van: "domotitech", naam: "DomotiTech" }), "Coach Assist");
@@ -909,7 +988,9 @@ proef("de namen: COACH en Coach Assist, alleen wat een mens leest (v0.223.0)", (
   assert.ok(lees("coach.py").includes('{"title": "COACH", "message": message}'), "een melding van het systeem: COACH");
   assert.ok(lees("monitor.py").includes('{"title": "COACH", "message": message}'));
   // De fabrikant blijft tot elke klant een lovelace heeft die COACH kent: de kaarten zoeken erop.
-  assert.ok(lees("entiteit.py").includes('manufacturer="DomotiApp Coach",'), "de fabrikant blijft DomotiApp Coach");
+  // Sinds v0.225.0 COACH: elke klant met een coach had toen een lovelace die beide namen kent.
+  assert.ok(lees("entiteit.py").includes('manufacturer="COACH",') && !lees("entiteit.py").includes('manufacturer="DomotiApp Coach"'),
+    "de fabrikant is COACH");
   assert.ok(lees("../../hacs.json").includes('"name": "COACH"'));
   // Het logo van COACH (v0.223.0): de kop, Coach Assist, het rapport, en de merkbeelden voor Home Assistant.
   assert.ok(lees("frontend/src/theme.js").includes('new URL("../img/coach.png", import.meta.url)'));

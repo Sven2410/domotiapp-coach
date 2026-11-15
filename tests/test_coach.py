@@ -7953,8 +7953,8 @@ controle("drie knoppen en een vrijgave, alleen voor de vaatwasser",
          and [b._attr_translation_key for b in binair143] == ["vrijgegeven"]
          and all(e.unique_id.startswith("dev-vw_") for e in knoppen143 + binair143), "")
 apparaat143 = knoppen143[0]._attr_device_info
-controle("ze horen bij een eigen apparaat: fabrikant DomotiApp Coach (de kaarten zoeken erop, ook na COACH), model Vaatwasser",
-         apparaat143["identifiers"] == {("domotiapp_coach", "dev-vw")} and apparaat143["manufacturer"] == "DomotiApp Coach"
+controle("ze horen bij een eigen apparaat: fabrikant COACH (sinds v0.225.0; de kaarten kennen beide namen), model Vaatwasser",
+         apparaat143["identifiers"] == {("domotiapp_coach", "dev-vw")} and apparaat143["manufacturer"] == "COACH"
          and apparaat143["model"] == "Vaatwasser" and sensor143[0]._attr_device_info == apparaat143, f"{apparaat143}")
 a143 = sensor143[0].extra_state_attributes
 print(f"  startsensor: stand {a143['stand']}, klaar_om {a143['klaar_om']}, entiteiten {a143['entiteiten']}")
@@ -18831,6 +18831,196 @@ finally:
     coachmod._LOGGER.removeHandler(log267)
     coachmod._LOGGER.setLevel(oudniveau259)
     logging.disable(logging.WARNING)
+
+
+print("=== 268. het pakket: een grens op het aantal vragen per dag (v0.225.0) ===")
+# De eigenaar op 15-11-2026: een abonnement met 10 of 25 vragen per dag, of onbeperkt; "Zo wordt het ook niet overvol en
+# kan ik alles managen", en "elk abbo heeft geen maandlimiet". Alleen een vraag in het gesprek telt.
+from zoneinfo import ZoneInfo  # noqa: E402
+
+AMS268 = ZoneInfo("Europe/Amsterdam")
+T268 = dt.datetime(2026, 11, 15, 9, 0, tzinfo=AMS268)
+d268 = tk264.leeg()
+controle("zonder pakket: geen grens, en list zegt pakket null", tk264.pakket_stand(d268, T268) is None
+         and tk264.overzicht(d268, T268)["pakket"] is None and "pakket" in tk264.overzicht(d268, T268), "")
+fouten268 = []
+for naam, per_dag, tickets in (("", 10, None), ("x" * 41, 10, None), ("Pakket", 0, None), ("Pakket", 1001, None),
+                               ("Pakket", True, None), ("Pakket", 2.5, None), (5, 10, None), ("Pakket", 10, 0),
+                               ("Pakket", 10, "5")):
+    try:
+        tk264.zet_pakket(d268, naam, per_dag, tickets)
+    except tk264.TicketFout as fout:
+        fouten268.append(fout.code)
+controle("set_plan keurt: een naam van 1 tot 40 tekens, 1 tot 1000 vragen en tickets, een heel getal",
+         fouten268 == ["pakket"] * 9 and "pakket" not in d268, f"{fouten268}")
+tk264.zet_pakket(d268, "  Pakket klein  ", 2)
+tk264.reageer(d268, 0, "gisteren", "u-1", "Bewoner", T268 - dt.timedelta(days=1))
+tk264.antwoord(d268, 0, "een antwoord telt niet", T268)
+een268 = tk264.nieuw(d268, "storing", "een storing telt niet", "u-1", "Bewoner", T268)[0]
+tk264.reageer(d268, een268["id"], "een reactie op een ticket ook niet", "u-1", "Bewoner", T268)
+tk264.reageer(d268, 0, "vraag 1", "u-1", "Bewoner", T268)
+stand268 = tk264.pakket_stand(d268, T268 + dt.timedelta(minutes=1))
+controle("vandaag telt alleen een vraag in het gesprek, van vandaag",
+         stand268 == {"naam": "Pakket klein", "coach_assist": True, "vragen_per_dag": 2, "vragen_vandaag": 1, "vragen_over": 1,
+                      "tickets_per_dag": None, "tickets_vandaag": 1, "tickets_over": None,
+                      "opnieuw": "2026-11-16T00:00:00+01:00"}, f"{stand268}")
+tk264.reageer(d268, 0, "vraag 2", "u-2", "Huisgenoot", T268 + dt.timedelta(minutes=2))
+aantal268 = len(d268["gesprek"]["berichten"])
+try:
+    tk264.reageer(d268, 0, "vraag 3", "u-1", "Bewoner", T268 + dt.timedelta(minutes=3))
+    op268 = None
+except tk264.TicketFout as fout:
+    op268 = fout
+print(f"  op: {op268}")
+controle("de grens is per huis: de derde vraag van vandaag geeft pakket_op, en er is niets bewaard",
+         op268 is not None and op268.code == "pakket_op" and str(op268).startswith("Je hebt je vragen voor vandaag gesteld.")
+         and len(d268["gesprek"]["berichten"]) == aantal268, f"{op268}")
+tk264.nieuw(d268, "storing", "kapot", "u-1", "Bewoner", T268 + dt.timedelta(minutes=4))
+tk264.reageer(d268, een268["id"], "nog een reactie", "u-1", "Bewoner", T268 + dt.timedelta(minutes=4))
+controle("een storing en een reactie op een ticket kunnen dan nog", len(d268["tickets"]) == 2, "")
+morgen268 = dt.datetime(2026, 11, 16, 0, 0, 1, tzinfo=AMS268)
+tk264.reageer(d268, 0, "na middernacht", "u-1", "Bewoner", morgen268)
+controle("na middernacht in de tijd van het huis weer vragen", tk264.pakket_stand(d268, morgen268)["vragen_over"] == 1, "")
+# De tijd van het huis telt, niet UTC: om 00:30 in Amsterdam is het in UTC nog gisteren.
+utc268 = dt.datetime(2026, 11, 16, 23, 30, tzinfo=dt.timezone.utc)
+controle("een bericht van 00:30 in het huis telt op de dag van het huis",
+         tk264.pakket_stand(d268, utc268.astimezone(AMS268))["vragen_vandaag"] == 0
+         and tk264.pakket_stand(d268, morgen268 + dt.timedelta(hours=12))["vragen_vandaag"] == 1, "")
+# Een bericht dat in UTC bewaard is, telt op de dag van het huis: 23:30 UTC is 00:30 in Amsterdam, de volgende dag.
+d268u = tk264.leeg()
+tk264.zet_pakket(d268u, "Pakket", 10)
+tk264.reageer(d268u, 0, "laat", "u-1", "Bewoner", dt.datetime(2026, 11, 15, 23, 30, tzinfo=dt.timezone.utc))
+controle("een tijd in UTC telt op de dag van het huis",
+         tk264.pakket_stand(d268u, dt.datetime(2026, 11, 16, 8, 0, tzinfo=AMS268))["vragen_vandaag"] == 1
+         and tk264.pakket_stand(d268u, dt.datetime(2026, 11, 15, 20, 0, tzinfo=AMS268))["vragen_vandaag"] == 0, "")
+# Nieuwe tickets: storing en aanvraag samen, tegen spam. De eigenaar: "ook om spammen te voorkomen max aantal per dag".
+d268t = tk264.leeg()
+tk264.zet_pakket(d268t, "Klein", 10, 2)
+eerste268 = tk264.nieuw(d268t, "storing", "een", "u-1", "Bewoner", T268)[0]
+tk264.nieuw(d268t, "aanvraag", "twee", "u-2", "Huisgenoot", T268)
+tk264.bijlage_erbij(d268t, "e" * 32, "image/jpeg", 100, T268)
+try:
+    tk264.nieuw(d268t, "storing", "drie", "u-1", "Bewoner", T268, bijlagen=["e" * 32])
+    tkop268 = None
+except tk264.TicketFout as fout:
+    tkop268 = fout
+controle("het derde ticket van vandaag: pakket_op, niets bewaard, de foto niet vastgemaakt",
+         tkop268 is not None and tkop268.code == "pakket_op" and str(tkop268).startswith("Je hebt vandaag al het maximum")
+         and len(d268t["tickets"]) == 2 and d268t["volgende"] == 3 and d268t["bijlagen"]["e" * 32]["ticket"] is None,
+         f"{tkop268}")
+tk264.reageer(d268t, eerste268["id"], "een reactie kan nog", "u-1", "Bewoner", T268)
+tk264.reageer(d268t, 0, "een vraag ook", "u-1", "Bewoner", T268)
+st268t = tk264.pakket_stand(d268t, T268)
+controle("een reactie en een vraag tellen niet bij de tickets", st268t["tickets_vandaag"] == 2 and st268t["tickets_over"] == 0
+         and st268t["vragen_over"] == 9, f"{st268t}")
+controle("morgen weer een ticket", tk264.nieuw(d268t, "storing", "morgen", "u-1", "Bewoner", morgen268)[0]["id"] == 3, "")
+# Geen Coach Assist in het abonnement: geen vraag en geen ticket, en wat er al was blijft. De eigenaar: "Dan moet er
+# geen AI assistant in zitten etc".
+d268g = tk264.leeg()
+tk264.reageer(d268g, 0, "van eerder", "u-1", "Bewoner", T268)
+oud268g = tk264.nieuw(d268g, "storing", "van eerder", "u-1", "Bewoner", T268)[0]
+tk264.zet_pakket(d268g, "Geen abonnement", None, None, False)
+fouten268g = []
+for doe in (lambda: tk264.reageer(d268g, 0, "mag niet", "u-1", "Bewoner", T268),
+            lambda: tk264.nieuw(d268g, "storing", "mag niet", "u-1", "Bewoner", T268),
+            lambda: tk264.reageer(d268g, oud268g["id"], "mag niet", "u-1", "Bewoner", T268)):
+    try:
+        doe()
+    except tk264.TicketFout as fout:
+        fouten268g.append(fout.code)
+st268g = tk264.overzicht(d268g, T268)
+controle("zonder Coach Assist: vraag, ticket en reactie geven geen_coach_assist, en wat er was blijft",
+         fouten268g == ["geen_coach_assist"] * 3 and len(st268g["gesprek"]["berichten"]) == 1 and len(st268g["tickets"]) == 1
+         and len(st268g["tickets"][0]["berichten"]) == 1 and st268g["pakket"]["coach_assist"] is False,
+         f"{fouten268g} {st268g['pakket']}")
+try:
+    tk264.zet_pakket(d268g, "x", 1, 1, "nee")
+    ca268 = None
+except tk264.TicketFout as fout:
+    ca268 = fout.code
+controle("coach_assist is waar of onwaar", ca268 == "pakket", f"{ca268}")
+tk264.zet_pakket(d268g, "Weer aan", 5)
+controle("zonder coach_assist is hij aan", tk264.pakket_stand(d268g, T268)["coach_assist"] is True
+         and tk264.reageer(d268g, 0, "mag weer", "u-1", "Bewoner", T268)[0]["id"] == 0, "")
+# Een dag van 25 en een van 23 uur: de volgende middernacht met de juiste offset.
+controle("opnieuw over de wintertijd en de zomertijd heen",
+         tk264.pakket_stand(d268, dt.datetime(2026, 10, 24, 22, 0, tzinfo=AMS268))["opnieuw"] == "2026-10-25T00:00:00+02:00"
+         and tk264.pakket_stand(d268, dt.datetime(2026, 10, 25, 22, 0, tzinfo=AMS268))["opnieuw"] == "2026-10-26T00:00:00+01:00"
+         and tk264.pakket_stand(d268, dt.datetime(2027, 3, 28, 12, 0, tzinfo=AMS268))["opnieuw"] == "2027-03-29T00:00:00+02:00",
+         "")
+tk264.zet_pakket(d268, "Onbeperkt", None)
+onb268 = tk264.pakket_stand(d268, morgen268)
+controle("onbeperkt: geen grens, vragen_per_dag en vragen_over null", onb268["vragen_per_dag"] is None
+         and onb268["vragen_over"] is None and onb268["vragen_vandaag"] == 1, f"{onb268}")
+tk264.zet_pakket(d268, None, 10)
+controle("naam null haalt het pakket weg", tk264.pakket_stand(d268, morgen268) is None, "")
+# Geteld uit het hele gesprek, niet alleen de laatste 100 van list.
+d268b = tk264.leeg()
+tk264.zet_pakket(d268b, "Groot", 150)
+for i in range(120):
+    tk264.reageer(d268b, 0, f"v{i}", f"u-{i}", "Bewoner", T268 + dt.timedelta(seconds=i))
+controle("vragen_vandaag uit het hele gesprek, ook voorbij de laatste 100",
+         tk264.overzicht(d268b, T268 + dt.timedelta(minutes=5))["pakket"]["vragen_vandaag"] == 120, "")
+
+# Over de websocket, met een herstart halverwege de dag.
+hass268, _, _ = bouw(huis(), instellingen())
+hass268.bus = _Bus264()
+bewoner268 = _Verbinding264("u-1", "Bewoner")
+beheer268 = _Verbinding264("u-9", "Beheer", admin=True)
+
+
+def ws268(functie, verbinding, **velden):
+    voor = len(verbinding.resultaten)
+    asyncio.run(functie(hass268, verbinding, {"id": 41, **velden}))
+    return verbinding.resultaten[-1][1] if len(verbinding.resultaten) > voor else None
+
+
+ws268(ws139.async_tickets_set_plan, bewoner268, naam="Basis", vragen_per_dag=10)
+controle("set_plan alleen voor een beheerder", bewoner268.fouten == [(41, "unauthorized")], f"{bewoner268.fouten}")
+ws268(ws139.async_tickets_subscribe, bewoner268, type="domotiapp_coach/tickets/subscribe")
+controle("subscribe: altijd een veld pakket, null zonder", bewoner268.berichten[-1]["event"].get("pakket", "mist") is None, "")
+plan268 = ws268(ws139.async_tickets_set_plan, beheer268, naam="Basis", vragen_per_dag=2)
+controle("set_plan: het pakket terug zoals in list, en een event met alleen het pakket",
+         plan268["naam"] == "Basis" and plan268["vragen_over"] == 2
+         and bewoner268.berichten[-1]["event"] == {"pakket": plan268}, f"{plan268} {bewoner268.berichten[-1]}")
+ws268(ws139.async_tickets_set_plan, beheer268, naam="x" * 41, vragen_per_dag=2)
+controle("een fout pakket: een nette fout", beheer268.fouten[-1][1] == "pakket", f"{beheer268.fouten}")
+ws268(ws139.async_tickets_reply, bewoner268, ticket_id=0, tekst="vraag 1")
+na268 = bewoner268.berichten[-1]["event"]
+controle("na een vraag gaat het pakket mee in het event van het gesprek",
+         na268.get("ticket", {}).get("id") == 0 and na268.get("pakket", {}).get("vragen_over") == 1, f"{na268}")
+nieuw268 = ws268(ws139.async_tickets_new, bewoner268, soort="storing", tekst="kapot")
+controle("na een nieuw ticket gaat het pakket ook mee, zonder grens op tickets",
+         bewoner268.berichten[-1]["event"].get("pakket", {}).get("tickets_vandaag") == 1
+         and bewoner268.berichten[-1]["event"]["pakket"]["tickets_over"] is None, f"{bewoner268.berichten[-1]}")
+ws268(ws139.async_tickets_read, bewoner268, ticket_id=nieuw268["id"])
+controle("na gelezen geen pakket in het event", "pakket" not in bewoner268.berichten[-1]["event"], "")
+# Herstart: een nieuwe opslag die hetzelfde van schijf leest; het pakket en de telling zijn er nog.
+schijf268 = opslag264.async_get_tickets(hass268)._store._data
+hass268.data["domotiapp_coach"]["tickets"] = opslag264.TicketsStore(hass268)
+hass268.data["domotiapp_coach"]["tickets"]._store._data = schijf268
+lijst268 = ws268(ws139.async_tickets_list, bewoner268, type="domotiapp_coach/tickets/list")
+controle("na een herstart: het pakket en wat er vandaag gevraagd is", lijst268["pakket"]["naam"] == "Basis"
+         and lijst268["pakket"]["vragen_vandaag"] == 1, f"{lijst268['pakket']}")
+ws268(ws139.async_tickets_reply, bewoner268, ticket_id=0, tekst="vraag 2")
+gebeurd268 = len([1 for soort, _ in hass268.bus.gebeurtenissen if soort == "domotiapp_coach_ticket"])
+ws268(ws139.async_tickets_reply, bewoner268, ticket_id=0, tekst="vraag 3")
+controle("de derde: fout pakket_op, geen gebeurtenis, en niets bewaard",
+         bewoner268.fouten[-1][1] == "pakket_op"
+         and len([1 for soort, _ in hass268.bus.gebeurtenissen if soort == "domotiapp_coach_ticket"]) == gebeurd268
+         and len(ws268(ws139.async_tickets_list, bewoner268)["gesprek"]["berichten"]) == 2, f"{bewoner268.fouten}")
+ws268(ws139.async_tickets_reply, bewoner268, ticket_id=nieuw268["id"], tekst="nog steeds kapot")
+controle("een reactie op een storing kan nog", bewoner268.fouten[-1][1] == "pakket_op"
+         and len(bewoner268.fouten) == 2, f"{bewoner268.fouten}")
+plan268g = ws268(ws139.async_tickets_set_plan, beheer268, naam="Geen abonnement", vragen_per_dag=None, coach_assist=False)
+ws268(ws139.async_tickets_reply, bewoner268, ticket_id=0, tekst="mag niet")
+controle("over de websocket: coach_assist onwaar, en dan geen_coach_assist op een vraag",
+         plan268g["coach_assist"] is False and bewoner268.fouten[-1][1] == "geen_coach_assist", f"{plan268g} {bewoner268.fouten}")
+plan268t = ws268(ws139.async_tickets_set_plan, beheer268, naam="Basis", vragen_per_dag=2, tickets_per_dag=1)
+ws268(ws139.async_tickets_new, bewoner268, soort="aanvraag", tekst="nog een")
+controle("set_plan met een grens op tickets: het tweede ticket van vandaag geeft pakket_op",
+         plan268t["tickets_per_dag"] == 1 and plan268t["tickets_over"] == 0 and bewoner268.fouten[-1][1] == "pakket_op"
+         and len(ws268(ws139.async_tickets_list, bewoner268)["tickets"]) == 1, f"{plan268t} {bewoner268.fouten}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
