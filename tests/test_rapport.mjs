@@ -770,7 +770,7 @@ proef("iedereen ziet alle personen (v0.114.0, was: een bewoner alleen zichzelf)"
 });
 // De DomotiTech Bot (v0.220.0): het venster toont, de coach bewaart. Tekst is tekst, nooit html.
 const { ongelezenTickets, ticketNieuw, ticketsHtml, gesprekHtml, TICKET_SOORTEN, GESPREK, afzender, eigen, dagTekst,
-  vragenOver, vragenOverTekst, pakketOver, ticketsOverTekst } = await import(
+  vragenOver, vragenOverTekst, pakketOver, ticketsOverTekst, uitAdres } = await import(
   "../custom_components/domotiapp_coach/frontend/src/tickets-sheet.js"
 );
 proef("de DomotiTech Bot: de stip, de lijst, het gesprek en de foto, en tekst als tekst (v0.220.0)", () => {
@@ -993,6 +993,26 @@ proef("nergens DomotiApp in wat een mens van COACH ziet, alleen in technische na
   assert.deepEqual(gevonden, [], "DomotiApp in tekst die een mens leest");
   assert.ok(readFileSync(join(wortel, "frontend/src/tickets-sheet.js"), "utf8").includes('<div class="eyebrow" id="bovenschrift">COACH</div>'),
     "het bovenschrift van Coach Assist: COACH, of de naam van het abonnement");
+});
+
+proef("tikken op de melding opent Coach Assist op dat ticket, en het adres is daarna schoon (v0.229.0)", () => {
+  // De eigenaar op 15-11-2026: "als ik op de notificatie klik van coach assist gaat hij niet naar de coach toe".
+  assert.deepEqual(uitAdres("?coach_assist=0"), { id: 0, rest: "" }, "het vragengesprek");
+  assert.deepEqual(uitAdres("?coach_assist=12&x=1"), { id: 12, rest: "?x=1" }, "een ticket, en de rest blijft");
+  assert.deepEqual(uitAdres("?x=1"), { id: null, rest: "?x=1" }, "zonder parameter niets");
+  assert.deepEqual(uitAdres("?coach_assist=abc"), { id: null, rest: "" }, "een rare waarde opent niets, en gaat wel weg");
+  const bron = (pad) => readFileSync(new URL(`../custom_components/domotiapp_coach/frontend/${pad}`, import.meta.url), "utf8");
+  const paneel = bron("domotiapp-coach-panel.js");
+  const open = paneel.slice(paneel.indexOf("  openUitAdres_() {"), paneel.indexOf("  set panel(value) {"));
+  assert.ok(open.includes("history.replaceState(") && open.indexOf("history.replaceState(") < open.indexOf(".openOp(id)"),
+    "eerst de parameter uit het adres, dan het venster open");
+  assert.ok(paneel.includes('window.addEventListener("location-changed", this.adresLuisteraar_);')
+    && /set route\(value\) \{[^}]*this\.openUitAdres_\(\);/.test(paneel) && /this\.syncRoute_\(\);\n    this\.openUitAdres_\(\);\n  \}/.test(paneel),
+  "bij het openen, bij een nieuwe route en bij een adreswissel terwijl het paneel open staat");
+  const venster = bron("src/tickets-sheet.js");
+  const op = venster.slice(venster.indexOf("  openOp(id) {"), venster.indexOf("  kiesTab_(tab) {"));
+  assert.ok(op.includes('this.tab_ = id === GESPREK ? "vragen" : "tickets";') && op.includes("if (id !== GESPREK) {")
+    && op.includes("this.openTicket_(id);"), "0 is Vragen, een ander nummer dat ticket, ook zonder Coach Assist");
 });
 
 proef("de namen: COACH en Coach Assist, alleen wat een mens leest (v0.223.0)", () => {

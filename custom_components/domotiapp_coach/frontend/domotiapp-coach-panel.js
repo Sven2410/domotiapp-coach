@@ -36,7 +36,7 @@ import { volgCoach } from "./src/data-source.js";
 import { navItemsFor } from "./src/header.js";
 import "./src/header.js";
 import { ongelezen } from "./src/berichten-sheet.js";
-import { ongelezenTickets } from "./src/tickets-sheet.js";
+import { ongelezenTickets, uitAdres } from "./src/tickets-sheet.js";
 import "./src/views/overview.js";
 import "./src/views/history.js";
 import "./src/views/notifications.js";
@@ -139,6 +139,20 @@ class DomotiAppCoachPanel extends DacElement {
   set route(value) {
     this.route_ = value;
     this.syncRoute_();
+    this.openUitAdres_();
+  }
+
+  /**
+   * Een pushmelding van Coach Assist opent het paneel met `?coach_assist=<ticket>` (v0.229.0, `melding_data` in
+   * websocket.py): het venster op dat ticket, en daarna de parameter uit het adres, zodat verversen het niet opnieuw
+   * opent. De eigenaar op 15-11-2026: "als ik op de notificatie klik van coach assist gaat hij niet naar de coach toe".
+   */
+  openUitAdres_() {
+    if (!this.rendered_) return;
+    const { id, rest } = uitAdres(location.search);
+    if (id == null) return;
+    history.replaceState(history.state, "", `${location.pathname}${rest}${location.hash}`);
+    this.$("dac-tickets-sheet").openOp(id);
   }
 
   set panel(value) {
@@ -336,6 +350,13 @@ class DomotiAppCoachPanel extends DacElement {
 
   afterRender() {
     this.verbindKop_(this.$("dac-header"));
+    // Een pushmelding kan het paneel ook openen terwijl het al open staat (de app hergebruikt het): dan verandert alleen
+    // het adres (v0.229.0).
+    if (!this.adresLuisteraar_) {
+      this.adresLuisteraar_ = () => this.openUitAdres_();
+      window.addEventListener("location-changed", this.adresLuisteraar_);
+      window.addEventListener("popstate", this.adresLuisteraar_);
+    }
     // On the panel, not on the header: a view opening one of its own sub-screens
     // sends the same event, and it has to be routed the same way.
     this.addEventListener("dac-navigate", (ev) => this.navigate_(ev.detail.id));
@@ -359,6 +380,7 @@ class DomotiAppCoachPanel extends DacElement {
 
     this.loadSettings_();
     this.syncRoute_();
+    this.openUitAdres_();
   }
 
   onDisconnect() {
