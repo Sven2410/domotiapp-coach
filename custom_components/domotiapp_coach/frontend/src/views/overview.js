@@ -317,7 +317,10 @@ export function advise(r, thresholds, configured, alertAt, sturing, devices, bat
       tone: "var(--dac-grid-in)",
       tag: t("Signaal"),
       title: t("Veel vraag uit het net"),
-      body: t("Je woning trekt nu {vermogen} uit het net terwijl de zon weinig levert. Kijk of er iets aan staat dat kan wachten.", { vermogen: powerText(r.importW) }),
+      // Zonder zonnepanelen geen zon in de zin (v0.231.0).
+      body: r.zonStand
+        ? t("Je woning trekt nu {vermogen} uit het net. Kijk of er iets aan staat dat kan wachten.", { vermogen: powerText(r.importW) })
+        : t("Je woning trekt nu {vermogen} uit het net terwijl de zon weinig levert. Kijk of er iets aan staat dat kan wachten.", { vermogen: powerText(r.importW) }),
     };
   }
 
@@ -1710,13 +1713,15 @@ class DacViewOverview extends DacElement {
     nameEl.hidden = !homeName;
 
     const exporting = (r.grid ?? 0) < 0;
+    // Zonder zonnepanelen (v0.231.0) zeggen de zon en de zelfbenutting waarom er niets staat, en niet "Geen meetwaarde".
+    const geenZon = { nee: t("Geen zonnepanelen"), later: t("Zonnepanelen komen later"), leeg: t("Nog niet ingesteld") }[r.zonStand];
 
     this.tiles_.solar.update({
       tone: "var(--dac-solar)",
       icon: "sun",
       label: t("Opwek zon"),
       ...power(r.solar),
-      sub: this.sub_(r.solar, (v) => (v > 50 ? t("Zonnepanelen leveren nu") : t("Geen opbrengst"))),
+      sub: geenZon ?? this.sub_(r.solar, (v) => (v > 50 ? t("Zonnepanelen leveren nu") : t("Geen opbrengst"))),
       series: this.source_.series("solar"),
     });
 
@@ -1746,8 +1751,8 @@ class DacViewOverview extends DacElement {
       icon: "leaf",
       label: t("Zelfbenutting"),
       ...percent(r.selfUse),
-      sub:
-        r.selfUse === null
+      sub: geenZon ??
+        (r.selfUse === null
           ? configured
             ? t("Geen opwek op dit moment")
             : t("Nog niet ingesteld")
@@ -1755,7 +1760,7 @@ class DacViewOverview extends DacElement {
               good: t("Je gebruikt je zon goed"),
               warn: t("Een deel gaat naar het net"),
               bad: t("Het meeste gaat naar het net"),
-            }[selfLevel],
+            }[selfLevel]),
       series: this.source_.series("selfUse"),
     });
 

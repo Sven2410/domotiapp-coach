@@ -190,6 +190,16 @@ class DacViewInstallation extends DacEditorElement {
           <div class="fields">
             <div class="block fields">
             <div class="block-title">${t("Zonnepanelen")}</div>
+            <!-- Geen zonnepanelen, of ze komen later (v0.231.0): dan is een leeg veld bewust, en geen vergeten sensor. -->
+            <div class="row">
+              <label>${t("Zijn er zonnepanelen?")}</label>
+              <div class="segmented drie" id="zonnepanelen">
+                <button type="button" data-zon="ja" aria-pressed="false"><strong>${t("Ja")}</strong>${t("De coach leest de omvormer.")}</button>
+                <button type="button" data-zon="nee" aria-pressed="false"><strong>${t("Nee")}</strong>${t("Er zijn geen zonnepanelen.")}</button>
+                <button type="button" data-zon="later" aria-pressed="false"><strong>${t("Komen later")}</strong>${t("Vul de omvormer in als ze er zijn.")}</button>
+              </div>
+            </div>
+            <div id="zon-velden">
             <div class="row">
               <label>${t("Opwek zonnepanelen")}</label>
               <dac-entity-picker id="src-solar" data-key="solar"></dac-entity-picker>
@@ -198,6 +208,7 @@ class DacViewInstallation extends DacEditorElement {
             <div class="row">
               <button type="button" class="add" id="solar-extra-add">${t("Nog een omvormer")}</button>
               <span class="sub">${t("Heb je meer omvormers, zet ze hier erbij; de coach telt ze op.")}</span>
+            </div>
             </div>
             </div>
             <div class="block fields">
@@ -525,6 +536,20 @@ class DacViewInstallation extends DacEditorElement {
         this.afterChange_();
       });
     }
+    for (const button of this.$$("#zonnepanelen button")) {
+      button.addEventListener("click", () => {
+        this.draft_.sources.solar_panels = button.dataset.zon;
+        if (button.dataset.zon !== "ja") {
+          // Geen omvormer meer: anders leest de coach een sensor die er niet hoort te zijn.
+          this.draft_.sources.solar = "";
+          this.draft_.sources.solar_extra = [];
+          this.$("#src-solar").value = "";
+          this.paintExtra_();
+        }
+        this.paintZon_();
+        this.afterChange_();
+      });
+    }
 
     this.$("#max-auto").addEventListener("change", (ev) => {
       this.draft_.installation.max_grid_auto = ev.target.checked;
@@ -667,6 +692,7 @@ class DacViewInstallation extends DacEditorElement {
     this.$("#water-enabled").checked = Boolean(d.sources.meters?.water_enabled);
     this.paintExtra_();
     this.paintGridMode_();
+    this.paintZon_();
     this.paintFaseVelden_();
     this.paintGas_();
     this.onFeed_();
@@ -1025,6 +1051,13 @@ class DacViewInstallation extends DacEditorElement {
   }
 
 
+  /** Zijn er zonnepanelen (v0.231.0): bij Nee en Komen later geen velden voor de omvormer. */
+  paintZon_() {
+    const zon = this.draft_.sources.solar_panels ?? "ja";
+    for (const button of this.$$("#zonnepanelen button")) button.setAttribute("aria-pressed", String(button.dataset.zon === zon));
+    this.$("#zon-velden").style.display = zon === "ja" ? "" : "none";
+  }
+
   paintGridMode_() {
     const mode = this.draft_.sources.grid_mode ?? "split";
     for (const button of this.$$("#grid-mode button")) {
@@ -1053,6 +1086,8 @@ class DacViewInstallation extends DacEditorElement {
 }
 
 DacViewInstallation.css = /* css */ `
+  .segmented.drie { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  @media (max-width: 720px) { .segmented.drie { grid-template-columns: minmax(0, 1fr); } }
   ${editorCss}
 
   /* ---- groepen ---- */

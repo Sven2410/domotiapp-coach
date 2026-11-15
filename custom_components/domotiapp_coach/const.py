@@ -377,6 +377,9 @@ DEFAULT_SETTINGS: Final[dict[str, Any]] = {
         # eerste opgeteld. De bewoner van de eerste woning op 22-09-2026:
         # "steeds meer consumenten hebben meerdere omvormers."
         "solar_extra": [],
+        # Zijn er zonnepanelen (v0.231.0): "ja", of "nee" en "later" als het lege veld bewust is. Een klantwoning
+        # zonder panelen, die later komen, zag op 15-11-2026 Verbruik woning op een streepje.
+        "solar_panels": "ja",
         # House consumption is never configured: it follows from generation and
         # the meter, and one less mandatory sensor is one less thing to get
         # wrong at a customer.

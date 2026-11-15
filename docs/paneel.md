@@ -670,3 +670,22 @@ v0.226.0: "je hebt voor home en history hetzelfde icoontje" (Overzicht en Histor
   - Vanaf 1440 px staat alles met tekst ernaast.
 - **De proef** houdt vast dat geen icoon twee keer in de kop staat en dat er geen stand `ta` meer is.
 
+## Een woning zonder zonnepanelen (v0.231.0)
+
+In een klantwoning op 15-11-2026 was er geen zon ingevuld: er zijn nog geen panelen, ze komen later. Op het Overzicht
+stond Verbruik woning op "—" en "Geen meetwaarde", terwijl het huis 3,44 kW van het net haalde. De opwek en de
+zelfbenutting zeiden ook "Geen meetwaarde", en de zin bovenaan zei "terwijl de zon weinig levert". De eigenaar wilde
+een keuze als "geen zonnepanelen aanwezig".
+
+- **Zonder omvormer** (`solar` en `solar_extra` leeg) telt de zon als 0 W voor het verbruik van de woning (`sample`
+  in data-source.js): afname min teruglevering, min wat de batterij doet. Met een omvormer die niets zegt blijft
+  het een streepje, zoals altijd.
+- **De keuze bij Installatie**, Zonnepanelen: Ja, Nee of Komen later (`sources.solar_panels`, standaard "ja"). Bij
+  Nee en Komen later verdwijnen de velden voor de omvormer, en worden ze leeg gemaakt. Anders leest de coach een
+  sensor die er niet hoort te zijn.
+- **De opwek en de zelfbenutting** zeggen zonder omvormer waarom er niets staat: "Geen zonnepanelen", "Zonnepanelen
+  komen later", of zonder keuze "Nog niet ingesteld" (`zonStand`).
+- **De zin bovenaan** bij veel vraag uit het net noemt de zon dan niet.
+- **De coach zelf** rekende al met een woning zonder zon, en meldt geen lege zonbron (de sensorwacht kijkt alleen naar
+  wat er is ingevuld). Daar verandert niets.
+
