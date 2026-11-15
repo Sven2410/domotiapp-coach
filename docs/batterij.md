@@ -2661,3 +2661,41 @@ Wat niet nagerekend is: het virtuele huis en de som op de getallen van die ochte
 (de zonverwachting per uur van toen staat in geen log). Proef 263 in test_coach.py zet daarom de uitkomst van de som
 vast en meet de bedrading na; proef 64 in test_batterij.py het vasthouden en het kwantiel. `anker-ochtend` in het
 virtuele huis bewaakt dat laden voor de avond in het goedkope uur blijft.
+
+## Een batterij die niets opneemt: één kritieke melding (v0.228.0)
+
+In een klantwoning nam de Growatt vanaf 13-11-2026 21:58 niets meer op, en leverde hij ook niets. Een paar dingen
+gebeurden tegelijk. Om 21:58 sprong de accustand in vijf minuten van 41 naar 17%, bij 2,4 kW ontladen. 's Nachts
+stond er een netlaadvak tot 100%, en er ging niets in. Overdag ging er 3 tot 4 kW zon naar het net, met de accu op
+15% en later op 0%. Op 15-11 om 13:15 was de accuspanning 0 V. In 44 uur kwam er geen enkele melding. `_levert_niet`
+(v0.202.0) ziet alleen een batterij die niets levert, en dan alleen ruim boven de vloer.
+
+Nu is er ook `_neemt_niet_op`, in dezelfde vorm: het gemiddelde over `LEVERT_NIET_VENSTER`, met minstens
+`LEVERT_NIET_RONDEN` rondes. Het venster gaat mee over een herstart (`batterij-neemt:` in `GeheugenStore`). Het telt
+in twee gevallen:
+
+- **In een vak van het net**: bij een Growatt het vak van het geschreven laadschema (niet vasthouden), bij een
+  andere batterij de stand netladen of max laden. Er gaat minder dan `NEEMT_NIET_W` (100 W) in, met de accu meer dan
+  `NEEMT_NIET_MARGE` onder de stopgrens.
+- **In nul of zonneladen**: er gaat gemiddeld meer dan `NEEMT_NIET_NET_W` (1 kW) naar het net en minder dan 100 W de
+  accu in, met de accu onder `NEEMT_NIET_ONDER` (95%).
+
+Het telt niet bij een volle accu, bij de afbouw bovenin, bij stand-by of vasthouden, en ook niet als er een paal laadt
+die de batterij niet helpt: dan wil de coach zelf geen zon in de accu.
+
+Dan volgt één kritieke melding: "{naam} neemt niets op. Laat hem nakijken: hij staat misschien uit of in storing."
+Op de kaart staat de reden. Laadt hij weer (meer dan `NEEMT_WEER_W`), dan komt er één regel in de geschiedenis,
+niet op de telefoon. Dat de melding gedaan is, gaat mee over een herstart (`_BATTERIJ_VLAGGEN`).
+
+Niet gedaan, en waarom:
+
+- **De accuspanning.** De coach kent geen spanningssensor van de batterij: die staat niet in de instellingen. Een
+  accu op 0% die niets opneemt terwijl er zon over is of een vak loopt, valt al onder de regels hierboven.
+- **Het plan zonder netlaadvak.** Het plan rekent nog steeds met een netlaadvak dat niets doet. De melding is er om
+  de batterij te laten nakijken; het plan aanpassen aan een batterij die stuk is, is een eigen werkbon.
+- **Een scenario in het virtuele huis.** Proef 269 bouwt het na met de ronde van een Growatt en rechtstreeks, met
+  twee herstarts.
+
+`tools/besluiten.py` kapt `overig` niet meer af op 300 tekens. Het geschreven laadschema van een Growatt stond
+daarachter, en was achteraf niet na te lezen.
+
