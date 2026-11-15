@@ -19305,6 +19305,17 @@ controle("de ronde draait elk uur en één keer bij het starten",
          and "    hass.async_create_task(async_opruimen(hass, gesloten=True))" in bron271
          and bij265.OPRUIMEN_ELK == dt.timedelta(hours=1), "")
 
+
+print("=== 272. zijn er zonnepanelen: ja, nee of later (v0.231.0) ===")
+import domotiapp_coach.const as const272  # noqa: E402
+
+
+def coachmod_settings_default(sleutel):
+    return const272.DEFAULT_SETTINGS["sources"].get(sleutel)
+
+# In een klantwoning op 15-11-2026: geen zonnepanelen, die later komen. De keuze komt in de instellingen.
+controle("de standaard is ja", coachmod_settings_default("solar_panels") == "ja", "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

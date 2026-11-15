@@ -553,6 +553,8 @@ _SETTINGS = _schema(
             {
                 vol.Optional("solar"): _ENTITY,
                 vol.Optional("solar_extra"): vol.All([_ENTITY], vol.Length(max=8)),
+                # Zijn er zonnepanelen (v0.231.0): "ja", "nee" of "later".
+                vol.Optional("solar_panels"): vol.In(["ja", "nee", "later"]),
                 vol.Optional("grid_mode"): vol.In([GRID_MODE_SPLIT, GRID_MODE_SIGNED]),
                 vol.Optional("grid_import"): _ENTITY,
                 vol.Optional("grid_export"): _ENTITY,

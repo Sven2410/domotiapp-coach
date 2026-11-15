@@ -2585,6 +2585,38 @@ function woningBij(zon, sun) {
   return new LiveSource().sample(feed, settings);
 }
 
+proef("een woning zonder zonnepanelen: het verbruik is gewoon van het net, en de zon zegt waarom er niets staat (v0.231.0)", () => {
+  // In een klantwoning op 15-11-2026: geen zon ingevuld (de panelen komen later), en Verbruik woning stond op een
+  // streepje terwijl het huis 3,44 kW van het net haalde.
+  const staten = {
+    "sensor.afname": { state: "3440", attributes: { unit_of_measurement: "W" } },
+    "sensor.teruglevering": { state: "0", attributes: { unit_of_measurement: "W" } },
+  };
+  const feed = { get: (id) => staten[id] };
+  const bron = (extra = {}) => ({ sources: { solar: "", solar_extra: [], grid_mode: "split", grid_import: "sensor.afname",
+    grid_export: "sensor.teruglevering", ...extra } });
+  const r = new LiveSource().sample(feed, bron());
+  assert.equal(r.house, 3440, "zonder omvormer: verbruik woning is afname min teruglevering");
+  assert.equal(r.solar, null, "de zon zelf blijft leeg");
+  assert.equal(r.zonStand, "leeg", "zonder keuze: nog niet ingesteld");
+  assert.equal(new LiveSource().sample(feed, bron({ solar_panels: "nee" })).zonStand, "nee");
+  assert.equal(new LiveSource().sample(feed, bron({ solar_panels: "later" })).zonStand, "later");
+  staten["sensor.omvormer"] = { state: "unavailable", attributes: {} };
+  const met = new LiveSource().sample(feed, bron({ solar: "sensor.omvormer" }));
+  assert.ok(met.house === null && met.zonStand === null, "met een omvormer die niets zegt blijft het een streepje, zoals altijd");
+  const drempels = { self_use: { low: 30, high: 70 }, price: { low: 0.2, high: 0.3 } };
+  const zonder = advise({ ...r, importW: 3440, grid: 3440, price: 0.28 }, drempels, true, 80, null, []);
+  assert.ok(zonder.title === "Veel vraag uit het net" && !zonder.body.includes("zon"), `geen zon in de zin: ${zonder.body}`);
+  const metZon = advise({ ...met, solar: 0, importW: 3440, grid: 3440, price: 0.28 }, drempels, true, 80, null, []);
+  assert.ok(metZon.body.includes("terwijl de zon weinig levert"), "met zonnepanelen blijft de zin zoals hij was");
+  const overzicht = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf8");
+  assert.ok(overzicht.includes('const geenZon = { nee: t("Geen zonnepanelen"), later: t("Zonnepanelen komen later"), leeg: t("Nog niet ingesteld") }[r.zonStand];')
+    && overzicht.includes("sub: geenZon ?? this.sub_(r.solar") && overzicht.includes("sub: geenZon ??\n"), "de zon en de zelfbenutting zeggen waarom");
+  const installatie = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/installation.js", import.meta.url), "utf8");
+  assert.ok(installatie.includes('data-zon="nee"') && installatie.includes('data-zon="later"')
+    && installatie.includes('this.draft_.sources.solar = "";'), "de keuze bij Installatie, en bij Nee de omvormer leeg");
+});
+
 proef("een favoriet van de machine is geen programma en staat niet in de lijst", () => {
   // De eigenaar op 23-09-2026: "favorite 001 is geen programma, haal die eruit."
   const state = { state: "dishcare_dishwasher_program_kurz60", attributes: { options: [

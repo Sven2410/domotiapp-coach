@@ -1126,6 +1126,11 @@ export class LiveSource {
     const sources = settings?.sources ?? {};
 
     const solar = readSolarAll(feed, sources);
+    // Een woning zonder omvormer (v0.231.0): geen zon is 0 W voor het verbruik van de woning, en geen meting die
+    // ontbreekt. In een klantwoning op 15-11-2026 stond Verbruik woning op een streepje terwijl het huis 3,4 kW van het
+    // net haalde. `zonStand` zegt waarom er geen zon is: "nee" of "later" (de keuze bij Installatie), of "leeg".
+    const zonder = !solarEntities(sources).length;
+    const zonStand = zonder ? (["nee", "later"].includes(sources.solar_panels) ? sources.solar_panels : "leeg") : null;
 
     let importW = null;
     let exportW = null;
@@ -1160,7 +1165,8 @@ export class LiveSource {
       .filter((device) => device.type === "thuisbatterij")
       .map((device) => batteryWatts(feed, device));
     const batterij = batterijen.reduce((som, w) => som + (w ?? 0), 0);
-    const house = solar !== null && grid !== null ? Math.max(0, solar + grid - batterij) : null;
+    const zonVoorHuis = zonder ? 0 : solar;
+    const house = zonVoorHuis !== null && grid !== null ? Math.max(0, zonVoorHuis + grid - batterij) : null;
 
     const devices = (settings?.devices ?? []).map((device) => {
       if (device.type !== "thuisbatterij") {
@@ -1191,6 +1197,7 @@ export class LiveSource {
 
     const reading = {
       solar,
+      zonStand,
       house,
       grid,
       importW,
