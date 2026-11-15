@@ -62,6 +62,14 @@ BIJLAGE_LOS = timedelta(hours=1)
 KLANT = "klant"
 DOMOTITECH = "domotitech"
 
+# Opruimen (v0.230.0): een gesloten ticket staat `UIT_ZICHT` na het sluiten niet meer in de lijst, na `FOTOS_WEG` gaan
+# zijn foto's weg en na `TICKET_WEG` het hele ticket; van het vragengesprek gaan berichten ouder dan `GESPREK_WEG` weg.
+# De eigenaar op 15-11-2026: "Mij lijkt me een dag na gesloten verwijderen goed?", en op het voorstel "prima".
+UIT_ZICHT = timedelta(days=1)
+FOTOS_WEG = timedelta(days=30)
+TICKET_WEG = timedelta(days=90)
+GESPREK_WEG = timedelta(days=90)
+
 # Het pakket: hoe lang de naam mag zijn, en hoeveel vragen per dag hoogstens.
 PAKKET_NAAM_MAX = 40
 PAKKET_VRAGEN_MAX = 1000
@@ -191,6 +199,46 @@ def opruimen(data: dict[str, Any], at: datetime) -> list[str]:
     return weg
 
 
+def opruimen_gesloten(data: dict[str, Any], at: datetime) -> dict[str, Any]:
+    """Wat er van gesloten tickets en het gesprek weg mag (v0.230.0): de foto's van een ticket dat langer dan `FOTOS_WEG`
+    gesloten is (het bericht krijgt `bijlagen_weg`), een ticket dat langer dan `TICKET_WEG` gesloten is, en berichten
+    in het gesprek ouder dan `GESPREK_WEG`. Een open ticket blijft heel, met zijn foto's. Geeft de ids van de foto's
+    (om de bestanden weg te halen) en de aantallen, voor het log."""
+    heel(data)
+    ids: list[str] = []
+    telling = {"fotos": 0, "tickets": 0, "berichten": 0}
+
+    def fotos_weg(ticket: dict[str, Any]) -> None:
+        for bericht in ticket.get("berichten") or []:
+            for foto in bericht.pop("bijlagen", None) or []:
+                bericht["bijlagen_weg"] = True
+                ids.append(str(foto.get("id")))
+                telling["fotos"] += 1
+        for bijlage_id, rij in list(data["bijlagen"].items()):
+            if rij.get("ticket") == ticket.get("id"):
+                if bijlage_id not in ids:
+                    ids.append(bijlage_id)
+                del data["bijlagen"][bijlage_id]
+
+    blijft = []
+    for ticket in data["tickets"]:
+        sinds = gesloten_sinds(ticket)
+        if _ouder_dan(sinds, at, TICKET_WEG):
+            fotos_weg(ticket)
+            telling["tickets"] += 1
+            continue
+        if _ouder_dan(sinds, at, FOTOS_WEG):
+            fotos_weg(ticket)
+        blijft.append(ticket)
+    data["tickets"] = blijft
+    gesprek = data["gesprek"]
+    berichten = gesprek.get("berichten") or []
+    jong = [b for b in berichten if not _ouder_dan(_moment(b.get("at")), at, GESPREK_WEG)]
+    telling["berichten"] = len(berichten) - len(jong)
+    gesprek["berichten"] = jong
+    return {"ids": ids, **telling}
+
+
 def _bericht(
     ticket: dict[str, Any], van: str, naam: str, tekst: str, at: datetime,
     user_id: str | None = None, bijlagen: list[dict[str, Any]] | None = None,
@@ -254,9 +302,11 @@ def reageer(
     data: dict[str, Any], ticket_id: Any, tekst: Any, user_id: str, naam: str, at: datetime,
     bijlagen: list[str] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Een bericht van de bewoner: een vraag in het gesprek (0), of een reactie op een ticket. Een ticket dat klaar
-    was gaat terug naar `nieuw`. In het gesprek hoogstens `GESPREK_PER_UUR` berichten per gebruiker."""
+    """Een bericht van de bewoner: een vraag in het gesprek (0), of een reactie op een ticket. Op een gesloten ticket
+    de fout `ticket_gesloten` (v0.230.0; tot dan ging het terug naar `nieuw`). In het gesprek hoogstens
+    `GESPREK_PER_UUR` berichten per gebruiker."""
     ticket = zoek(data, ticket_id)
+    _niet_gesloten(ticket)
     if ticket_id == GESPREK:
         _zonder_coach_assist(data, at)
     schoon = _tekst(tekst, mag_leeg=bool(bijlagen) and ticket_id != GESPREK)
@@ -274,36 +324,52 @@ def reageer(
                                           n=GESPREK_PER_UUR))
     vast = _vastmaken(data, ticket, bijlagen)
     bericht = _bericht(ticket, KLANT, naam, schoon, at, user_id, vast)
-    if ticket.get("stand") == "klaar":
-        ticket["stand"] = "nieuw"
     ticket.setdefault("gelezen", {})[user_id] = bericht["id"]
     return ticket, bericht
+
+
+def _niet_gesloten(ticket: dict[str, Any]) -> None:
+    """De fout `ticket_gesloten` op een gesloten ticket (v0.230.0). De eigenaar op 15-11-2026: "als een ticket gesloten
+    is moet je niet meer opnieuw kunnen typen". Een beheerder kan het heropenen met `zet_stand`."""
+    if ticket.get("id") != GESPREK and ticket.get("stand") == "klaar":
+        raise TicketFout("ticket_gesloten", t("Dit ticket is gesloten. Is het er weer? Maak dan een nieuw ticket."))
+
+
+def _stand_zetten(ticket: dict[str, Any], stand: str, at: datetime) -> None:
+    """De stand, en wanneer hij gesloten is (`gesloten`, v0.230.0): bij het sluiten de tijd, bij heropenen weg."""
+    if stand == "klaar" and ticket.get("stand") != "klaar":
+        ticket["gesloten"] = _stempel(at)
+    elif stand != "klaar":
+        ticket.pop("gesloten", None)
+    ticket["stand"] = stand
 
 
 def antwoord(
     data: dict[str, Any], ticket_id: Any, tekst: Any, at: datetime, stand: str | None = None,
     naam: str = "Coach Assist",
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Een antwoord van Coach Assist (tot v0.223.0 met de naam DomotiTech); bij een ticket wordt de stand `stand`, of `in_behandeling`. Het gesprek heeft
-    geen stand."""
+    """Een antwoord van Coach Assist (tot v0.223.0 met de naam DomotiTech); bij een ticket wordt de stand `stand`, of
+    `in_behandeling`. Het gesprek heeft geen stand. Een gesloten ticket blijft dicht (v0.230.0)."""
     ticket = zoek(data, ticket_id)
+    _niet_gesloten(ticket)
     if ticket_id != GESPREK:
         nieuw_stand = stand or "in_behandeling"
         if nieuw_stand not in STANDEN:
             raise TicketFout("stand", t("Onbekende stand: {stand}.", stand=nieuw_stand))
-        ticket["stand"] = nieuw_stand
+        _stand_zetten(ticket, nieuw_stand, at)
     bericht = _bericht(ticket, DOMOTITECH, naam, _tekst(tekst), at)
     return ticket, bericht
 
 
 def zet_stand(data: dict[str, Any], ticket_id: Any, stand: str, at: datetime) -> dict[str, Any]:
-    """Alleen de stand van een ticket; geen bericht. Het gesprek heeft geen stand."""
+    """Alleen de stand van een ticket; geen bericht. Het gesprek heeft geen stand. Een gesloten ticket weer openen kan
+    hier (een beheerder); de klok van het opruimen begint dan bij het volgende sluiten."""
     if ticket_id == GESPREK:
         raise TicketFout("stand", t("Het gesprek heeft geen stand."))
     if stand not in STANDEN:
         raise TicketFout("stand", t("Onbekende stand: {stand}.", stand=stand))
     ticket = zoek(data, ticket_id)
-    ticket["stand"] = stand
+    _stand_zetten(ticket, stand, at)
     ticket["bijgewerkt"] = _stempel(at)
     return ticket
 
@@ -323,17 +389,34 @@ def voor_buiten(ticket: dict[str, Any]) -> dict[str, Any]:
     return {**ticket, "berichten": list(ticket.get("berichten") or [])[-GESPREK_MAX:]}
 
 
-def lijst(data: dict[str, Any]) -> list[dict[str, Any]]:
-    """De tickets, nieuwste eerst (op het laatste bericht), hoogstens `LIJST_MAX`. Het gesprek staat er niet in."""
-    tickets = sorted(data.get("tickets") or [], key=lambda tk: (str(tk.get("bijgewerkt") or ""), tk.get("id") or 0),
-                     reverse=True)
+def gesloten_sinds(ticket: dict[str, Any]) -> datetime | None:
+    """Sinds wanneer een ticket gesloten is (v0.230.0), of None als het open is. Een ticket dat al gesloten was voor
+    er `gesloten` bestond, telt vanaf `bijgewerkt`."""
+    if ticket.get("stand") != "klaar":
+        return None
+    return _moment(ticket.get("gesloten")) or _moment(ticket.get("bijgewerkt"))
+
+
+def _ouder_dan(moment: datetime | None, at: datetime, duur: timedelta) -> bool:
+    return moment is not None and not _sinds(moment, at - duur)
+
+
+def lijst(data: dict[str, Any], at: datetime | None = None, oud: bool = False) -> list[dict[str, Any]]:
+    """De tickets, nieuwste eerst (op het laatste bericht), hoogstens `LIJST_MAX`. Het gesprek staat er niet in. Een
+    ticket dat langer dan `UIT_ZICHT` gesloten is niet, behalve met `oud` (v0.230.0)."""
+    nu = at or datetime.now().astimezone()
+    tickets = sorted(
+        (tk for tk in data.get("tickets") or [] if oud or not _ouder_dan(gesloten_sinds(tk), nu, UIT_ZICHT)),
+        key=lambda tk: (str(tk.get("bijgewerkt") or ""), tk.get("id") or 0), reverse=True,
+    )
     return tickets[:LIJST_MAX]
 
 
-def overzicht(data: dict[str, Any], at: datetime | None = None) -> dict[str, Any]:
+def overzicht(data: dict[str, Any], at: datetime | None = None, oud: bool = False) -> dict[str, Any]:
     """Het antwoord van `list` en het eerste event van `subscribe`; `pakket` altijd, `None` zonder (v0.225.0)."""
-    return {"contract": CONTRACT, "gesprek": voor_buiten(heel(data)["gesprek"]), "tickets": lijst(data),
-            "pakket": pakket_stand(data, at or datetime.now().astimezone())}
+    nu = at or datetime.now().astimezone()
+    return {"contract": CONTRACT, "gesprek": voor_buiten(heel(data)["gesprek"]), "tickets": lijst(data, nu, oud),
+            "pakket": pakket_stand(data, nu)}
 
 
 def zet_pakket(data: dict[str, Any], naam: Any, vragen_per_dag: Any, tickets_per_dag: Any = None,

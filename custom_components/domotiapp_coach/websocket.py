@@ -1941,16 +1941,20 @@ async def _ticket_wijzig(hass: HomeAssistant, connection: websocket_api.ActiveCo
         return None
 
 
-@websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/tickets/list"})
+@websocket_api.websocket_command(
+    {vol.Required("type"): "domotiapp_coach/tickets/list", vol.Optional("oud", default=False): bool}
+)
 @websocket_api.async_response
 async def async_tickets_list(
     hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
 ) -> None:
-    """Het gesprek en de tickets van dit huis, nieuwste eerst."""
+    """Het gesprek en de tickets van dit huis, nieuwste eerst. Een ticket dat langer dan een dag gesloten is staat er
+    niet in (v0.230.0), behalve met `oud` voor een beheerder, om terug te zoeken."""
     from .storage import async_get_tickets
     from .tickets import overzicht
 
-    connection.send_result(msg["id"], overzicht(await async_get_tickets(hass).async_data(), dt_util.now()))
+    oud = bool(msg.get("oud")) and bool(getattr(connection.user, "is_admin", False))
+    connection.send_result(msg["id"], overzicht(await async_get_tickets(hass).async_data(), dt_util.now(), oud))
 
 
 @websocket_api.websocket_command({vol.Required("type"): "domotiapp_coach/tickets/subscribe"})
