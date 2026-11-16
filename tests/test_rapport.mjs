@@ -3947,6 +3947,34 @@ proef("een waarde op een apparaatkaart begint met een hoofdletter (v0.119.2)", a
 
 // De eigenaar op 15-10-2026, bij de pop-up van de batterij in de energiestroom met "laadt" en
 // "ongeveer 93%, gemeten in de accu": "hier ook hoofdletters toepassen."
+proef("het rondje Opwek zonder zonnepanelen: Later, of weg; een streepje alleen als er een meting hoort (v0.233.0)", async () => {
+  // Bij een klantwoning op 16-11-2026, zonnepanelen "later": Woning en Van het net met een getal, Opwek "—". De
+  // eigenaar: "ja zet het op een werkbon".
+  await import("../custom_components/domotiapp_coach/frontend/src/components/energy-flow.js");
+  const Stroom = geregistreerd.get("dac-energy-flow");
+  const cel = { textContent: "", firstChild: { nodeValue: "" } };
+  const tspan = { textContent: "" };
+  cel.querySelector = () => tspan;
+  const bol = { style: { setProperty() {} }, querySelector: (k) => (k.includes("value") ? cel : k === ".halo" ? { style: {} } : null) };
+  const el = Object.create(Stroom.prototype);
+  el.nodes_ = { solar: bol, grid: bol };
+  el.setNaam_ = () => {};
+  el.setNode_("solar", null, "Opwek", undefined, undefined, "Later");
+  assert.deepEqual([cel.firstChild.nodeValue, tspan.textContent], ["Later", ""], "bij later het woord, zonder eenheid");
+  el.setNode_("solar", null, "Opwek");
+  assert.equal(cel.firstChild.nodeValue, "—", "zonder meting het streepje");
+  el.setNode_("grid", 4280, "Van het net", "var(--dac-grid-in)", "grid");
+  assert.equal(cel.firstChild.nodeValue, "4,28", "het net met zijn vijfde argument blijft een getal");
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/components/energy-flow.js", import.meta.url), "utf8");
+  assert.ok(bron.includes('const zonWeg = reading.zonStand === "nee";') && bron.includes('this.nodes_.solar.classList.toggle("hidden", zonWeg);')
+    && bron.includes("this.flows_.solar.previousElementSibling, this.flows_.solar, this.arrows_.solar")
+    && bron.includes('reading.zonStand === "later" ? t("Later") : null'), "bij nee geen bol en geen lijn, bij later Later");
+  const historie = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/history.js", import.meta.url), "utf8");
+  assert.ok(historie.includes("const verbruikBekend = hasSolar || this.geenPanelen_();") && historie.includes('used: verbruikBekend ? sum("used") : null,')
+    && historie.includes('return !this.meters_().solar.length && ["nee", "later"].includes(bronnen.solar_panels);'),
+  "Historie: zonder panelen is het verbruik bekend, de opwek blijft weg");
+});
+
 proef("de pop-up in de energiestroom begint elke waarde met een hoofdletter (v0.119.3)", async () => {
   await import("../custom_components/domotiapp_coach/frontend/src/components/energy-flow.js");
   const Stroom = geregistreerd.get("dac-energy-flow");

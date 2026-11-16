@@ -222,6 +222,7 @@ export const OVERIG = {
   "De coach leest de omvormer.": "The coach reads the inverter.",
   "Er zijn geen zonnepanelen.": "There are no solar panels.",
   "Komen later": "Coming later",
+  "Later": "Later",
   "Ja": "Yes",
   "Nee": "No",
   "Vul de omvormer in als ze er zijn.": "Fill in the inverter once they are there.",

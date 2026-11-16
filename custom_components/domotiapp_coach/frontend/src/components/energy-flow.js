@@ -418,7 +418,14 @@ class DacEnergyFlow extends DacElement {
     const gridPower = reading.grid === null ? null : Math.abs(reading.grid);
     const gridTone = exporting ? "var(--dac-grid-out)" : "var(--dac-grid-in)";
 
-    this.setNode_("solar", reading.solar, t("Opwek"));
+    // Zonder zonnepanelen (v0.233.0): bij "nee" geen bol en geen lijn, bij "later" het woord Later. Een streepje
+    // alleen nog als er een omvormer hoort te zijn die niets meet. Zie `zonStand` in data-source.js.
+    const zonWeg = reading.zonStand === "nee";
+    this.nodes_.solar.classList.toggle("hidden", zonWeg);
+    for (const deel of [this.flows_.solar.previousElementSibling, this.flows_.solar, this.arrows_.solar]) {
+      deel.style.display = zonWeg ? "none" : "";
+    }
+    this.setNode_("solar", reading.solar, t("Opwek"), undefined, undefined, reading.zonStand === "later" ? t("Later") : null);
     this.setNode_("house", reading.house, t("Woning"));
     this.setNode_(
       "grid",
@@ -516,11 +523,12 @@ class DacEnergyFlow extends DacElement {
     }));
   }
 
-  setNode_(id, value, name, tone) {
+  setNode_(id, value, name, tone, _icoon, woord = null) {
     const node = this.nodes_[id];
     if (tone) node.style.setProperty("--tone", tone);
 
-    const { value: text, unit } = power(value);
+    // `woord` in plaats van een vermogen, zonder eenheid (v0.233.0).
+    const { value: text, unit } = woord ? { value: woord, unit: "" } : power(value);
     const cell = node.querySelector("text.n-value, text.h-value");
     const tspan = cell.querySelector("tspan");
     if (tspan) {

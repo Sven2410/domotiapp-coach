@@ -1067,6 +1067,12 @@ class DacViewHistory extends DacElement {
   }
 
   /** Which counters this installation has, in the roles the chart needs. */
+  /** Of er bewust geen zonnepanelen zijn, "nee" of "later" bij Installatie (v0.233.0), en dus ook geen opwekteller. */
+  geenPanelen_() {
+    const bronnen = this.settings_?.sources ?? {};
+    return !this.meters_().solar.length && ["nee", "later"].includes(bronnen.solar_panels);
+  }
+
   meters_() {
     const meters = this.settings_?.sources?.meters ?? {};
     return {
@@ -1635,9 +1641,12 @@ class DacViewHistory extends DacElement {
     // naar het net ging en zelfbenutting altijd op nul stond. Beter niets tonen
     // dan een getal dat nergens op slaat.
     const hasSolar = this.meters_().solar.length > 0;
+    // Zonder zonnepanelen (v0.233.0, "nee" of "later" bij Installatie) is de opwek bekend: nul. Dan is het verbruik
+    // gewoon inkoop min teruglevering, min wat de batterij opnam; alleen opgewekt en zelfbenutting blijven weg.
+    const verbruikBekend = hasSolar || this.geenPanelen_();
     const totals = {
       solar: hasSolar ? sum("solar") : null,
-      used: hasSolar ? sum("used") : null,
+      used: verbruikBekend ? sum("used") : null,
       bought: sum("bought"),
       sold: sum("sold"),
       accuIn: sum("accuIn"),
@@ -1653,7 +1662,7 @@ class DacViewHistory extends DacElement {
     // stroom voor het deel dat zon was (`herkomst`, v0.144.0): wat er 's nachts
     // van het net in ging blijft van het net, ook als hij het pas later afgeeft.
     totals.selfSufficient =
-      hasSolar && totals.used > 0 ? Math.max(0, (1 - sum("fromGrid") / totals.used) * 100) : null;
+      verbruikBekend && totals.used > 0 ? Math.max(0, (1 - sum("fromGrid") / totals.used) * 100) : null;
 
     this.paintTotals_(totals);
     this.paintLegend_();
@@ -1908,7 +1917,7 @@ class DacViewHistory extends DacElement {
 
     const energieVakjes = [
       hasSolar ? cel("Opgewekt", kwh(totals.solar)) : null,
-      hasSolar ? cel("Verbruikt", kwh(totals.used)) : null,
+      hasSolar || this.geenPanelen_() ? cel("Verbruikt", kwh(totals.used)) : null,
       cel("Van het net", kwh(totals.bought)),
       cel("Naar het net", kwh(totals.sold)),
       this.accuTegels_ ? cel("Batterij geladen", kwh(totals.accuIn ?? 0)) : null,
@@ -3089,7 +3098,7 @@ class DacViewHistory extends DacElement {
     if (card.hidden) return;
 
     // Het verbruik van het huis is er alleen met een opwekteller (`paintChart_`).
-    const huis = this.meters_().solar.length > 0 ? vakken.map((row) => row.used) : null;
+    const huis = this.meters_().solar.length > 0 || this.geenPanelen_() ? vakken.map((row) => row.used) : null;
     this.appReeksen_ = reeksen;
     this.appHuis_ = huis;
     this.$("#apparaten-titel").textContent = t("Wat je apparaten verbruikten");

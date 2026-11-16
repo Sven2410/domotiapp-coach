@@ -689,3 +689,11 @@ een keuze als "geen zonnepanelen aanwezig".
 - **De coach zelf** rekende al met een woning zonder zon, en meldt geen lege zonbron (de sensorwacht kijkt alleen naar
   wat er is ingevuld). Daar verandert niets.
 
+**Het rondje Opwek en Historie (v0.233.0).** In een klantwoning op 16-11-2026, met de keuze "later", stond het rondje Opwek
+in de energiestroom nog op "—"; de eigenaar: "ja zet het op een werkbon".
+- **De energiestroom:** bij "nee" verdwijnen de bol en de lijn naar Woning, bij "later" staat er "Later" in de bol
+  (`setNode_` met een woord). Een streepje staat er alleen nog bij een omvormer die er hoort te zijn maar niets meet.
+- **Historie en het rapport** lieten het verbruik zonder opwekteller met opzet weg, want de opwek is dan onbekend.
+  Bij "nee" en "later" is die bekend, namelijk nul (`geenPanelen_`). Dan staan Verbruikt, het verbruik bij de
+  apparaten en zelfvoorzienend er weer; opgewekt en zelfbenutting blijven weg.
+
