@@ -257,6 +257,7 @@
   "De integratie {naam} komt niet op. Herlaad hem in Home Assistant, of kijk of het internet het doet.": "The {naam} integration does not start. Reload it in Home Assistant, or check the internet connection.",
   "hij volgde zijn eigen stand niet": "it did not follow its own mode",
   "{naam} volgt de coach weer.": "{naam} follows the coach again.",
+  "De accustand van {auto} staat op {procent}%.": "The battery level of {auto} is set to {procent}%.",
   "{naam} laadt weer.": "{naam} is charging again.",
   "{naam} neemt niets op, ook niet als hij zou moeten laden.": "{naam} takes in nothing, not even when it should be charging.",
   "{naam} neemt niets op. Laat hem nakijken: hij staat misschien uit of in storing.": "{naam} takes in nothing. Have it checked: it may be switched off or in a fault.",

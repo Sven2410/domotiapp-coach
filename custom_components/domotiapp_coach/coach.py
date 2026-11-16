@@ -32,6 +32,7 @@ from homeassistant.helpers.event import (
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    PANEL_URL_PATH,
     BIJLADEN_MIN_WINST,
     GAS_VERGELIJK_DAGEN,
     BATTERIJ_ALLEEN_LEZEN,
@@ -201,7 +202,7 @@ from .planner import (
     watts_for,
     zet_zone,
 )
-from .ontvangers import ontvangers
+from .ontvangers import accu_actie, melding_data, ontvangers, plek_van
 from .storage import (
     async_get_berichten, async_get_beurten, async_get_geheugen, async_get_meldingen, async_get_store,
     async_get_zon,
@@ -2321,6 +2322,8 @@ class ChargerCoach:
         self._last_round: datetime | None = None
         self._warned_silent = False
         self._cancel_watchdog = None
+        # De knoppen in een melding (v0.232.0): de luisteraar op `mobile_app_notification_action`.
+        self._cancel_actie = None
 
     @callback
     def async_start(self) -> None:
@@ -2331,6 +2334,8 @@ class ChargerCoach:
             # de opslag: die gaan anders elke vijf minuten en de laatste
             # minuten raken kwijt.
             self.hass.bus.async_listen_once("homeassistant_stop", self._async_bij_stop)
+        if self._cancel_actie is None:
+            self._cancel_actie = self.hass.bus.async_listen("mobile_app_notification_action", self._async_actie)
         if self._cancel_watchdog is None:
             self._last_round = dt_util.utcnow()
             self._cancel_watchdog = async_track_time_interval(
@@ -2371,6 +2376,9 @@ class ChargerCoach:
         if self._cancel_watchdog is not None:
             self._cancel_watchdog()
             self._cancel_watchdog = None
+        if self._cancel_actie is not None:
+            self._cancel_actie()
+            self._cancel_actie = None
         if self._unwatch is not None:
             self._unwatch()
             self._unwatch = None
@@ -2474,7 +2482,8 @@ class ChargerCoach:
             await self._async_tell(f"{entry['title']}. {entry['body']}")
 
     async def _async_tell(
-        self, message: str, kritiek: bool = False, telefoon: bool = True, soort: str | None = None
+        self, message: str, kritiek: bool = False, telefoon: bool = True, soort: str | None = None,
+        plek: dict[str, Any] | None = None,
     ) -> None:
         """Een melding sturen aan wie hem wil hebben, en in de geschiedenis zetten.
 
@@ -2486,6 +2495,9 @@ class ChargerCoach:
         een auto die niet op tijd vol raakt. In de geschiedenis is daar op te
         filteren; de eigenaar op 05-09-2026: "dat je op normale en kritieke
         meldingen kan filteren".
+
+        `plek` is waar tikken op de melding heen gaat (v0.232.0, `melding_data` in ontvangers.py): de kaart van het
+        apparaat op het overzicht, of zonder plek het tabblad Meldingen.
         """
         # Een eigen soort (v0.212.0): "herinnering", zodat wie die aan heeft hem krijgt, ook als
         # verslagen uit staan.
@@ -2493,7 +2505,7 @@ class ChargerCoach:
         # De eigenaar op 06-09-2026: per beurt één verslag plus wat kritiek is. Wat
         # daarbuiten valt komt wel in de geschiedenis, niet op de telefoon.
         if telefoon:
-            await self._async_versturen(message, soort)
+            await self._async_versturen(message, soort, plek)
         # En in de geschiedenis, ook als er geen ontvanger is ingesteld: het
         # paneel toont wat er gemeld is, en een telefoon vergeet dat zodra de
         # melding weggeveegd is.
@@ -2503,8 +2515,8 @@ class ChargerCoach:
         except Exception:  # noqa: BLE001 - de geschiedenis mag de melding zelf niet kosten
             _LOGGER.exception("kon de melding niet in de geschiedenis zetten")
 
-    async def _async_versturen(self, message: str, soort: str) -> None:
-        """Naar de telefoons van wie deze soort aan heeft staan."""
+    async def _async_versturen(self, message: str, soort: str, plek: dict[str, Any] | None = None) -> None:
+        """Naar de telefoons van wie deze soort aan heeft staan, met waar tikken heen gaat (v0.232.0)."""
         try:
             settings = await async_get_store(self.hass).async_load()
         except Exception:  # noqa: BLE001 - een stille coach is erger dan een lege melding
@@ -2515,11 +2527,48 @@ class ChargerCoach:
                 await self.hass.services.async_call(
                     "notify",
                     target,
-                    {"title": "COACH", "message": message},
+                    {"title": "COACH", "message": message, "data": melding_data(PANEL_URL_PATH, plek)},
                     blocking=False,
                 )
             except Exception:  # noqa: BLE001 - één slechte ontvanger is niet alle
                 _LOGGER.exception("Kon melding niet versturen naar notify.%s", target)
+
+    @staticmethod
+    def _plek(device: Any) -> dict[str, Any]:
+        """De kaart van dit apparaat op het overzicht, voor tikken op een melding erover (v0.232.0)."""
+        apparaat = device.get("id") if isinstance(device, dict) else device
+        return plek_van(str(apparaat) if apparaat else None)
+
+    async def _async_actie(self, event: Any) -> None:
+        """Een knop in een melding (v0.232.0): de accustand van de auto aan deze paal, als in `accu_acties`.
+
+        Alleen voor een paal en een auto die de coach kent, en een getal van 0 tot 100; anders gebeurt er niets.
+        Daarna één korte bevestiging. De luisteraar staat er na elke start van Home Assistant weer (`async_start`).
+        """
+        gelezen = accu_actie((event.data or {}).get("action"), (event.data or {}).get("reply_text"))
+        if gelezen is None:
+            return
+        apparaat_id, auto_id, procent = gelezen
+        try:
+            settings = await async_get_store(self.hass).async_load()
+        except Exception:  # noqa: BLE001 - een knop mag de coach niet kosten
+            _LOGGER.exception("kon de instellingen niet lezen voor een knop in een melding")
+            return
+        device = next((d for d in settings.get("devices") or [] if d.get("id") == apparaat_id
+                       and d.get("type") == "laadpaal"), None)
+        cars = (device or {}).get("cars") or []
+        auto = next((c for c in cars if c.get("id") == auto_id), None)
+        if device is None or (auto_id not in ("", "__guest__") and auto is None) or (not auto_id and cars):
+            _LOGGER.warning("een knop in een melding voor een paal of auto die de coach niet kent: %s", apparaat_id)
+            return
+        from .entiteit import async_accustand
+
+        await async_accustand(self.hass, apparaat_id, auto_id, procent)
+        await self._async_tell(
+            t("De accustand van {auto} staat op {procent}%.", auto=(auto or {}).get("name") or t("de auto"),
+              procent=round(procent)),
+            plek=self._plek(device),
+        )
 
     async def _async_noteer(
         self, message: str, now: datetime, extra: dict[str, Any] | None = None
@@ -2530,7 +2579,7 @@ class ChargerCoach:
         een telefoon van horen zoemen. Vandaar dat de soort "besluit" bij een
         nieuwe persoon uit staat; wie alles wil volgen zet hem zelf aan.
         """
-        await self._async_versturen(message, "besluit")
+        await self._async_versturen(message, "besluit", self._plek((extra or {}).get("device")))
         try:
             entry = await async_get_meldingen(self.hass).async_add(message, now, "besluit", extra)
             self.hass.bus.async_fire(EVENT_NOTIFICATION, entry)
@@ -2900,7 +2949,8 @@ class ChargerCoach:
                 self._weg_zin(soort, naam, car) + " " + t(
                     "Hangt er een andere auto aan, kies die dan op de kaart. Anders hangt de paal: "
                     "haal de kabel eruit en doe hem er weer in."
-                )
+                ),
+                plek=self._plek(device),
             )
             return
         if gemeld is None or soort or (zegt and charger.connected and not charger.charging):
@@ -2920,7 +2970,7 @@ class ChargerCoach:
             tekst = t("{auto} is weer thuis.", auto=auto)
         else:
             tekst = t("De kabel zit weer in {auto}.", auto=self._hoe_heet(car))
-        await self._async_tell(tekst, telefoon=False)
+        await self._async_tell(tekst, telefoon=False, plek=self._plek(device))
 
     def _weg_zin(self, soort: str, naam: str, car: Car) -> str:
         """De eerste zin van de melding, en wat het besluit erbij zegt."""
@@ -3054,7 +3104,7 @@ class ChargerCoach:
             if rec.get("herladen") or rec.get("gemeld"):
                 await self._async_tell(
                     t("{naam} is weer online.", naam=_hoofdletter(device.get("name") or t("de laadpaal"))),
-                    telefoon=False,
+                    telefoon=False, plek=self._plek(device),
                 )
             return None
         if rec is None:
@@ -3178,7 +3228,8 @@ class ChargerCoach:
             t("{naam} is sinds {tijd} offline en komt niet terug na herladen. Staat de automaat aan en heeft hij "
               "internet?", naam=naam, tijd=tijd)
             if rec.get("herlaadde") else
-            t("{naam} is sinds {tijd} offline. Staat de automaat aan en heeft hij internet?", naam=naam, tijd=tijd)
+            t("{naam} is sinds {tijd} offline. Staat de automaat aan en heeft hij internet?", naam=naam, tijd=tijd),
+            plek=self._plek(device),
         )
 
     async def _async_herinnering(self, now: datetime, settings: dict[str, Any], device: dict[str, Any]) -> None:
@@ -3265,7 +3316,7 @@ class ChargerCoach:
         self._herinnerd[device_id] = sleutel
         self._onthoud(f"herinnering:{device_id}", {"klaar": sleutel}, meteen=True)
         _LOGGER.info("%s: herinnering voor de klaar-tijd %s (drempel %.0f%%)", device_id, sleutel, drempel)
-        await self._async_tell(tekst, soort="herinnering")
+        await self._async_tell(tekst, soort="herinnering", plek=self._plek(device))
 
     def _volgende_klaar(
         self, settings: dict[str, Any], device: dict[str, Any], now: datetime
@@ -4659,7 +4710,7 @@ class ChargerCoach:
             t("De ventilator van {naam} staat aan: {temp}.", naam=naam, temp=_graden(temp))
             if aan
             else t("De ventilator van {naam} staat uit: {temp}.", naam=naam, temp=_graden(temp)),
-            telefoon=False,
+            telefoon=False, plek=self._plek(device),
         )
 
     async def _async_altijd_aan(
@@ -5732,7 +5783,7 @@ class ChargerCoach:
         if alleen_lezen and decision.rule not in ("running", "finished"):
             decision = Decision(False, 0, t("Alleen uitlezen: de coach start hem niet."), rule="read-only")
         if sessie.pop("knop_melden", False):
-            await self._async_tell(self._knop_zin(naam, decision, now, handmatig))
+            await self._async_tell(self._knop_zin(naam, decision, now, handmatig), plek=self._plek(device))
 
         draait = status in DRAAIT
         if not draait and sessie["gestart"] is None and eerste:
@@ -5804,7 +5855,8 @@ class ChargerCoach:
             await self._async_tell(
                 t("{naam} is gestart{wat}{klaar}.", naam=naam, wat=wat, klaar=klaar)
                 if zelf
-                else t("{naam} draait{wat}{klaar}.", naam=naam, wat=wat, klaar=klaar)
+                else t("{naam} draait{wat}{klaar}.", naam=naam, wat=wat, klaar=klaar),
+                plek=self._plek(device),
             )
         # Geen vermogenssensor maar wel een energieteller (Miele, v0.124.0): dan
         # telt de coach per stap van de teller (`_teller_tellen`).
@@ -5900,14 +5952,15 @@ class ChargerCoach:
                 reden = ". " + reden
             if gevraagd is None:
                 sessie["gevraagd"] = now
-                await self._async_tell(t("Zet {naam} nu aan{reden}", naam=naam, reden=reden), kritiek=True)
+                await self._async_tell(t("Zet {naam} nu aan{reden}", naam=naam, reden=reden), kritiek=True,
+                    plek=self._plek(device))
             elif now - gevraagd >= HERINNERING and "herinnerd" not in sessie["gemeld"]:
                 sessie["gemeld"].add("herinnerd")
                 await self._async_tell(
                     t("{naam} staat nog steeds uit; de coach vroeg om {klok} om hem aan te zetten",
                       naam=naam, klok=f"{gevraagd:%H:%M}")
                     + (reden if reden.startswith(":") else "."),
-                    kritiek=True,
+                    kritiek=True, plek=self._plek(device),
                 )
             return
 
@@ -5941,7 +5994,7 @@ class ChargerCoach:
                     await self._async_tell(
                         t("De coach wil {naam} starten, maar de machine neemt nu geen start aan. {waarom}",
                           naam=naam, waarom=waarom),
-                        kritiek=True,
+                        kritiek=True, plek=self._plek(device),
                     )
                 return
             sessie["knop_weg"] = None
@@ -5962,7 +6015,7 @@ class ChargerCoach:
             await self._async_tell(
                 t("De coach heeft {naam} om {klok} gestart, maar hij is niet gaan draaien. {waarom}",
                   naam=naam, klok=f"{gedrukt:%H:%M}", waarom=waarom),
-                kritiek=True,
+                kritiek=True, plek=self._plek(device),
             )
         if now - gedrukt >= START_OPNIEUW and sessie["pogingen"] < START_POGINGEN:
             await self._async_druk(device, "start")
@@ -6428,7 +6481,7 @@ class ChargerCoach:
             wanneer,
             herkomst,
             bespaard,
-        ))
+        ), plek=self._plek(device))
         # Wat er gemeten is gaat in de instellingen, zodat de volgende beurt
         # met de echte duur, het echte verbruik en het verloop rekent.
         if meten and not afgebroken:
@@ -7328,7 +7381,8 @@ class ChargerCoach:
                 sessie["vorige"] = hvac
                 if sessie["mislukt"] or sessie["gemeld"]:
                     if sessie["gemeld"]:
-                        await self._async_tell(t("{naam} reageert weer op de coach.", naam=naam), telefoon=False)
+                        await self._async_tell(t("{naam} reageert weer op de coach.", naam=naam), telefoon=False,
+                            plek=self._plek(device))
                     sessie["mislukt"] = 0
                     sessie["gemeld"] = False
                     self._remember(device_id)
@@ -7442,7 +7496,8 @@ class ChargerCoach:
             sessie["gemeld"] = True
             self._remember(device_id)
             await self._async_tell(
-                t("{naam} reageert niet op de coach. Kijk of de integratie werkt.", naam=naam), kritiek=True
+                t("{naam} reageert niet op de coach. Kijk of de integratie werkt.", naam=naam), kritiek=True,
+                plek=self._plek(device),
             )
         if doof:
             besluit = AircoBesluit(
@@ -8014,7 +8069,7 @@ class ChargerCoach:
                 bespaard = self._bespaard_zin(maat - sessie["betaald"])
             await self._async_tell(
                 _verslag(t("{naam} is weer warm.", naam=naam), erin_tekst, herkomst, bespaard),
-                telefoon=False,
+                telefoon=False, plek=self._plek(device),
             )
             self._beurt_schrijven(self._boiler_regel(device, naam, sessie, now))
 
@@ -8046,7 +8101,7 @@ class ChargerCoach:
                         "schakelaar doen wat ze horen te doen.",
                         naam=naam, n=sessie["vergeefs"],
                     ),
-                    kritiek=True,
+                    kritiek=True, plek=self._plek(device),
                 )
 
         samen = await self._async_boiler_bewaren(settings, device_id, geleerd, nieuw)
@@ -9401,7 +9456,7 @@ class ChargerCoach:
                         "of haal bij de coach het vinkje 'mag sturen' weg.",
                         naam=naam,
                     ),
-                    kritiek=True,
+                    kritiek=True, plek=self._plek(device),
                 )
         if sessie.get("vreemd") is not None:
             if now - sessie["vreemd"] < VREEMD_PAUZE:
@@ -9567,7 +9622,7 @@ class ChargerCoach:
             watt = self._batterij_w(device)
             if watt is not None and watt > NEEMT_WEER_W:
                 sessie.pop("neemt_niet_gemeld", None)
-                await self._async_tell(t("{naam} laadt weer.", naam=naam), telefoon=False)
+                await self._async_tell(t("{naam} laadt weer.", naam=naam), telefoon=False, plek=self._plek(device))
             return
         if not self._neemt_niet_op(now, settings, device, sessie, besluit, b):
             return
@@ -9579,7 +9634,7 @@ class ChargerCoach:
             stand["reason"] = t("{naam} neemt niets op, ook niet als hij zou moeten laden.", naam=naam)
         await self._async_tell(
             t("{naam} neemt niets op. Laat hem nakijken: hij staat misschien uit of in storing.", naam=naam),
-            kritiek=True,
+            kritiek=True, plek=self._plek(device),
         )
 
     async def _async_volgt_niet(self, now: datetime, settings: dict[str, Any], device: dict[str, Any],
@@ -9596,7 +9651,8 @@ class ChargerCoach:
         if wat is None:
             sessie.pop("volgt_niet", None)
             if sessie.pop("volgt_niet_gemeld", False):
-                await self._async_tell(t("{naam} volgt de coach weer.", naam=naam), telefoon=False)
+                await self._async_tell(t("{naam} volgt de coach weer.", naam=naam), telefoon=False,
+                    plek=self._plek(device))
             if sessie.get("volgt_extern_tot") is not None and now >= sessie["volgt_extern_tot"]:
                 sessie.pop("volgt_extern_tot", None)
             return
@@ -9652,7 +9708,7 @@ class ChargerCoach:
                 if wat == "niets" else
                 t("{naam} volgt de coach niet en ontlaadt. Kijk of de batterij zelf iets doet, zoals "
                   "kalibreren of een update.", naam=naam),
-                kritiek=True,
+                kritiek=True, plek=self._plek(device),
             )
 
     def _kasboek(
@@ -10304,7 +10360,7 @@ class ChargerCoach:
                 t("{naam} heeft nu {kwh} kWh opgegeven in plaats van {oud} kWh. Wat de coach van deze batterij "
                   "leerde begint opnieuw; tot dan rekent hij met {kwh} kWh.",
                   naam=device.get("name") or t("De batterij"), kwh=getal(opgave, 1), oud=getal(vorige, 1)),
-                telefoon=False,
+                telefoon=False, plek=self._plek(device),
             )
         return self._batterij_rij(settings, device_id)
 
@@ -10535,7 +10591,8 @@ class ChargerCoach:
                     sessie["growatt_terug_om"] = now + GROWATT_VREEMD_LEZEN
                 self.state[device_id]["schedule"]["confirmed"] = True
                 if sessie.pop("growatt_gemeld", False):
-                    await self._async_tell(t("{naam} neemt het laadschema weer aan.", naam=naam), telefoon=False)
+                    await self._async_tell(t("{naam} neemt het laadschema weer aan.", naam=naam), telefoon=False,
+                        plek=self._plek(device))
             elif (not geschreven.net and sessie.get("growatt_bevestigd") is not None
                   and isinstance(gelezen, dict) and gelezen.get("mains_enabled")):
                 # Uit stond er al, en nu laadt hij van het net: dat is iemand anders (v0.215.0).
@@ -10620,13 +10677,13 @@ class ChargerCoach:
             await self._async_tell(t(
                 "Iemand zet steeds een ander laadschema in {naam} ({schema}). De coach laat het staan en stuurt het "
                 "laadschema niet tot het eruit is. Haal het eruit in de Growatt-app, of haal bij de coach het vinkje "
-                "'mag sturen' weg.", naam=naam, schema=schema))
+                "'mag sturen' weg.", naam=naam, schema=schema), plek=self._plek(device))
             return
         _LOGGER.warning("%s: een ander laadschema in de Growatt (%s); de coach vervangt het", device_id, gelezen)
         sessie["growatt_geschreven"] = None
         await self._async_tell(
             t("Er stond een ander laadschema in {naam} ({schema}); de coach vervangt het.", naam=naam, schema=schema),
-            telefoon=False,
+            telefoon=False, plek=self._plek(device),
         )
 
     async def _async_growatt_laat(
@@ -10646,7 +10703,8 @@ class ChargerCoach:
         naam = device.get("name") or t("de batterij")
         _LOGGER.info("%s: het andere laadschema is eruit; de coach stuurt weer", device.get("id"))
         await self._async_tell(
-            t("Het andere laadschema is uit {naam}; de coach stuurt het laadschema weer.", naam=naam), telefoon=False)
+            t("Het andere laadschema is uit {naam}; de coach stuurt het laadschema weer.", naam=naam), telefoon=False,
+                plek=self._plek(device))
 
     async def _async_growatt_kijk(self, now: datetime, device: dict[str, Any], sessie: dict[str, Any]) -> None:
         """Een Growatt die de coach niet stuurt: elk `GROWATT_VREEMD_LEZEN` kijken of er een ander laadschema in
@@ -10673,7 +10731,7 @@ class ChargerCoach:
         await self._async_tell(
             t("Er staat een laadschema in {naam} dat niet van de coach is ({schema}); de coach stuurt hem niet.",
               naam=naam, schema=schema),
-            telefoon=False,
+            telefoon=False, plek=self._plek(device),
         )
 
     @staticmethod
@@ -10737,7 +10795,7 @@ class ChargerCoach:
             _LOGGER.warning("%s: vasthouden niet aangenomen; tot %s zonder", device.get("id"), wil.tot)
             await self._async_tell(
                 t("{naam} neemt vasthouden niet aan; de coach laat dat voor deze goedkope uren weg.", naam=naam),
-                telefoon=False,
+                telefoon=False, plek=self._plek(device),
             )
             return
         if sessie["growatt_fouten"] >= GROWATT_FOUTEN and not sessie.get("growatt_gemeld"):
@@ -10747,7 +10805,7 @@ class ChargerCoach:
                 await self._async_tell(
                     t("{naam} neemt het nieuwe laadschema van de coach niet aan; het vorige blijft staan. "
                       "De coach probeert het opnieuw.", naam=naam),
-                    telefoon=False,
+                    telefoon=False, plek=self._plek(device),
                 )
                 return
             await self._async_tell(
@@ -10758,7 +10816,7 @@ class ChargerCoach:
                     "{naam} neemt het laadschema van de coach niet aan; hij laadt niet van het net zoals gepland.",
                     naam=naam,
                 ),
-                kritiek=not wil.net,
+                kritiek=not wil.net, plek=self._plek(device),
             )
 
     @staticmethod
@@ -11747,7 +11805,7 @@ class ChargerCoach:
             uitleg = not nettip and not vreemdtip and not fasetip
             await self._async_tell(
                 f"{device.get('name') or t('De laadpaal')}: {tip}",
-                kritiek=not uitleg, telefoon=not uitleg,
+                kritiek=not uitleg, telefoon=not uitleg, plek=self._plek(device),
             )
 
         # De pauze van de bewoner wint, ook van de klaar-tijd: het is zijn huis
@@ -11766,7 +11824,7 @@ class ChargerCoach:
                     "Hervat het laden of verzet je klaar-tijd.",
                     naam=device.get("name") or t("de laadpaal"),
                 ),
-                kritiek=True,
+                kritiek=True, plek=self._plek(device),
             )
 
         # The dead band holds only while the charging point is doing what it was
@@ -12245,7 +12303,7 @@ class ChargerCoach:
         await self._async_tell(
             t("{naam}: je startte het laden in de Easee-app. Hij laadt nu door tot de auto vol is.",
               naam=_hoofdletter(naam)),
-            telefoon=False,
+            telefoon=False, plek=self._plek(device),
         )
 
     def _pause_expiring(self, device_id: str, now: datetime) -> bool:
@@ -14530,7 +14588,8 @@ class ChargerCoach:
         auto = _hoofdletter(self._hoe_heet(car))
         if rij.get("terug"):
             rij["terug"] = False
-            await self._async_tell(t("De accustand van {auto} wordt weer bijgewerkt.", auto=auto), telefoon=False)
+            await self._async_tell(t("De accustand van {auto} wordt weer bijgewerkt.", auto=auto), telefoon=False,
+                plek=self._plek(device))
         if rij.get("vast") and not rij.get("gemeld"):
             rij["gemeld"] = True
             self._soc_vast_onthouden(device.get("id", ""))
@@ -14541,7 +14600,7 @@ class ChargerCoach:
                     auto=auto, stand=round(float(rij.get("waarde") or 0.0)),
                     kwh=getal(float(rij.get("kwh") or 0.0), 1),
                 ),
-                kritiek=True,
+                kritiek=True, plek=self._plek(device),
             )
 
     def _onthouden_soc(
@@ -14677,7 +14736,7 @@ class ChargerCoach:
                     auto=_hoofdletter(self._hoe_heet(car)),
                     naam=device.get("name") or t("de laadpaal"),
                 ),
-                telefoon=False,
+                telefoon=False, plek=self._plek(device),
             )
             return
         if fase == "klaar" and not charger.charging:
@@ -14716,7 +14775,7 @@ class ChargerCoach:
                 naam=device.get("name") or t("de laadpaal"),
                 keer=PROEF_POGINGEN,
             ),
-            kritiek=True,
+            kritiek=True, plek=self._plek(device),
         )
 
     @staticmethod
@@ -16919,7 +16978,7 @@ class ChargerCoach:
                                        pct=round(car.soc_percent)) if car.soc_percent is not None else ""),
                         klok=f"{window.deadline:%H:%M}",
                     ),
-                    kritiek=True,
+                    kritiek=True, plek=self._plek(device),
                 )
             else:
                 await self._async_tell(
@@ -16930,7 +16989,7 @@ class ChargerCoach:
                         auto=_hoofdletter(self._hoe_heet(car)), naam=naam, minuten=minuten, stand=stand,
                         klok=f"{window.deadline:%H:%M}",
                     ),
-                    kritiek=True,
+                    kritiek=True, plek=self._plek(device),
                 )
 
         # De coach heeft de paal zojuist opnieuw gestart omdat de auto volgens
@@ -16953,7 +17012,7 @@ class ChargerCoach:
                     "kwartier verder, dan laat hij het daarbij.",
                     naam=naam, auto=self._hoe_heet(car), stand=stand, heen=heen,
                 ),
-                kritiek=True,
+                kritiek=True, plek=self._plek(device),
             )
 
         # Gaat een auto na "laadt niet verder" toch weer laden, dan was dat
@@ -17038,7 +17097,7 @@ class ChargerCoach:
             )
             await self._async_tell(_verslag(
                 klaar, verloop, self._beurt_cijfers(sessie), self._beurt_bespaard(sessie), nog,
-            ))
+            ), plek=self._plek(device))
             return
 
         # De klaar-tijd is verstreken en de auto is niet vol. Te zien aan een
@@ -17075,7 +17134,7 @@ class ChargerCoach:
             + stand
             + (f" {waarom}." if waarom else "")
             + " " + t("Hij laadt door tot hij vol is."),
-            kritiek=True,
+            kritiek=True, plek=self._plek(device),
         )
 
     @staticmethod
@@ -17186,7 +17245,7 @@ class ChargerCoach:
                 self._beurt_cijfers(sessie),
                 self._beurt_bespaard(sessie),
             ),
-            telefoon="vol" not in (sessie.get("gemeld") or set()),
+            telefoon="vol" not in (sessie.get("gemeld") or set()), plek=self._plek(device),
         )
 
     async def _async_ask_soc(self, device: dict[str, Any], decision: Decision) -> None:
@@ -17216,7 +17275,14 @@ class ChargerCoach:
                 "accustand door op de laadpaalkaart, dan laadt hij op het gunstigste moment.",
                 naam=naam,
             )
-        await self._async_tell(bericht, kritiek=True)
+        # Tikken opent het veld van de accustand van deze auto, en er staan knoppen in de melding (v0.232.0).
+        try:
+            gekozen, profiel = self._chosen_car(await async_get_store(self.hass).async_load(), device)
+        except Exception:  # noqa: BLE001 - zonder de auto toch de melding
+            gekozen, profiel = "", None
+        auto = (profiel or {}).get("id") or gekozen
+        await self._async_tell(bericht, kritiek=True, plek=plek_van(
+            device_id, accustand=auto, tag=f"coach-accustand-{device_id}"))
 
     async def _async_forget(self, settings: dict[str, Any], device_id: str) -> None:
         """Alles wat over deze sessie bewaard was vergeten, in één keer.
@@ -18512,7 +18578,7 @@ class ChargerCoach:
                 "{naam} is al {minuten} minuten niet bereikbaar. De coach probeert het elke minuut opnieuw.",
                 naam=f"{naam[0].upper()}{naam[1:]}", minuten=minuten,
             ),
-            kritiek=True,
+            kritiek=True, plek=self._plek(device),
         )
 
     async def _async_paal_terug(self, device: dict[str, Any]) -> None:
@@ -18525,7 +18591,8 @@ class ChargerCoach:
             self._paal_gemeld.discard(device_id)
             naam = device.get("name") or t("De laadpaal")
             await self._async_tell(
-                t("{naam} doet het weer.", naam=f"{naam[0].upper()}{naam[1:]}"), telefoon=False
+                t("{naam} doet het weer.", naam=f"{naam[0].upper()}{naam[1:]}"), telefoon=False,
+                plek=self._plek(device),
             )
 
     @staticmethod

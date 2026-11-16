@@ -128,6 +128,20 @@ function netZin(r) {
 
 // `vlak` (v0.149.0): stroom kost bij dit contract elk uur hetzelfde (`vlakkePrijs`).
 // Dan zijn "Stroom is nu duur" en "Goedkoop moment" geen moment maar altijd waar.
+/**
+ * Het apparaat en de auto uit het adres van een melding (`?apparaat=<id>&accustand=<auto>`, v0.232.0), en de rest
+ * van de zoekstring zonder die twee. Zie `melding_data` in ontvangers.py.
+ */
+export function apparaatUitAdres(zoekstring) {
+  const zoek = new URLSearchParams(zoekstring ?? "");
+  const apparaat = zoek.get("apparaat");
+  const accustand = zoek.get("accustand");
+  zoek.delete("apparaat");
+  zoek.delete("accustand");
+  const rest = zoek.toString();
+  return { apparaat: apparaat || null, accustand, rest: rest ? `?${rest}` : "" };
+}
+
 export function advise(r, thresholds, configured, alertAt, sturing, devices, batterij = null, vlak = false) {
   if (!configured) {
     return {
@@ -916,6 +930,8 @@ class DacViewOverview extends DacElement {
     /* De eenheid naast het veld, want een getal zonder "%" leest als niets
        (de bewoner van de eerste woning, 23-09-2026). */
     .soc-procent { align-self: center; margin-left: -2px; font-size: 14px; color: var(--dac-ink-2); }
+    /* Een kaart waar een melding naar wees (v0.232.0). */
+    .steer.uitgelicht { box-shadow: 0 0 0 2px var(--dac-accent-hi); transition: box-shadow 400ms ease; }
     .soc-input {
       flex: 1 1 90px;
       min-width: 0;
@@ -2515,6 +2531,7 @@ class DacViewOverview extends DacElement {
       });
       field.dataset.stand = String(percent ?? "");
       delete field.dataset.bewerkt;
+      if (this.socVraag_ === device.id) this.socVraag_ = null;
       this.fire("dac-settings-saved", { settings });
     } catch (error) {
       console.warn("[COACH] kon de accustand niet doorgeven", error);
@@ -3162,7 +3179,8 @@ class DacViewOverview extends DacElement {
       const gekozen = cars.find((car) => car.id === (this.activeCar_(device.id) ?? cars[0]?.id));
       const oordeel = this.coach_?.[device.id];
       const hangt = Boolean(oordeel) && oordeel.rule !== "disconnected" && oordeel.rule !== "offline";
-      socPick.hidden = !(hangt && vraagAccustand(gekozen, this.feed_, device));
+      // Gevraagd vanuit een melding (v0.232.0): het veld blijft staan tot het doorgegeven is.
+      socPick.hidden = !(this.socVraag_ === device.id || (hangt && vraagAccustand(gekozen, this.feed_, device)));
       if (!socPick.hidden) {
         const opgave = (this.settings_?.car_soc ?? []).find((row) => row?.device === device.id);
         const field = this.$(`[data-soc-input="${slot}"]`);
@@ -3311,6 +3329,39 @@ class DacViewOverview extends DacElement {
     });
 
     this.paintSteerChoice_();
+    this.toonNu_();
+  }
+
+  /**
+   * Vanuit een melding (v0.232.0): de kaart van dit apparaat kiezen en in beeld brengen, en bij de vraag naar de
+   * accustand (`auto` niet null) het veld openen met de cursor erin. Zijn de apparaten er nog niet, dan zodra ze er
+   * zijn (`fillSteerable_`). De eigenaar op 16-11-2026: "als ik de melding krijg van de coach van zet je percentage
+   * van je auto in de coach dat wil ik ook kunnen doen".
+   */
+  toonApparaat(id, auto = null) {
+    this.teTonen_ = { id, auto };
+    this.toonNu_();
+  }
+
+  toonNu_() {
+    const doel = this.teTonen_;
+    const slot = (this.steerDevices_ ?? []).findIndex((device) => device.id === doel?.id);
+    if (!doel || slot < 0 || !this.rendered_) return;
+    this.teTonen_ = null;
+    this.steerActive_ = doel.id;
+    this.paintSteerChoice_();
+    const kaart = this.$(`#steer-panel-${slot}`);
+    kaart?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+    kaart?.classList.add("uitgelicht");
+    setTimeout(() => kaart?.classList.remove("uitgelicht"), 2500);
+    if (doel.auto != null) {
+      this.socVraag_ = doel.id;
+      const pick = this.$(`[data-soc-pick="${slot}"]`);
+      if (pick) pick.hidden = false;
+      const veld = this.$(`[data-soc-input="${slot}"]`);
+      veld?.focus?.();
+      veld?.select?.();
+    }
   }
 
   /**

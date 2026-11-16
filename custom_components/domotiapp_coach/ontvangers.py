@@ -35,6 +35,9 @@ from __future__ import annotations
 import copy
 import secrets
 from typing import Any
+from urllib.parse import urlencode
+
+from .taal import t
 
 SOORTEN: tuple[str, ...] = ("kritiek", "melding", "besluit", "belasting", "herinnering", "tickets")
 
@@ -201,3 +204,58 @@ def migreer_load_alert(stored: dict[str, Any]) -> dict[str, Any]:
         },
     }
     return stored
+
+
+# Waar tikken op een melding heen gaat (v0.232.0). De eigenaar op 16-11-2026: "Ja ik wil werkende klikbare meldingen.
+# Ook als ik de melding krijg van de coach van zet je percentage van je auto in de coach dat wil ik ook kunnen doen".
+# Tot dan ging elke melding naar de startpagina van Home Assistant. Een plek is een tabblad van het paneel, eventueel
+# met het apparaat (de kaart op het overzicht) en de auto waarvan de accustand gevraagd wordt; zonder plek Meldingen.
+ACCU_ACTIE = "COACH_ACCU"
+ACCU_KNOPPEN = (20, 50, 80)
+
+
+def plek_van(apparaat: str | None = None, tab: str = "overzicht", **extra: Any) -> dict[str, Any]:
+    """Een plek in het paneel: het tabblad, en eventueel het apparaat en meer (`accustand`, `tag`)."""
+    return {"tab": tab, **({"apparaat": apparaat} if apparaat else {}), **extra}
+
+
+def melding_data(paneel: str, plek: dict[str, Any] | None) -> dict[str, Any]:
+    """De `data` van een pushmelding: `url` (iOS) en `clickAction` (Android) naar de plek in het paneel, een `tag` als
+    die er is (een nieuwe melding vervangt dan de oude), en bij de vraag naar de accustand knoppen in de melding."""
+    plek = plek or {}
+    zoek = [(sleutel, str(plek[sleutel])) for sleutel in ("apparaat", "accustand") if plek.get(sleutel) is not None]
+    adres = f"/{paneel}/{plek.get('tab') or 'meldingen'}" + (f"?{urlencode(zoek)}" if zoek else "")
+    data: dict[str, Any] = {"url": adres, "clickAction": adres}
+    if plek.get("tag"):
+        data["tag"] = str(plek["tag"])
+    if plek.get("apparaat") and plek.get("accustand") is not None:
+        data["actions"] = accu_acties(str(plek["apparaat"]), str(plek["accustand"]))
+    return data
+
+
+def accu_acties(apparaat: str, auto: str) -> list[dict[str, Any]]:
+    """Knoppen in de melding die om de accustand vraagt: 20, 50 en 80%, en zelf invullen (op iOS met een veld; Android
+    laat er drie zien, de knoppen). De actie draagt het apparaat en de auto mee (`accu_actie`)."""
+    basis = f"{ACCU_ACTIE}::{apparaat}::{auto}::"
+    return [
+        *({"action": f"{basis}{pct}", "title": f"{pct}%"} for pct in ACCU_KNOPPEN),
+        {"action": basis, "title": t("Zelf invullen"), "behavior": "textInput",
+         "textInputButtonTitle": t("Doorgeven"), "textInputPlaceholder": "%"},
+    ]
+
+
+def accu_actie(actie: Any, tekst: Any = None) -> tuple[str, str, float] | None:
+    """(apparaat, auto, procent) uit een actie van `accu_acties`, met het getal uit de knop of uit wat er getypt is;
+    None als het geen actie van de coach is of het getal niet tussen 0 en 100 ligt."""
+    delen = str(actie or "").split("::")
+    if len(delen) != 4 or delen[0] != ACCU_ACTIE or not delen[1]:
+        return None
+    ruw = (delen[3] or str(tekst or "")).strip().rstrip("%").strip().replace(",", ".")
+    try:
+        procent = float(ruw)
+    except ValueError:
+        return None
+    if not 0 <= procent <= 100:
+        return None
+    return delen[1], delen[2], procent
+

@@ -37,7 +37,7 @@ import { navItemsFor } from "./src/header.js";
 import "./src/header.js";
 import { ongelezen } from "./src/berichten-sheet.js";
 import { ongelezenTickets, uitAdres } from "./src/tickets-sheet.js";
-import "./src/views/overview.js";
+import { apparaatUitAdres } from "./src/views/overview.js";
 import "./src/views/history.js";
 import "./src/views/notifications.js";
 import "./src/views/devices.js";
@@ -150,9 +150,12 @@ class DomotiAppCoachPanel extends DacElement {
   openUitAdres_() {
     if (!this.rendered_) return;
     const { id, rest } = uitAdres(location.search);
-    if (id == null) return;
-    history.replaceState(history.state, "", `${location.pathname}${rest}${location.hash}`);
-    this.$("dac-tickets-sheet").openOp(id);
+    // En de andere meldingen (v0.232.0): de kaart van het apparaat, en bij de vraag naar de accustand het veld.
+    const { apparaat, accustand, rest: over } = apparaatUitAdres(rest);
+    if (id == null && apparaat == null) return;
+    history.replaceState(history.state, "", `${location.pathname}${over}${location.hash}`);
+    if (id != null) this.$("dac-tickets-sheet").openOp(id);
+    if (apparaat != null) this.viewFor_("overzicht").toonApparaat?.(apparaat, accustand);
   }
 
   set panel(value) {

@@ -296,3 +296,32 @@ verwijderen goed?"; op het voorstel (een dag uit het zicht, na 30 dagen de foto'
 
 Proef 271, met de grenzen, een herstart en heropenen. De proef "gesloten is gesloten" in test_rapport.mjs.
 
+## Elke melding opent de plek waar je er iets mee doet (v0.232.0)
+
+De eigenaar op 16-11-2026: "Ja ik wil werkende klikbare meldingen. Ook als ik de melding krijg van de coach van zet je
+percentage van je auto in de coach dat wil ik ook kunnen doen". Sinds v0.229.0 deed alleen de melding van Coach Assist
+dat. Elke andere melding ging naar de startpagina van Home Assistant.
+
+- **Elke pushmelding** (`_async_versturen` in coach.py, de aansluiting in monitor.py) krijgt `data` met `url` (iOS) en
+  `clickAction` (Android). Die maakt `melding_data` in ontvangers.py, dat Home Assistant niet kent.
+  - Zonder plek gaat de melding naar het tabblad Meldingen.
+  - Een melding over een apparaat opent de kaart van dat apparaat op het overzicht: `/<paneel>/overzicht?apparaat=<id>`.
+    Elke `_async_tell` in een functie die het apparaat kent, geeft `plek=self._plek(device)` mee. Een besluit gaat
+    naar zijn apparaat.
+  - De aansluiting gaat naar het overzicht, met de tag `coach-aansluiting`.
+- **De vraag naar de accustand** (`_async_ask_soc`) gaat naar `...?apparaat=<paal>&accustand=<auto>`, met de tag
+  `coach-accustand-<paal>`, zodat een nieuwe vraag de oude vervangt.
+  - Het paneel (`openUitAdres_`, `apparaatUitAdres`) haalt de parameters uit het adres. Het overzicht (`toonApparaat`)
+    kiest dan de kaart, brengt hem in beeld en opent het veld met de cursor erin. Dat veld blijft staan tot er een
+    stand is doorgegeven (`socVraag_`).
+  - In de melding staan knoppen (`accu_acties`): 20, 50 en 80%, en Zelf invullen. Op iOS is dat een veld
+    (`behavior: textInput`); Android laat er drie zien, de knoppen.
+- **De knop in de melding** komt binnen via `mobile_app_notification_action` (`_async_actie`, aangemeld in
+  `async_start`, dus na elke start van Home Assistant). Die zet de stand met `async_accustand`, net als het veld op de
+  kaart, en stuurt "De accustand van {auto} staat op {procent}%." terug.
+  - Alleen voor een paal en een auto die de coach kent (ook een gastauto), en een getal van 0 tot 100.
+  - Wie de knop indrukte, ziet Home Assistant niet in de actie. Daarom telt alleen of de paal en de auto bestaan.
+
+Proef 273, en de proef "elke melding opent de plek" in test_rapport.mjs. Of tikken en de knoppen werken in de app,
+kan alleen op een echte telefoon.
+

@@ -7018,7 +7018,7 @@ coach127b._net_stil_sinds = dt.datetime(2026, 8, 18, 14, 30)
 gestuurd127 = []
 
 
-async def tell127(message, kritiek=False, telefoon=True):
+async def tell127(message, kritiek=False, telefoon=True, **_):
     gestuurd127.append((message, kritiek, telefoon))
 
 
@@ -7030,7 +7030,7 @@ controle("een netmeting die wegvalt blijft een kritieke melding op de telefoon",
 gestuurd127c = []
 
 
-async def tell127c(message, kritiek=False, telefoon=True):
+async def tell127c(message, kritiek=False, telefoon=True, **_):
     gestuurd127c.append((message, kritiek, telefoon))
 
 
@@ -11447,7 +11447,7 @@ controle("vol laden en leegladen vallen meteen weg, en er komt geen ander schema
 telefoon196 = []
 
 
-async def _versturen196(bericht, soort):
+async def _versturen196(bericht, soort, plek=None):
     telefoon196.append(bericht)
 
 
@@ -12151,7 +12151,7 @@ sys.modules["homeassistant.helpers.entity_registry"] = er208
 gemeld208 = []
 
 
-async def tell208(bericht, kritiek=False, telefoon=True):
+async def tell208(bericht, kritiek=False, telefoon=True, **_):
     gemeld208.append((bericht, kritiek, telefoon))
 
 
@@ -13976,7 +13976,7 @@ sys.modules["homeassistant.helpers.entity_registry"] = er228
 gemeld228 = []
 
 
-async def tell228(bericht, kritiek=False, telefoon=True):
+async def tell228(bericht, kritiek=False, telefoon=True, **_):
     gemeld228.append((bericht, kritiek, telefoon))
 
 
@@ -14220,7 +14220,7 @@ def huis231(omv=(17, 35), teller=(18, 39), hulp=(12, 0), stekker=(12, 0), helper
 
 
 def loop231(hass, coach, van, tot, gemeld):
-    async def tell(bericht, kritiek=False, telefoon=True):
+    async def tell(bericht, kritiek=False, telefoon=True, **_):
         gemeld.append((bericht, kritiek, telefoon))
 
     coach._async_tell = tell
@@ -14504,7 +14504,7 @@ def huis235(paal_stil, omv=None, zon=30.0):
 
 
 def loop235(hass, coach, van, tot, gemeld):
-    async def tell(bericht, kritiek=False, telefoon=True):
+    async def tell(bericht, kritiek=False, telefoon=True, **_):
         gemeld.append((bericht, kritiek, telefoon))
 
     coach._async_tell = tell
@@ -14578,7 +14578,7 @@ try:
     # kwam na de start van 11:45 terug, gaf een kwartier waarden, viel om 12:00:31 een halve minuut weg, en de eerste
     # controle herlaadde hem midden in een programma. Hier met de meting van v0.217.0 erbij, zoals in een echte ronde.
     def loop235m(hass, coach, van, tot, gemeld):
-        async def tell(bericht, kritiek=False, telefoon=True):
+        async def tell(bericht, kritiek=False, telefoon=True, **_):
             gemeld.append((bericht, kritiek, telefoon))
 
         coach._async_tell = tell
@@ -15521,7 +15521,7 @@ def bouw242(opgave, rij, merk="growatt"):
     hass.services.antwoorden = dict(hass192.services.antwoorden)
     gezegd = []
 
-    async def tell(bericht, kritiek=False, telefoon=True):
+    async def tell(bericht, kritiek=False, telefoon=True, **_):
         gezegd.append(bericht)
 
     coach._async_tell = tell
@@ -15638,7 +15638,7 @@ def bouw243(soc=95, ontladen="0", afname="4000"):
 
 
 def tell243(coach, gezegd):
-    async def tell(bericht, kritiek=False, telefoon=True):
+    async def tell(bericht, kritiek=False, telefoon=True, **_):
         gezegd.append((bericht, kritiek, telefoon))
     coach._async_tell = tell
 
@@ -16003,7 +16003,7 @@ def bouw246(sessies=None):
     hass.data["domotiapp_coach"]["coach"] = coach
     berichten = []
 
-    async def tell(bericht, kritiek=False, telefoon=True):
+    async def tell(bericht, kritiek=False, telefoon=True, **_):
         berichten.append((bericht, kritiek, telefoon))
     coach._async_tell = tell
     return hass, store, coach, berichten
@@ -16270,7 +16270,7 @@ def bouw248(locatie="not_home", kabel="off", soc="27", paal=PAAL248, waarden=Non
         hass.states.zet("binary_sensor.tesla_kabel", kabel, last_updated=stempel248(15, 38))
     berichten = []
 
-    async def tell(bericht, kritiek=False, telefoon=True):
+    async def tell(bericht, kritiek=False, telefoon=True, **_):
         berichten.append((bericht, kritiek, telefoon))
     coach._async_tell = tell
     asyncio.run(coach._async_geheugen_laden())
@@ -16389,7 +16389,7 @@ c248h2 = herstart213(h248h)
 b248h2 = []
 
 
-async def tell248h(bericht, kritiek=False, telefoon=True):
+async def tell248h(bericht, kritiek=False, telefoon=True, **_):
     b248h2.append((bericht, kritiek, telefoon))
 c248h2._async_tell = tell248h
 asyncio.run(c248h2._async_geheugen_laden())
@@ -16500,7 +16500,7 @@ def bouw249(online="on", sinds=None, waarden=None, paal=LAADPAAL, done_by="07:00
         async_get_entry=lambda eid: entry if eid == "e-easee" else None, async_reload=herlaad)
     berichten = []
 
-    async def tell(bericht, kritiek=False, telefoon=True):
+    async def tell(bericht, kritiek=False, telefoon=True, **_):
         berichten.append((bericht, kritiek, telefoon))
     coach._async_tell = tell
     asyncio.run(coach._async_geheugen_laden())
@@ -16614,7 +16614,7 @@ try:
     c249h2 = herstart213(h249h)
     b249h2 = []
 
-    async def tell249h(bericht, kritiek=False, telefoon=True):
+    async def tell249h(bericht, kritiek=False, telefoon=True, **_):
         b249h2.append((bericht, kritiek, telefoon))
     c249h2._async_tell = tell249h
     asyncio.run(c249h2._async_geheugen_laden())
@@ -16628,7 +16628,7 @@ try:
     c249h3 = herstart213(h249h)
     b249h3 = []
 
-    async def tell249h3(bericht, kritiek=False, telefoon=True):
+    async def tell249h3(bericht, kritiek=False, telefoon=True, **_):
         b249h3.append((bericht, kritiek, telefoon))
     c249h3._async_tell = tell249h3
     asyncio.run(c249h3._async_geheugen_laden())
@@ -16690,7 +16690,7 @@ def bouw250(paal=LAADPAAL):
     hass, store, coach = bouw(huis(status="completed"), inst)
     berichten = []
 
-    async def tell(bericht, kritiek=False, telefoon=True):
+    async def tell(bericht, kritiek=False, telefoon=True, **_):
         berichten.append((bericht, kritiek, telefoon))
     coach._async_tell = tell
     asyncio.run(coach._async_geheugen_laden())
@@ -16873,7 +16873,7 @@ try:
     c252b = herstart213(h252)
     b252b = []
 
-    async def tell252b(bericht, kritiek=False, telefoon=True):
+    async def tell252b(bericht, kritiek=False, telefoon=True, **_):
         b252b.append((bericht, kritiek, telefoon))
     c252b._async_tell = tell252b
     asyncio.run(c252b._async_geheugen_laden())
@@ -17403,7 +17403,7 @@ for plek, naam in ((plek255(5000), "weg"), (plek255(17), "oprit")):
     c255h2 = herstart213(h255h)
     na255 = []
 
-    async def tell255(bericht, kritiek=False, telefoon=True, soort=None, _na=na255):
+    async def tell255(bericht, kritiek=False, telefoon=True, soort=None, _na=na255, **_):
         _na.append((bericht, kritiek, telefoon))
     c255h2._async_tell = tell255
     asyncio.run(c255h2._async_geheugen_laden())
@@ -17549,7 +17549,7 @@ sys.modules["homeassistant.helpers.entity_registry"] = register192
 berichten257 = []
 
 
-async def tell257(bericht, kritiek=False, telefoon=True, soort=None):
+async def tell257(bericht, kritiek=False, telefoon=True, soort=None, **_):
     berichten257.append((bericht, kritiek, telefoon))
 oud_tell257, coach192._async_tell = coach192._async_tell, tell257
 UIT257 = coachmod.GrowattSchema()
@@ -17731,7 +17731,7 @@ c258h2 = herstart213(h258h)
 b258h2 = []
 
 
-async def tell258(bericht, kritiek=False, telefoon=True, soort=None):
+async def tell258(bericht, kritiek=False, telefoon=True, soort=None, **_):
     b258h2.append((bericht, kritiek, telefoon))
 c258h2._async_tell = tell258
 asyncio.run(c258h2._async_geheugen_laden())
@@ -19315,6 +19315,78 @@ def coachmod_settings_default(sleutel):
 
 # In een klantwoning op 15-11-2026: geen zonnepanelen, die later komen. De keuze komt in de instellingen.
 controle("de standaard is ja", coachmod_settings_default("solar_panels") == "ja", "")
+
+
+print("=== 273. elke melding opent de plek in het paneel, en de accustand met een knop in de melding (v0.232.0) ===")
+# De eigenaar op 16-11-2026: "Ja ik wil werkende klikbare meldingen. Ook als ik de melding krijg van de coach van zet je
+# percentage van je auto in de coach dat wil ik ook kunnen doen". Tot dan ging elke melding naar de startpagina.
+import domotiapp_coach.ontvangers as ont273  # noqa: E402
+
+controle("zonder plek: het tabblad Meldingen", ont273.melding_data("domotiapp-coach", None)
+         == {"url": "/domotiapp-coach/meldingen", "clickAction": "/domotiapp-coach/meldingen"}, "")
+controle("een apparaat: zijn kaart op het overzicht", ont273.melding_data("domotiapp-coach", ont273.plek_van("dev-accu"))
+         == {"url": "/domotiapp-coach/overzicht?apparaat=dev-accu", "clickAction": "/domotiapp-coach/overzicht?apparaat=dev-accu"}, "")
+vraag273 = ont273.melding_data("domotiapp-coach", ont273.plek_van("dev-laadpaal", accustand="car-1", tag="coach-accustand-dev-laadpaal"))
+print(f"  {vraag273}")
+controle("de vraag naar de accustand: het veld, een tag, drie knoppen en zelf invullen",
+         vraag273["url"] == "/domotiapp-coach/overzicht?apparaat=dev-laadpaal&accustand=car-1"
+         and vraag273["tag"] == "coach-accustand-dev-laadpaal"
+         and [a["title"] for a in vraag273["actions"]] == ["20%", "50%", "80%", "Zelf invullen"]
+         and vraag273["actions"][3]["behavior"] == "textInput"
+         and vraag273["actions"][1]["action"] == "COACH_ACCU::dev-laadpaal::car-1::50", f"{vraag273}")
+controle("een knop of getypt getal lezen; een fout getal of een vreemde actie niet",
+         ont273.accu_actie("COACH_ACCU::dev-laadpaal::car-1::50") == ("dev-laadpaal", "car-1", 50.0)
+         and ont273.accu_actie("COACH_ACCU::dev-laadpaal::car-1::", " 62 % ") == ("dev-laadpaal", "car-1", 62.0)
+         and ont273.accu_actie("COACH_ACCU::dev-laadpaal::car-1::", "37,5") == ("dev-laadpaal", "car-1", 37.5)
+         and ont273.accu_actie("COACH_ACCU::dev-laadpaal::car-1::", "150") is None
+         and ont273.accu_actie("COACH_ACCU::dev-laadpaal::car-1::", "vol") is None
+         and ont273.accu_actie("IETS_ANDERS::x::y::5") is None and ont273.accu_actie(None) is None, "")
+
+# In de coach: een melding gaat met de plek naar de telefoon; de vraag naar de accustand met de knoppen.
+inst273 = instellingen()
+inst273["notifications"]["people"] = [
+    {"id": "p-1", "name": "Bewoner", "target": "mobile_app_bewoner", "user_id": "u-1", "kinds": {}}]
+hass273, store273, c273 = bouw(huis(status="ready_to_charge"), inst273)
+asyncio.run(c273._async_tell("Iets algemeens", kritiek=True))
+asyncio.run(c273._async_tell("Over de paal", kritiek=True, plek=c273._plek(LAADPAAL)))
+asyncio.run(c273._async_ask_soc(LAADPAAL, types.SimpleNamespace(rule="wait")))
+data273 = [d.get("data") for dom, dienst, d in hass273.services.verstuurd if dom == "notify"]
+controle("elke melding met url en clickAction; over de paal zijn kaart; de vraag met de knoppen",
+         data273[0]["url"] == "/domotiapp-coach/meldingen" and data273[1]["url"] == "/domotiapp-coach/overzicht?apparaat=dev-laadpaal"
+         and data273[2]["url"] == "/domotiapp-coach/overzicht?apparaat=dev-laadpaal&accustand=car-1"
+         and len(data273[2]["actions"]) == 4 and data273[2]["tag"] == "coach-accustand-dev-laadpaal", f"{data273}")
+asyncio.run(c273._async_noteer("Een besluit", coachmod._moment(None), {"device": "dev-laadpaal"}))
+# Een besluit gaat alleen naar wie besluiten aan heeft: hier niemand, dus alleen de plek nakijken via de bron.
+bron273 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components/domotiapp_coach/coach.py").read_text()
+controle("een besluit gaat naar de kaart van zijn apparaat",
+         'await self._async_versturen(message, "besluit", self._plek((extra or {}).get("device")))' in bron273, "")
+controle("geen _async_tell meer zonder plek in een functie die het apparaat kent",
+         bron273.count("plek=self._plek(") >= 45, f"{bron273.count('plek=self._plek(')}")
+
+# De knop in de melding: de accustand gezet, en een korte bevestiging; een fout getal of een onbekende paal niets.
+hass273.services.verstuurd.clear()
+asyncio.run(c273._async_actie(types.SimpleNamespace(data={"action": "COACH_ACCU::dev-laadpaal::car-1::50"})))
+opgave273 = [r for r in store273.instellingen.get("car_soc") or [] if r.get("device") == "dev-laadpaal"]
+bevestig273 = [d.get("message") for dom, dienst, d in hass273.services.verstuurd if dom == "notify"]
+print(f"  {opgave273} {bevestig273}")
+controle("een knop van 50%: de accustand van de Ford staat op 50%, met een bevestiging",
+         len(opgave273) == 1 and opgave273[0]["percent"] == 50.0 and opgave273[0]["car"] == "car-1"
+         and bevestig273 == ["De accustand van Ford staat op 50%."], f"{opgave273} {bevestig273}")
+asyncio.run(c273._async_actie(types.SimpleNamespace(data={"action": "COACH_ACCU::dev-laadpaal::car-1::", "reply_text": "73"})))
+controle("zelf getypt: 73%", [r["percent"] for r in store273.instellingen["car_soc"] if r.get("device") == "dev-laadpaal"] == [73.0], "")
+for data in ({"action": "COACH_ACCU::dev-laadpaal::car-1::", "reply_text": "300"},
+             {"action": "COACH_ACCU::dev-onbekend::car-1::20"}, {"action": "COACH_ACCU::dev-laadpaal::car-9::20"},
+             {"action": "IETS_ANDERS"}):
+    asyncio.run(c273._async_actie(types.SimpleNamespace(data=data)))
+controle("een fout getal, een onbekende paal of auto, of een andere actie: niets veranderd",
+         [r["percent"] for r in store273.instellingen["car_soc"] if r.get("device") == "dev-laadpaal"] == [73.0], "")
+# Na een herstart luistert de nieuwe coach weer.
+hass273n = NepHass(huis())
+hass273n.data["domotiapp_coach"] = {"store": store273}
+c273n = coachmod.ChargerCoach(hass273n)
+c273n.async_start()
+controle("na een herstart luistert de coach weer naar de knoppen",
+         any(soort == "mobile_app_notification_action" for soort, _ in hass273n.bus.luisteraars), f"{hass273n.bus.luisteraars}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
