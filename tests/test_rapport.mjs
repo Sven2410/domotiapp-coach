@@ -1047,6 +1047,26 @@ proef("gesloten is gesloten: Open en Gesloten apart, en een gesloten ticket zond
   assert.ok(paneel.includes('else if (error?.code === "ticket_gesloten") sheet.ticketGesloten(error.message);'));
 });
 
+proef("elke melding opent de plek in het paneel: het apparaat, en het veld van de accustand (v0.232.0)", async () => {
+  // De eigenaar op 16-11-2026: "Ja ik wil werkende klikbare meldingen. Ook als ik de melding krijg van de coach van zet
+  // je percentage van je auto in de coach dat wil ik ook kunnen doen".
+  const { apparaatUitAdres } = await import("../custom_components/domotiapp_coach/frontend/src/views/overview.js");
+  assert.deepEqual(apparaatUitAdres("?apparaat=dev-paal&accustand=car-1"), { apparaat: "dev-paal", accustand: "car-1", rest: "" });
+  assert.deepEqual(apparaatUitAdres("?apparaat=dev-accu&x=1"), { apparaat: "dev-accu", accustand: null, rest: "?x=1" });
+  assert.deepEqual(apparaatUitAdres(""), { apparaat: null, accustand: null, rest: "" });
+  const bron = (pad) => readFileSync(new URL(`../custom_components/domotiapp_coach/frontend/${pad}`, import.meta.url), "utf8");
+  const paneel = bron("domotiapp-coach-panel.js");
+  const open = paneel.slice(paneel.indexOf("  openUitAdres_() {"), paneel.indexOf("  set panel(value) {"));
+  assert.ok(open.indexOf("history.replaceState(") < open.indexOf('this.viewFor_("overzicht").toonApparaat?.(apparaat, accustand);')
+    && open.includes("apparaatUitAdres(rest)"), "eerst de parameters uit het adres, dan de kaart");
+  const overzicht = bron("src/views/overview.js");
+  const toon = overzicht.slice(overzicht.indexOf("  toonNu_() {"), overzicht.indexOf("  toonNu_() {") + 1400);
+  assert.ok(toon.includes("this.steerActive_ = doel.id;") && toon.includes("this.socVraag_ = doel.id;") && toon.includes("veld?.focus?.();"),
+    "de kaart van het apparaat gekozen, en bij de accustand het veld open met de cursor erin");
+  assert.ok(/this\.paintSteerChoice_\(\);\n    this\.toonNu_\(\);\n  \}/.test(overzicht), "ook als de apparaten er later zijn");
+  assert.ok(overzicht.includes("if (this.socVraag_ === device.id) this.socVraag_ = null;"), "doorgegeven: het veld weer zoals altijd");
+});
+
 proef("de namen: COACH en Coach Assist, alleen wat een mens leest (v0.223.0)", () => {
   // Een antwoord heet Coach Assist, ook een oud antwoord dat met de naam DomotiTech in de opslag staat.
   assert.equal(afzender({ van: "domotitech", naam: "DomotiTech" }), "Coach Assist");
@@ -1076,8 +1096,9 @@ proef("de namen: COACH en Coach Assist, alleen wat een mens leest (v0.223.0)", (
     const tekst = JSON.stringify(JSON.parse(lees(taal)));
     assert.ok(tekst.includes('"title":"COACH"') && !tekst.includes("DomotiApp Coach"), `${taal}: COACH`);
   }
-  assert.ok(lees("coach.py").includes('{"title": "COACH", "message": message}'), "een melding van het systeem: COACH");
-  assert.ok(lees("monitor.py").includes('{"title": "COACH", "message": message}'));
+  assert.ok(lees("coach.py").includes('{"title": "COACH", "message": message, "data": melding_data(PANEL_URL_PATH, plek)}'),
+    "een melding van het systeem: COACH, en sinds v0.232.0 met waar tikken heen gaat");
+  assert.ok(lees("monitor.py").includes('{"title": "COACH", "message": message,'));
   // De fabrikant blijft tot elke klant een lovelace heeft die COACH kent: de kaarten zoeken erop.
   // Sinds v0.225.0 COACH: elke klant met een coach had toen een lovelace die beide namen kent.
   assert.ok(lees("entiteit.py").includes('manufacturer="COACH",') && !lees("entiteit.py").includes('manufacturer="DomotiApp Coach"'),
@@ -2024,8 +2045,8 @@ proef("'hoe vol is de auto nu' staat er ook als de sensor van de auto niets zegt
   assert.equal(vraagAccustand(auto({ capacity_kwh: 0 }), feed), false, "zonder accu zegt een percentage niets");
   assert.equal(vraagAccustand(undefined, feed), false);
   const kaart = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/overview.js", import.meta.url), "utf-8");
-  assert.ok(kaart.includes("socPick.hidden = !(hangt && vraagAccustand(gekozen, this.feed_, device));"),
-    "de kaart vraagt het met dezelfde grens");
+  assert.ok(kaart.includes("socPick.hidden = !(this.socVraag_ === device.id || (hangt && vraagAccustand(gekozen, this.feed_, device)));"),
+    "de kaart vraagt het met dezelfde grens (en sinds v0.232.0 ook als een melding erom vroeg)");
   assert.ok(kaart.includes('"De auto geeft zijn accustand nu niet door. "'), "en zegt waarom");
 });
 

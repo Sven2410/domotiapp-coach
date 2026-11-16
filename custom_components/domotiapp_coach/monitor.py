@@ -28,8 +28,8 @@ from homeassistant.core import Event, HomeAssistant, State, callback
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
-from .const import EVENT_NOTIFICATION, EVENT_SETTINGS_UPDATED, GRID_MODE_SIGNED, LEVEL_STEER
-from .ontvangers import ontvangers
+from .const import EVENT_NOTIFICATION, EVENT_SETTINGS_UPDATED, GRID_MODE_SIGNED, LEVEL_STEER, PANEL_URL_PATH
+from .ontvangers import melding_data, ontvangers, plek_van
 from .planner import groep_apparaten_amps, groep_fase
 from .storage import async_get_meldingen, async_get_store
 from .taal import getal, t
@@ -444,7 +444,9 @@ class LoadMonitor:
                 await self.hass.services.async_call(
                     "notify",
                     target,
-                    {"title": "COACH", "message": message},
+                    # Tikken opent het overzicht, waar de belastbaarheid staat (v0.232.0).
+                    {"title": "COACH", "message": message,
+                     "data": melding_data(PANEL_URL_PATH, plek_van(None, "overzicht", tag="coach-aansluiting"))},
                     blocking=False,
                 )
             except Exception:  # noqa: BLE001 - one bad target must not stop the rest
