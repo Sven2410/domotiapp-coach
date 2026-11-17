@@ -42,6 +42,8 @@ export const HISTORIE = {
   "Er zijn nog geen meterstanden gekozen. Onder Installatie bij Meterstanden wijs je de tellers aan; daarna staat hier je geschiedenis.":
     "No meters have been chosen yet. Choose them under Installation, Meter readings; then your history appears here.",
   "Bezig met ophalen…": "Loading…",
+  "Zonnepanelen komen later. Zodra ze er zijn, staan hier ook je opwek en je zelfbenutting.":
+    "Solar panels are coming later. Once they are there, you will also see your generation and your self-consumption here.",
   "Je opwekteller staat nog niet ingesteld, dus je ziet hier alleen wat er van het net kwam en wat er naar het net ging. Vul bij Installatie onder Meterstanden de teller van je omvormer in, dan komen je opwek, je verbruik en je zelfbenutting er ook bij te staan.":
     "Your generation meter is not set up yet, so you only see what came from the grid and what went to the grid. Add the meter of your inverter under Installation, Meter readings, and your generation, consumption and self-consumption appear here too.",
   "Van één teller houdt Home Assistant geen geschiedenis bij.": "Home Assistant keeps no history for one meter.",

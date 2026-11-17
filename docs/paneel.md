@@ -697,3 +697,17 @@ in de energiestroom nog op "—"; de eigenaar: "ja zet het op een werkbon".
   Bij "nee" en "later" is die bekend, namelijk nul (`geenPanelen_`). Dan staan Verbruikt, het verbruik bij de
   apparaten en zelfvoorzienend er weer; opgewekt en zelfbenutting blijven weg.
 
+
+**Historie zonder zonnepanelen, nu echt (v0.236.0).** In dezelfde klantwoning op 17-11-2026, met v0.235.0 en de keuze
+"later", stond Verbruikt er in Historie toch niet. Er stonden alleen Van het net, Naar het net en Zelfvoorzienend 0 %, met "Eigen zon
+gebruikt" in de legenda. Eronder stond de zin om bij Installatie de teller van de omvormer in te vullen, maar er is geen omvormer.
+v0.233.0 rekende het verbruik wel uit, maar de tegels (`paintTotals_`) toonden Verbruikt alleen samen met Opgewekt. De proef
+van v0.233.0 las alleen de bron en tekende niets.
+- **De tegels:** Verbruikt staat er zodra het verbruik bekend is, los van Opgewekt. Dat geldt ook als je één uur aanwijst.
+  Zonder opwekteller staat er dan geen Opgewekt van 0 meer, ook niet zonder keuze.
+- **Zelfvoorzienend** blijft zonder opwekteller weg. Zonder zonnepanelen komt alles van het net, en is het altijd 0 %.
+- **De legenda** noemt Eigen zon gebruikt alleen met een opwekteller, zoals het rapport (`metZon`).
+- **De zin eronder:** bij "later" staat er "Zonnepanelen komen later. Zodra ze er zijn, staan hier ook je opwek en je
+  zelfbenutting.", en bij "nee" niets. De vraag om de teller van de omvormer staat er alleen nog als er geen keuze is gemaakt.
+- **Het rapport** krijgt in de tabel per tijdvak een kolom Verbruikt.
+- **De proef** tekent Historie nu echt, bij "later", "nee", zonder keuze en met een opwekteller.

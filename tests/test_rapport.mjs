@@ -3975,6 +3975,86 @@ proef("het rondje Opwek zonder zonnepanelen: Later, of weg; een streepje alleen 
   "Historie: zonder panelen is het verbruik bekend, de opwek blijft weg");
 });
 
+proef("Historie zonder zonnepanelen: Verbruikt, geen eigen zon, geen zelfvoorzienend en geen omvormer om in te vullen (v0.236.0)", async () => {
+  // Bij een klantwoning op 17-11-2026, zonnepanelen "later", met v0.235.0: alleen Van het net, Naar het net en
+  // Zelfvoorzienend 0 %, "Eigen zon gebruikt" in de legenda, en de zin om de teller van de omvormer in te vullen.
+  const vakken = [
+    { start: new Date(2026, 10, 17, 7), solar: 0, used: 0.9, bought: 0.9, sold: 0, accuIn: 0, accuUit: 0, fromGrid: 0.9, ownUse: 0, zonZelf: 0 },
+    { start: new Date(2026, 10, 17, 8), solar: 0, used: 0.5, bought: 0.5, sold: 0, accuIn: 0, accuUit: 0, fromGrid: 0.5, ownUse: 0, zonZelf: 0 },
+  ];
+  const maak = (bronnen) => {
+    const el = Object.create(Historie.prototype);
+    const knopen = new Map();
+    const luisteraars = {};
+    const svg = {
+      getBoundingClientRect: () => ({ left: 0, width: 400 }),
+      querySelectorAll: () => [],
+      addEventListener: (soort, fn) => { luisteraars[soort] = fn; },
+    };
+    el.$ = (sel) => {
+      if (!knopen.has(sel)) {
+        const knoop = nepEl();
+        knoop.getBoundingClientRect = () => ({ width: 400 });
+        knoop.querySelector = () => svg;
+        knopen.set(sel, knoop);
+      }
+      return knopen.get(sel);
+    };
+    el.$$ = () => [];
+    el.settings_ = { sources: { meters: { import_low: "sensor.afname", export_low: "sensor.teruglevering" }, ...bronnen } };
+    el.period_ = "day";
+    el.buckets_ = () => vakken;
+    el.accuPerVak_ = () => null;
+    el.rendered_ = true;
+    el.rows_ = {};
+    for (const naam of ["paintPeriod_", "paintTijdlijn_", "paintFasen_", "paintApparaten_", "paintMoney_", "paintGas_", "paintVolume_"]) el[naam] = () => {};
+    const tegels = () => knopen.get("#totals").kinderen.map((cel) => cel.kinderen[0].textContent);
+    const legenda = () => knopen.get("#legend").kinderen.map((item) => item.kinderen[1]?.textContent?.trim() ?? item.kinderen[1]);
+    return { el, knopen, luisteraars, tegels, legenda };
+  };
+  const oudTekst = globalThis.document.createTextNode;
+  globalThis.document.createTextNode = (tekst) => ({ textContent: tekst });
+  try {
+    for (const stand of ["later", "nee"]) {
+      const h = maak({ solar_panels: stand });
+      metNepDocument(() => h.el.paint_());
+      assert.deepEqual(h.tegels(), ["Verbruikt", "Van het net", "Naar het net"], `${stand}: Verbruikt, zonder zelfvoorzienend`);
+      assert.equal(h.knopen.get("#totals").kinderen[0].kinderen[1].textContent, "1,4", `${stand}: verbruikt is wat van het net kwam`);
+      assert.ok(!h.legenda().includes("Eigen zon gebruikt"), `${stand}: geen eigen zon in de legenda`);
+      assert.ok(!h.knopen.get("#note").textContent.includes("omvormer"), `${stand}: geen omvormer om in te vullen`);
+      metNepDocument(() => h.luisteraars.pointerdown({ clientX: 10 }));
+      assert.deepEqual(h.tegels(), ["Verbruikt", "Van het net", "Naar het net"], `${stand}: één uur aangewezen ook`);
+    }
+    assert.equal(maak({ solar_panels: "later" }).el.geenPanelen_(), true);
+    const later = maak({ solar_panels: "later" });
+    metNepDocument(() => later.el.paint_());
+    assert.equal(later.knopen.get("#note").textContent, "Zonnepanelen komen later. Zodra ze er zijn, staan hier ook je opwek en je zelfbenutting.");
+    const nee = maak({ solar_panels: "nee" });
+    metNepDocument(() => nee.el.paint_());
+    assert.equal(nee.knopen.get("#note").textContent, "", "bij nee geen zin");
+    // Zonder keuze en zonder teller: zoals het was, de vraag om de teller van de omvormer.
+    const leeg = maak({});
+    metNepDocument(() => leeg.el.paint_());
+    assert.deepEqual(leeg.tegels(), ["Van het net", "Naar het net"]);
+    assert.ok(leeg.knopen.get("#note").textContent.includes("de teller van je omvormer"));
+    metNepDocument(() => leeg.luisteraars.pointerdown({ clientX: 10 }));
+    assert.deepEqual(leeg.tegels(), ["Van het net", "Naar het net"], "één uur zonder teller: geen opwek van 0");
+    // Met een opwekteller alles zoals het was.
+    const zon = maak({ meters: { import_low: "sensor.afname", solar_total: "sensor.opwek" } });
+    metNepDocument(() => zon.el.paint_());
+    assert.deepEqual(zon.tegels(), ["Opgewekt", "Verbruikt", "Van het net", "Naar het net", "Zelfvoorzienend"]);
+    assert.ok(zon.legenda().includes("Eigen zon gebruikt"));
+  } finally {
+    globalThis.document.createTextNode = oudTekst;
+  }
+  // Het rapport: zonder zonnepanelen een kolom Verbruikt, met een teller de drie van de zon.
+  const historie = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/views/history.js", import.meta.url), "utf8");
+  assert.ok(historie.includes("const alleenVerbruik = !hasSolar && this.geenPanelen_();")
+    && historie.includes('else if (alleenVerbruik) kop.push(t("Verbruikt"));')
+    && historie.includes("else if (alleenVerbruik) cellen.push(kwh(row.used));")
+    && historie.includes('else if (alleenVerbruik) totaalCellen.push(kwh(som("used")));'), "het rapport: de kolom Verbruikt");
+});
+
 proef("de pop-up in de energiestroom begint elke waarde met een hoofdletter (v0.119.3)", async () => {
   await import("../custom_components/domotiapp_coach/frontend/src/components/energy-flow.js");
   const Stroom = geregistreerd.get("dac-energy-flow");
@@ -5296,7 +5376,7 @@ proef("zelfvoorzienend: 's nachts van het net geladen en 's ochtends ontladen is
   const bron = Historie.toString();
   assert.ok(bron.includes("kwh(row.solar), kwh(row.used), kwh(row.zonZelf)"));
   assert.ok(bron.includes('(sum("zonZelf") / totals.solar)') && bron.includes('kwh(som("zonZelf"))'));
-  assert.ok(bron.includes("solar: row.solar,") && bron.includes("(row.zonZelf / row.solar)"));
+  assert.ok(bron.includes("solar: hasSolar ? row.solar : null,") && bron.includes("(row.zonZelf / row.solar)"));
   assert.ok(bron.includes('solar: hasSolar ? sum("solar") : null'));
 });
 
