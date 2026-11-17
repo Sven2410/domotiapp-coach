@@ -43,7 +43,7 @@ export const NAV_ITEMS = [
 
 /**
  * De standen van de kop, van ruim naar krap (v0.226.0). Elke stand is een rij attributen op de kop:
- * `ki` knoppen rechts alleen een icoon, `ao` het abonnement onder COACH, `onder` elk tabblad een icoon met de naam
+ * `ki` knoppen rechts alleen een icoon, `ao` het abonnement onder het logo en COACH, `onder` elk tabblad een icoon met de naam
  * klein eronder, `ti` alle tabbladen alleen een icoon, `rijen` de tabbladen op een eigen rij, `krap` minder ruimte rond de
  * tabbladen, `aw` geen abonnement naast COACH (het staat ook bij Coach Assist en op Contract), `zn` alleen het logo.
  */
@@ -247,8 +247,12 @@ class DacHeader extends DacElement {
     /* ---- de standen (v0.226.0, zie STANDEN) ---- */
     :host([ki]) button.ghost > span { display: none; }
     :host([ki]) button.ghost { padding: 9px; }
-    :host([ao]) .brand-text { flex-direction: column; align-items: flex-start; gap: 2px; }
-    :host([ao]) .abo { align-self: flex-start; font-size: 10px; padding: 1px 6px; }
+    /* Het abonnement onder het logo en COACH, links gelijk met het logo (v0.237.0). De eigenaar op 17-11-2026:
+       "ik wil dat het abbonnement onder het logo komt te staan en COACH en dan uitgelijnd". Tot dan stond het onder
+       COACH, naast het logo. */
+    :host([ao]) .brand { display: grid; grid-template-columns: auto 1fr; column-gap: 10px; row-gap: 3px; justify-items: start; }
+    :host([ao]) .brand-text { display: contents; }
+    :host([ao]) .abo { grid-column: 1 / -1; font-size: 10px; padding: 1px 6px; }
     :host([ti]) button.pill > span { display: none; }
     :host([ti]) button.pill { padding: 9px 12px; }
     /* Icoon met de naam klein eronder, zoals een tabbalk in een app (v0.227.0). */

@@ -711,3 +711,18 @@ van v0.233.0 las alleen de bron en tekende niets.
   zelfbenutting.", en bij "nee" niets. De vraag om de teller van de omvormer staat er alleen nog als er geen keuze is gemaakt.
 - **Het rapport** krijgt in de tabel per tijdvak een kolom Verbruikt.
 - **De proef** tekent Historie nu echt, bij "later", "nee", zonder keuze en met een opwekteller.
+
+## Het abonnement onder het logo en COACH (v0.237.0)
+
+De eigenaar op 17-11-2026, met een schermafdruk van zijn eigen woning: "ik wil dat het abbonnement onder het logo komt te
+staan en COACH en dan uitgelijnd. Nu staat het raar". In de stand `ao` (zie `STANDEN`) stond het etiket onder COACH,
+en dus naast het logo.
+- **Nu** is `.brand` in de stand `ao` een raster. Bovenaan staan het logo en COACH naast elkaar, en daaronder staat het etiket
+  over de hele breedte, links gelijk met het logo. `.brand-text` krijgt `display: contents`, zodat de opmaak (en
+  `pas_`) gelijk blijft.
+- **De kolommen zijn `auto 1fr`.** Met `auto auto` maakte het brede etiket de kolom van het logo breder, en dan stond COACH
+  ver van het logo af.
+- **Nagemeten** in Chrome op 280 tot 1920 px. Het etiket begint op dezelfde x als het logo (16 px op een telefoon, 20 px
+  breder), COACH staat 10 px naast het logo, en het etiket valt binnen de kop. Op een telefoon wordt de kop 14 px hoger
+  (110 naar 124), want het etiket heeft nu een eigen regel. Op 800 px en breder blijft de kop 64 px. Zonder abonnement
+  verandert er niets. In de ruime standen staat het etiket gewoon naast COACH.
