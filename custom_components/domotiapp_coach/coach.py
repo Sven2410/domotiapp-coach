@@ -16459,7 +16459,10 @@ class ChargerCoach:
         self._limiet_vorig.pop(device_id, None)
         self._limiet_omhoog.pop(device_id, None)
         self._weerleg_vorig.pop(device_id, None)
+        # Allebei de vragen naar de accustand: die van het vangnet ook (v0.238.0). Tot dan bleef dat merk staan, ook na
+        # een herstart, en kwam de tweede vraag per paal maar één keer ooit.
         self._soc_asked.discard(device_id)
+        self._soc_asked.discard(f"{device_id}:deadline")
         self._warned.pop(device_id, None)
         if self._getipt.get(device_id) != "net":
             self._getipt.pop(device_id, None)

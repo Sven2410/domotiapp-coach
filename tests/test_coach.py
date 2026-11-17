@@ -19541,6 +19541,48 @@ w275, wol275 = coachmod._half_uur(w275, t275, (t275, 0.0))
 du181.as_local, du181.as_utc, du181.get_default_time_zone = oud181
 controle("en een minuut later wel", wol275, "")
 
+print("=== 276. De tweede vraag naar de accustand komt bij elke beurt, niet één keer ooit (v0.238.0) ===")
+# Gevonden op 17-11-2026 bij het nalezen voor de eigenaar: "ik zou nu kunnen rijden en is die leger en dan kan ik het
+# vergeten om te updaten". Het merk van het vangnet (`<paal>:deadline`) ging bij het afkoppelen niet weg, en werd bewaard.
+hass276, store276, c276 = bouw(huis(status="ready_to_charge"), instellingen())
+asyncio.run(c276._async_geheugen_laden())  # zoals bij de start, anders onthoudt het geheugen nog niets
+WACHT276, VANGNET276 = types.SimpleNamespace(rule="wait"), types.SimpleNamespace(rule="deadline")
+
+
+def vragen276(hass):
+    return [d.get("message", "") for dom, dienst, d in hass.services.verstuurd
+            if dom in ("notify", "persistent_notification") and "accustand" in d.get("message", "")]
+
+
+def beurt276(coach, hass):
+    hass.services.verstuurd.clear()
+    for regel in (WACHT276, WACHT276, VANGNET276, VANGNET276):
+        asyncio.run(coach._async_ask_soc(LAADPAAL, regel))
+    return vragen276(hass)
+
+
+eerste276 = beurt276(c276, hass276)
+print(f"  eerste beurt: {eerste276}")
+controle("de eerste beurt: de vraag en die van het vangnet, elk één keer",
+         len(eerste276) == 2 and "weet niet hoe vol" in eerste276[0] and "nog steeds niet" in eerste276[1], f"{eerste276}")
+asyncio.run(c276._async_beurt_vergeten(store276.instellingen, LAADPAAL, coachmod._moment(None)))
+controle("afgekoppeld: allebei de merken weg", not c276._soc_asked, f"{c276._soc_asked}")
+tweede276 = beurt276(c276, hass276)
+controle("de volgende beurt: weer allebei", len(tweede276) == 2 and "nog steeds niet" in tweede276[1], f"{tweede276}")
+# Een herstart midden in de beurt: geen van beide nog eens; na het afkoppelen weer allebei.
+c276._meldingen_onthouden()
+c276b = herstart213(hass276)
+asyncio.run(c276b._async_geheugen_laden())
+controle("na een herstart staan allebei de merken er nog",
+         c276b._soc_asked == {"dev-laadpaal", "dev-laadpaal:deadline"}, f"{c276b._soc_asked}")
+controle("en komt er in dezelfde beurt niets nog eens", beurt276(c276b, hass276) == [], "")
+asyncio.run(c276b._async_beurt_vergeten(store276.instellingen, LAADPAAL, coachmod._moment(None)))
+c276b._meldingen_onthouden()
+c276c = herstart213(hass276)
+asyncio.run(c276c._async_geheugen_laden())
+derde276 = beurt276(c276c, hass276)
+controle("afgekoppeld en weer een herstart: de volgende beurt weer allebei", len(derde276) == 2, f"{derde276}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
