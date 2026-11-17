@@ -19130,6 +19130,8 @@ hr269, sr269, cr269, ir269, ar269 = bouw269(terug="0", afname="2000")
 sr = cr269._batterij_sessie("dev-growatt")
 ar269 = dict(ar269, brand="anker")
 sr["stuurt"] = True
+# In netladen vraagt de coach de regelaar om te laden; een ronde waarin hij zelf niets vraagt telt niet (v0.235.0).
+sr["regelaar"].opdracht_w = 2000.0
 controle("een batterij met een regelaar in netladen: ja; vlak onder haar bovengrens niet",
          meet269(cr269, ir269, ar269, sr, coachmod.NETLADEN) is True
          and not meet269(cr269, ir269, ar269, cr269._batterij_sessie("dev-growatt"), coachmod.MAX_LADEN, soc=92.0,
@@ -19451,6 +19453,93 @@ coach274._sessie["dev-laadpaal"] = {"begon": None}
 bewaard274 = coach274._sessie_bewaren("dev-laadpaal", coach274._sessie["dev-laadpaal"], dt.datetime(2026, 11, 16, 23, 30))
 controle("de bewaarde beurt weet bij welke tellerstand de staart hoort",
          bewaard274.get("staart_teller") == 293.34, f"{bewaard274.get('staart_teller')}")
+
+print("=== 275. het venster van een half uur raakt vol, ook als een ronde net langer duurt dan een minuut (v0.235.0) ===")
+# In een klantwoning op 17-11-2026 kwam de melding van v0.228.0 nooit: de Growatt stond uit, het netlaadvak liep vanaf
+# 01:00:47, en een ronde duurde 60,0005 tot 60,046 s. Het venster gooide alles weg wat ouder was dan 30:00 en eiste
+# daarna een oudste punt van 30:00; dat bleef op 29:00 staan. In de proeven was een ronde altijd precies 60 s.
+T275 = dt.datetime(2026, 11, 17, 1, 0, 47, 793985)
+
+
+def rondes275(n, gat=lambda i: 60.0005 + (i * 7 % 46) / 1000.0):
+    """De tijdstippen van n rondes, met de gaten van Home Assistant."""
+    uit, t = [], T275
+    for i in range(n):
+        uit.append(t)
+        t += dt.timedelta(seconds=gat(i))
+    return uit
+
+
+def eerste275(tijden, ronde):
+    """Na hoeveel minuten de eerste ja komt, of None."""
+    for t in tijden:
+        if ronde(t) is True:
+            return (t - tijden[0]).total_seconds() / 60.0
+    return None
+
+
+# 1. In een netlaadvak dat niets opneemt: de melding na een half uur, met rondes van net langer dan een minuut.
+for naam275, gat275 in (("rondes zoals in de klantwoning (60,0005 tot 60,046 s)", None),
+                        ("rondes van 60,002 s", lambda i: 60.002),
+                        ("af en toe een ronde vier seconden later", lambda i: 64.0 if i % 7 == 3 else 60.01)):
+    hx, sx, cx, ix, ax = bouw269(terug="0", afname="1662")
+    sessie275 = sessie269(cx, vak=True)
+    sessie275["growatt_geschreven"] = coachmod.GrowattSchema(
+        net=True, houden=False, vakken=[("00:00", "23:00")], stop_soc=100, vermogen_pct=50)
+    b275 = types.SimpleNamespace(soc=0.0, soc_max=100.0)
+    besluit275 = types.SimpleNamespace(stand=coachmod.NETLADEN)
+    tijden275 = rondes275(53, gat275) if gat275 else rondes275(53)
+    na275 = eerste275(tijden275, lambda t: cx._neemt_niet_op(t, ix, ax, sessie275, besluit275, b275))
+    controle(f"neemt niets op, {naam275}: binnen 31 minuten", na275 is not None and 30.0 <= na275 < 31.0, f"{na275}")
+
+# 2. Hetzelfde voor een batterij die niets levert (v0.202.0).
+hl, sl, cl, il, al = bouw243()
+bl275 = types.SimpleNamespace(soc=95.0, soc_min=15.0, reserve=None)
+sessie275l = {}
+na275l = eerste275(rondes275(53), lambda t: cl._levert_niet(t, il, sessie275l, nul243, bl275, 0.0, 4000.0, False))
+controle("levert niets, met rondes zoals in de klantwoning: binnen 31 minuten",
+         na275l is not None and 30.0 <= na275l < 31.0, f"{na275l}")
+
+# 3. Het venster zelf: één punt van vóór het half uur blijft, niet meer, en wat van ver voorbij het half uur is telt
+# niet (een lange herstart). Het half uur is echte tijd, ook over de wintertijd.
+v275, vol275 = [], False
+for t in rondes275(40):
+    v275, vol275 = coachmod._half_uur(v275, t, (t, 0.0))
+controle("na 40 rondes: één punt van vóór het half uur, en vol",
+         vol275 and (v275[-1][0] - v275[0][0]) >= coachmod.LEVERT_NIET_VENSTER
+         and (v275[-1][0] - v275[1][0]) < coachmod.LEVERT_NIET_VENSTER, f"{len(v275)}")
+oud275 = [(T275 - dt.timedelta(hours=3), 0.0)]
+v275, vol275 = oud275, False
+uit275 = []
+for t in rondes275(25, lambda i: 60.0)[1:]:
+    v275, vol275 = coachmod._half_uur(v275, t + dt.timedelta(hours=1), (t + dt.timedelta(hours=1), 0.0))
+    uit275.append(vol275)
+controle("een punt van drie uur oud telt niet: na een lange herstart opnieuw een half uur",
+         not any(uit275) and v275[0][0] > T275, f"{v275[0][0]}")
+# 4. Een batterij met een regelaar die van de coach zelf (bijna) niets mag, omdat de paal de groep vol heeft: geen
+# melding. In het virtuele huis kwam die tot v0.235.0 wel, in groep-paal-en-batterij-zonder-meter.
+for naam275r, opdracht275 in (("de coach vraagt 0 W", 0.0), ("de coach vraagt 2 kW", 2000.0)):
+    hr, sr_, cr, ir, ar = bouw269(terug="0", afname="2000")
+    s275r = cr._batterij_sessie("dev-growatt")
+    s275r["stuurt"] = True
+    s275r["regelaar"] = types.SimpleNamespace(opdracht_w=opdracht275)
+    uit275r = meet269(cr, ir, dict(ar, brand="anker"), s275r, coachmod.NETLADEN, van=0, tot=45)
+    controle(f"een regelaar in netladen, {naam275r}: {'geen melding' if not opdracht275 else 'wel'}",
+             (uit275r is True) == bool(opdracht275), f"{uit275r}")
+
+_zone181(AMSTERDAM)
+w275, wol275 = [], False
+for m in range(30):
+    t = dt.datetime(2026, 10, 25, 2, 40) + dt.timedelta(minutes=m)
+    if t.hour >= 3:
+        t = (t - dt.timedelta(hours=1)).replace(fold=1)
+    w275, wol275 = coachmod._half_uur(w275, t, (t, 0.0))
+controle("over de wintertijd (02:40 tot 02:09 de tweede keer): 29 echte minuten, nog niet vol", not wol275,
+         f"{[str(m[0]) for m in w275[:2]]}")
+t275 = dt.datetime(2026, 10, 25, 2, 10, fold=1)
+w275, wol275 = coachmod._half_uur(w275, t275, (t275, 0.0))
+du181.as_local, du181.as_utc, du181.get_default_time_zone = oud181
+controle("en een minuut later wel", wol275, "")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")

@@ -1782,6 +1782,14 @@ growatt_levert = growatt_levert_niets.kopie(
     uitleg="hetzelfde, met een Growatt die gewoon levert: geen melding",
     batterij=Batterij(**{**GROWATT_SPH, "soc": 95.0}),
 )
+# Een Growatt die niets opneemt (v0.228.0), zoals in een klantwoning in de nacht van 16 op 17-11-2026: het netlaadvak
+# liep, de accu stond op 0%, en er ging niets in. De melding kwam daar nooit, want een ronde van Home Assistant duurt
+# net iets langer dan een minuut, en het venster raakte zo nooit vol (v0.235.0).
+growatt_neemt_niets = growatt_bihorario.kopie(
+    naam="growatt-neemt-niets",
+    uitleg="dezelfde Growatt op 20%, die in het netlaadvak niets opneemt",
+    batterij=Batterij(**{**GROWATT_SPH, "soc": 20.0}, neemt_niet=True), duur_uren=16,
+)
 growatt_zon = growatt_bihorario.kopie(
     naam="growatt-zon",
     uitleg="dezelfde Growatt op een bewolkte dag: de zon van morgen vult hem, dus geen laden van het net",
@@ -2132,7 +2140,7 @@ ALLE = [
     growatt_zon_onzeker_zonder, growatt_zon_onzeker, growatt_zon_te_hoog,
     growatt_ochtend, growatt_ochtend_zonder_grens, growatt_herstart, growatt_weigert, growatt_terug_100,
     batterij_volgt_niet, batterij_volgt_niet_zelf, batterij_volgt_even_niet,
-    growatt_levert_niets, growatt_levert,
+    growatt_levert_niets, growatt_levert, growatt_neemt_niets,
     anker_ochtend, anker_ochtend_zonder, anker_ochtend_helder,
 ]
 

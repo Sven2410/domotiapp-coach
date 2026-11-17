@@ -942,6 +942,9 @@ class Batterij:
     # En een die tussen deze klokuren niets levert (v0.202.0), zoals de Growatt in een klantwoning op
     # 05-11-2026 van 17:06 tot 22:00 op 95%, terwijl het huis van het net haalde.
     staakt: tuple[str, str] | None = None
+    # En een die helemaal niets opneemt (v0.228.0), zoals de Growatt in een klantwoning vanaf 13-11-2026, en weer in
+    # de nacht van 16 op 17-11-2026: een netlaadvak tot 100% waar niets in ging.
+    neemt_niet: bool = False
     # --- een Growatt (v0.150.0) ---
     # Een SPH op het API-token: geen stuurgetal, wel een laadschema met drie vakken,
     # een vermogen in procent, een accustand om te stoppen en of hij van het net mag
@@ -1057,6 +1060,8 @@ class Batterij:
         if self.eigenwijs and self.eigenwijs[0] <= nu.strftime("%H:%M") < self.eigenwijs[1] and self.soc < 100.0:
             w = self.max_laden_w
         if self.staakt and self.staakt[0] <= nu.strftime("%H:%M") < self.staakt[1] and w < 0:
+            w = 0.0
+        if self.neemt_niet and w > 0:
             w = 0.0
         self.sensor_verloop.append((nu, w))
         grens = nu - dt.timedelta(seconds=self.sensor_na_s + 60)
@@ -1458,6 +1463,11 @@ class Verloop:
     def bat_wissels(self) -> int:
         """Hoe vaak de batterij van richting wisselde of aan- en uitging."""
         tekens = [0 if abs(w) < 1 else (1 if w > 0 else -1) for _, w in self.bat_opdrachten]
+        return sum(1 for a, b in zip(tekens, tekens[1:]) if a != b)
+
+    def bat_richtingen(self) -> int:
+        """Hoe vaak de batterij van laden naar ontladen ging of terug; aan en uit telt niet."""
+        tekens = [1 if w > 0 else -1 for _, w in self.bat_opdrachten if abs(w) >= 1]
         return sum(1 for a, b in zip(tekens, tekens[1:]) if a != b)
 
     def bat_minuten(self, stand: str) -> float:
@@ -2796,6 +2806,12 @@ def jaarbalans(coach, s: Scenario) -> None:
     coach._jaarsaldo_tot = dt.datetime(2100, 1, 1)
 
 
+# Elke stap loopt een fractie uit, zoals de rondes van Home Assistant: in een klantwoning op 17-11-2026 duurde
+# een ronde 60,0005 tot 60,05 s, nooit precies 60. Een venster dat alleen bij precies 60 s ooit vol raakt,
+# valt zo in de proeven op en niet pas in het echt.
+UITLOOP_S = 0.002
+
+
 def draai(s: Scenario, toon: bool = False) -> Verloop:
     wereld = Wereld(s)
     inst = instellingen(s)
@@ -3076,7 +3092,7 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
                     if t == nu:
                         print(f"           !! melding: {m}")
             vorige = (regel.regel, regel.amps)
-            wereld.verstrijk(stap_s)
+            wereld.verstrijk(stap_s + UITLOOP_S)
 
     asyncio.run(lus())
     asyncio.run(hass.afmaken())

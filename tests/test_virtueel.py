@@ -442,7 +442,7 @@ if (vg := v("pt-bi-zonder-accustand-groot")):
              and vg.klaar_op is not None, f"{vg.klaar_op}")
 if (vd := v("dynamisch-zonder-accustand-donker")):
     net = [r for r in vd.regels if r.amps > 0]
-    uren = sorted({r.tijd.replace(minute=0) for r in net})
+    uren = sorted({r.tijd.replace(minute=0, second=0, microsecond=0) for r in net})
     print(f"  dynamisch zonder accustand, donker: {vd.uit_net_kwh:.1f} kWh in {[f'{u:%a %H}' for u in uren]}")
     controle("dynamisch zonder accustand: van het net in één uur, het goedkoopste dat hij kende",
              len(uren) == 1 and all(r.regel.startswith("blok") for r in net)
@@ -1126,7 +1126,9 @@ if (vl := v("vaatwasser-dom-negeert")):
              len(meldingen(vl, "Zet Vaatwasser nu aan")) == 1 and len(meldingen(vl, "nog steeds uit")) == 1
              and vl.vw_gestart is None and not meldingen(vl, "is klaar"), f"{[m for _, m in vl.meldingen]}")
     controle("dom negeert: de herinnering komt drie kwartier na de vraag",
-             len(vl.meldingen) >= 2 and (vl.meldingen[1][0] - vl.meldingen[0][0]) == virtueel.dt.timedelta(minutes=45),
+             len(vl.meldingen) >= 2
+             and virtueel.dt.timedelta(minutes=45) <= (vl.meldingen[1][0] - vl.meldingen[0][0])
+             < virtueel.dt.timedelta(minutes=45, seconds=60),
              f"{[t for t, _ in vl.meldingen]}")
 
 if (vl := v("vaatwasser-dom-zelf")):
@@ -1212,7 +1214,8 @@ if (vl := v("vaatwasser-eindtijd")):
              f"{gestart_m} klaar {vw_klok(vl.vw_klaar)}")
     controle("eindtijd: en de melding komt binnen twee minuten na de start",
              len(gestart_m) == 1 and vl.vw_gestart is not None
-             and (gestart_m[0][0] - vl.vw_gestart).total_seconds() <= 120, f"{gestart_m} gestart {vw_klok(vl.vw_gestart)}")
+             # Twee rondes, en een ronde loopt een fractie uit (`UITLOOP_S` in virtueel.py).
+             and (gestart_m[0][0] - vl.vw_gestart).total_seconds() <= 121, f"{gestart_m} gestart {vw_klok(vl.vw_gestart)}")
 
 if (vl := v("vaatwasser-eindtijd-bijstellen")):
     gestart_m = [(t, m) for t, m in vl.meldingen if "Vaatwasser is gestart" in m]
@@ -1676,7 +1679,7 @@ if (vl := v("groep-paal-en-batterij-zonder-meter")):
 if (vl := v("klantwoning-prijssensor-weg-om-13")):
     klant_basis(vl, "prijssensor weg om 13")
     controle("prijssensor weg: gemeld na tien minuten, om 13:00",
-             any(t.time() == virtueel.dt.time(13, 0) and "prijssensor" in m for t, m in vl.meldingen),
+             any(t.strftime("%H:%M") == "13:00" and "prijssensor" in m for t, m in vl.meldingen),
              f"{[(t.strftime('%H:%M'), m[:40]) for t, m in vl.meldingen]}")
     controle("prijssensor weg: zonder prijzen niets van het net",
              not laadt_tussen(vl, "12:54", "13:39"), "laadde zonder prijzen")
@@ -1695,8 +1698,12 @@ if (vl := v("p1-valt-weg")):
     controle("P1 drie minuten weg: geen melding", not meldingen(vl, "netmeting"), "")
 
 if (vl := v("p1-lang-weg")):
+    # De laatste meting was om 11:59. Met rondes van precies een minuut kwam de melding om 12:05 ("6 minuten");
+    # een ronde loopt een fractie uit (`UITLOOP_S`), en dan komt hij om 12:04:00,6 ("5 minuten"). Allebei juist.
+    p1_m = [(t, m) for t, m in vl.meldingen if "netmeting" in m]
     controle("P1 lang weg: zegt het, met de juiste duur",
-             any("6 minuten" in m for m in meldingen(vl, "netmeting")), f"{meldingen(vl, 'netmeting')}")
+             len(p1_m) >= 1 and f"{int((p1_m[0][0] - p1_m[0][0].replace(hour=11, minute=59, second=0, microsecond=0)).total_seconds() // 60)} minuten" in p1_m[0][1],
+             f"{[(t.strftime('%H:%M:%S'), m) for t, m in p1_m]}")
     controle("P1 lang weg: gaat verder zodra de meter terug is", laadt_tussen(vl, "12:25", "13:30"), "")
     controle("P1 lang weg: op tijd vol", gehaald(vl), "")
 
@@ -1940,9 +1947,14 @@ for naam, vl in V.items():
                  len(vl.bat_opdrachten) / uren <= grens_per_uur, f"{len(vl.bat_opdrachten) / uren:.1f} per uur")
     # Zes mag altijd: ontladen, laden bij een negatieve prijs, vol, en weer
     # ontladen is er al drie, en dat is geen pendelen.
+    # Bij de voorrang telt alleen de richting, niet aan en uit. Daar schuift de paal elke tien minuten een ampère
+    # bij, en zakt de wens van de batterij soms net onder `STOP_W`: dan staat hij stil tot er weer `BEGIN_W` over
+    # is. Met rondes van precies 60 s viel dat zo dat het nooit gebeurde; met rondes die een fractie uitlopen,
+    # zoals in Home Assistant (v0.235.0), 16 keer aan en uit tussen 09:05 en 10:40, bij evenveel opdrachten.
     if not nalopen:
+        wissels_b = vl.bat_richtingen() if naam.startswith("voorrang-") else vl.bat_wissels()
         controle(f"{naam}: hooguit een richtingwissel per twee uur",
-                 vl.bat_wissels() <= max(6, uren / 2), f"{vl.bat_wissels()} in {uren:.0f} uur")
+                 wissels_b <= max(6, uren / 2), f"{wissels_b} in {uren:.0f} uur")
     # De laadgrens mag hoger staan als de coach hem voor de volle beurt schreef.
     hoogste = max([bat.soc_max] + [g for _, g in vl.bat_grenzen])
     controle(f"{naam}: de accustand blijft tussen zijn eigen grenzen",
@@ -2132,6 +2144,19 @@ controle("een batterij die levert krijgt nooit 'levert niets'",
          not [n for n, vl in V.items() if n != "growatt-levert-niets"
               and any("levert niets terwijl" in (g.get("message") or "") for g in vl.geschiedenis)],
          f"{[n for n, vl in V.items() if n != 'growatt-levert-niets' and any('levert niets terwijl' in (g.get('message') or '') for g in vl.geschiedenis)]}")
+if (vl := v("growatt-neemt-niets")):
+    # De rondes lopen in het virtuele huis een fractie uit, zoals in Home Assistant (`UITLOOP_S`): tot v0.235.0 kwam
+    # deze melding dan nooit, net als in de klantwoning in de nacht van 16 op 17-11-2026.
+    vak_nn = next((nu for nu, _n, _w, _s, stand in vl.bat_verloop if stand == "netladen"), None)
+    tel_nn = [(t, m) for t, m in vl.meldingen if "neemt niets op" in m]
+    print(f"  growatt-neemt-niets: vak vanaf {vak_nn}, {[(f'{t:%H:%M:%S}', m) for t, m in tel_nn]}")
+    controle("growatt-neemt-niets: een half uur na het begin van het vak één melding",
+             vak_nn is not None and len(tel_nn) == 1
+             and dt.timedelta(minutes=30) <= tel_nn[0][0] - vak_nn <= dt.timedelta(minutes=32), f"{vak_nn} {tel_nn}")
+controle("een batterij die opneemt krijgt nooit 'neemt niets op'",
+         not [n for n, vl in V.items() if n != "growatt-neemt-niets"
+              and any("neemt niets op" in (g.get("message") or "") for g in vl.geschiedenis)],
+         f"{[n for n, vl in V.items() if n != 'growatt-neemt-niets' and any('neemt niets op' in (g.get('message') or '') for g in vl.geschiedenis)]}")
 if (vl := v("batterij-volgt-even-niet")):
     controle("batterij-volgt-even-niet: twee minuten is geen storing",
              not any("volgt de coach" in (g.get("message") or "") for g in vl.geschiedenis), "")
@@ -3030,7 +3055,8 @@ if (off_v := v("paal-offline")) and (nacht_v := v("paal-offline-nacht")):
     controle("paal-offline: geen kritieke melding", not [g for g in off_v.geschiedenis if g.get("kind") == "kritiek"],
              f"{[g.get('message') for g in off_v.geschiedenis if g.get('kind') == 'kritiek']}")
     controle("paal-offline: terug om 15:00, meteen weer laden, en 'weer online' alleen in de geschiedenis",
-             any(r.tijd == eind_off and r.regel != "offline" and r.amps > 0 for r in off_v.regels)
+             any(eind_off <= r.tijd < eind_off + dt.timedelta(seconds=60) and r.regel != "offline" and r.amps > 0
+                 for r in off_v.regels)
              and not meldingen(off_v, "weer online")
              and any("Laadpaal is weer online." in str(g.get("message")) for g in off_v.geschiedenis),
              f"{[(r.tijd, r.regel) for r in off_v.regels if r.tijd == eind_off]}")

@@ -448,6 +448,8 @@ LEVERT_NIET_W = 100.0
 LEVERT_NIET_NET_W = 1000.0
 LEVERT_NIET_BOVEN = 15.0
 LEVERT_NIET_RONDEN = 10
+# Hoe ver het oudste punt van het venster voorbij `LEVERT_NIET_VENSTER` mag liggen (v0.235.0, `_half_uur`).
+LEVERT_NIET_RUIM = timedelta(minutes=5)
 # Een batterij die niets opneemt terwijl dat hoort (v0.228.0). In een klantwoning nam de Growatt vanaf 13-11-2026 21:58
 # niets meer op: 's nachts een netlaadvak tot 100% waar niets in ging, overdag 3 tot 4 kW zon naar het net met de accu op
 # 15% en daarna 0%, en op 15-11 om 13:15 een accuspanning van 0 V. 44 uur lang kwam er geen melding. Gemiddeld over
@@ -1219,6 +1221,24 @@ def _tussen(van: datetime, tot: datetime) -> timedelta:
     if van.tzinfo is None and tot.tzinfo is None:
         return dt_util.as_utc(tot) - dt_util.as_utc(van)
     return tot.astimezone(timezone.utc) - van.astimezone(timezone.utc)
+
+
+def _half_uur(venster: list, now: datetime, punt: tuple) -> tuple[list, bool]:
+    """Het venster van `_levert_niet` en `_neemt_niet_op` met het punt van nu erbij, en of het het hele
+    `LEVERT_NIET_VENSTER` beslaat (v0.235.0).
+
+    Eén punt van vóór het half uur blijft staan, zoals in `Regelaar._geduld`. Tot v0.235.0 ging alles weg wat
+    ouder was dan het half uur, en moest het oudste punt daarna een half uur oud zijn. Dat kan alleen als er
+    precies een half uur geleden een ronde was, en een ronde van Home Assistant duurt net iets langer dan een
+    minuut: in een klantwoning op 17-11-2026 60,0005 tot 60,05 s. Het oudste punt bleef op 29:00 staan, en de
+    melding van v0.228.0 kwam nooit. Een punt dat meer dan `LEVERT_NIET_RUIM` voorbij het half uur ligt, zoals
+    van vóór een lange herstart, telt niet.
+    """
+    venster = [m for m in venster if timedelta(0) <= _tussen(m[0], now) <= LEVERT_NIET_VENSTER + LEVERT_NIET_RUIM]
+    while len(venster) > 1 and _tussen(venster[1][0], now) >= LEVERT_NIET_VENSTER:
+        venster.pop(0)
+    venster.append(punt)
+    return venster, _tussen(venster[0][0], now) >= LEVERT_NIET_VENSTER and len(venster) >= LEVERT_NIET_RONDEN
 
 
 def _ververs_om(now: datetime, gelukt: bool, gewoon: timedelta) -> datetime:
@@ -9567,10 +9587,9 @@ class ChargerCoach:
         ):
             sessie.pop("levert_venster", None)
             return False
-        venster = [m for m in sessie.get("levert_venster") or [] if m[0] <= now and now - m[0] <= LEVERT_NIET_VENSTER]
-        venster.append((now, float(watt), float(net_w)))
+        venster, vol = _half_uur(sessie.get("levert_venster") or [], now, (now, float(watt), float(net_w)))
         sessie["levert_venster"] = venster
-        if now - venster[0][0] < LEVERT_NIET_VENSTER or len(venster) < LEVERT_NIET_RONDEN:
+        if not vol:
             return False
         eruit = -sum(m[1] for m in venster) / len(venster)
         erin = sum(m[2] for m in venster) / len(venster)
@@ -9609,12 +9628,16 @@ class ChargerCoach:
         ):
             sessie.pop("neemt_venster", None)
             return None
+        regelaar = None if schema else sessie.get("regelaar")
+        if regelaar is not None and regelaar.opdracht_w < NEEMT_NIET_W:
+            # De coach vraagt zelf (bijna) niets, bijvoorbeeld omdat de paal de groep vol heeft: die ronde telt niet,
+            # en het venster blijft staan (v0.235.0). In het virtuele huis kwam zo een valse melding in netladen.
+            return None
         soort = "vak" if in_vak else "zon"
-        venster = [m for m in sessie.get("neemt_venster") or []
-                   if m[0] <= now and now - m[0] <= LEVERT_NIET_VENSTER and m[3] == soort]
-        venster.append((now, float(watt), float(net_w), soort))
+        venster, vol = _half_uur([m for m in sessie.get("neemt_venster") or [] if m[3] == soort], now,
+                                 (now, float(watt), float(net_w), soort))
         sessie["neemt_venster"] = venster
-        if now - venster[0][0] < LEVERT_NIET_VENSTER or len(venster) < LEVERT_NIET_RONDEN:
+        if not vol:
             return None
         erin = sum(m[1] for m in venster) / len(venster)
         naar_net = -sum(m[2] for m in venster) / len(venster)
