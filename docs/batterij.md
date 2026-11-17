@@ -2699,3 +2699,44 @@ Niet gedaan, en waarom:
 `tools/besluiten.py` kapt `overig` niet meer af op 300 tekens. Het geschreven laadschema van een Growatt stond
 daarachter, en was achteraf niet na te lezen.
 
+
+## Het half uur raakt ook in het echt vol (v0.235.0)
+
+De melding van v0.228.0 kwam in de klantwoning nooit. In de nacht van 16 op 17-11-2026 stond de Growatt uit, op 0%,
+en liep het netlaadvak van de coach vanaf 01:00:47. De melding hoorde om 01:30:47 te komen; om 02:10 was er nog
+niets. `_levert_niet` (v0.202.0) had hetzelfde.
+
+Het venster gooide alles weg wat ouder was dan `LEVERT_NIET_VENSTER`, en eiste daarna dat het oudste punt minstens
+zo oud was. Dat kan alleen als er precies een half uur geleden een ronde was. Een ronde van Home Assistant duurt net
+iets langer dan een minuut: in de klantwoning 60,0005 tot 60,046 s, nooit precies 60. Het punt van dertig rondes
+terug was dus net te oud en viel eruit, en het oudste punt bleef op 29:00 staan. In de proeven duurde een ronde
+altijd precies 60 s, en daar ging het goed.
+
+Nu doen allebei het venster met `_half_uur`, zoals de regelaar het al deed in `_geduld`: één punt van vóór het half
+uur blijft staan, en het oordeel komt zodra dat punt een half uur oud is. Een punt dat meer dan `LEVERT_NIET_RUIM`
+(5 minuten) voorbij het half uur ligt, zoals van vóór een lange herstart, telt niet. Het half uur is echte tijd
+(`_tussen`), ook over de wintertijd.
+
+**Het virtuele huis laat zijn rondes nu uitlopen** (`UITLOOP_S`, 2 ms per stap), zoals Home Assistant. Met de oude
+code gaven `growatt-levert-niets` en het nieuwe `growatt-neemt-niets` dan geen melding; met `_half_uur` komt die
+een half uur na het begin. Proef 275 doet het rechtstreeks, met de rondes van de klantwoning, met rondes van
+60,002 s en met af en toe een ronde vier seconden later.
+
+**Een ronde waarin de coach zelf (bijna) niets vraagt, telt niet.** Een batterij met een regelaar kreeg in
+`groep-paal-en-batterij-zonder-meter` in netladen van de coach zelf 0 W, omdat de paal de groep vol had. Na een
+half uur kwam dan "neemt niets op", en een uur later nog een keer. Dat zat er sinds v0.228.0 al in, en geen proef
+keek ernaar. Nu telt een ronde waarin de opdracht van de regelaar onder `NEEMT_NIET_W` ligt niet mee, en het venster
+blijft staan. Een nieuwe controle in het virtuele huis zegt dat geen ander scenario die melding krijgt.
+
+Wat de uitloop verder liet zien, in proeven die op de seconde vergeleken: een melding om 13:00:02 in plaats van
+13:00:00, en een herinnering 45 minuten en 90 ms na de vraag. Die kijken nu naar de minuut, of naar de eerste ronde
+erna. De melding over een stille P1 kwam om 12:04:00,6 met "5 minuten" in plaats van om 12:05 met "6 minuten": de
+laatste meting was van 11:59, en de coach meldt zodra er meer dan vijf minuten om zijn. Allebei juist; de proef
+rekent de duur nu na. En in `voorrang-auto-eerst` ging de batterij tussen 09:05 en 10:40 zestien keer aan en uit,
+bij evenveel opdrachten (170 tegen 171). De paal schuift daar elke tien minuten een ampère bij, en met de stap een
+ronde eerder zakte de wens van de regelaar naar 49 W, onder `STOP_W` (50 W). Dan staat hij stil tot er weer
+`BEGIN_W` (100 W) over is. Dat is de bestaande drempel rond nul; de proef telt bij de voorrang nu alleen de
+richting. Of de regelaar daar beter kan, staat open.
+
+Andere vensters in de coach zijn nagekeken: `_meter_zeker` vraagt 8 minuten dekking van een venster van 10, en
+`_geduld` in de regelaar hield al een punt van vóór het venster vast. Die hebben dit niet.
