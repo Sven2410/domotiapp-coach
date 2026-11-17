@@ -954,7 +954,7 @@ proef("de kop past op elke breedte, met tabbladen die allemaal hetzelfde zijn en
   assert.ok(bron0().includes('title="${t(item.label)}" aria-label="${t(item.label)}"'), "een tabblad zonder tekst heeft zijn naam als title en aria-label");
   assert.deepEqual(STANDEN[0], [], "eerst alles met tekst");
   assert.deepEqual(STANDEN[1], ["ki"], "dan de knoppen rechts alleen een icoon");
-  assert.deepEqual(STANDEN[2], ["ki", "ao"], "dan het abonnement onder COACH");
+  assert.deepEqual(STANDEN[2], ["ki", "ao"], "dan het abonnement onder het logo en COACH");
   assert.deepEqual(STANDEN[3], ["ki", "ao", "onder"], "dan elk tabblad een icoon met de naam eronder (v0.227.0)");
   // Nooit één tabblad met tekst en de rest zonder (v0.227.0): de eigenaar op zijn telefoon, "sommige icoontjes hebben
   // wel tekst, sommige niet".
@@ -969,6 +969,22 @@ proef("de kop past op elke breedte, met tabbladen die allemaal hetzelfde zijn en
   assert.ok(bron.includes("new ResizeObserver(() => this.pas_())") && bron.includes("this.observer_.observe(this);"),
     "gemeten op de breedte van de kop");
   for (const knop of ['id="bot" title=', 'id="berichten" title=', 'id="home" title=']) assert.ok(bron.includes(knop), `${knop}: met title als het een icoon is`);
+});
+
+proef("het abonnement onder het logo en COACH, links gelijk met het logo (v0.237.0)", () => {
+  // De eigenaar op 17-11-2026, met een schermafdruk waarop het etiket onder COACH naast het logo stond: "ik wil dat het
+  // abbonnement onder het logo komt te staan en COACH en dan uitgelijnd". In de browser nagemeten op 320, 390, 800 en
+  // 1000 px: het etiket begint op dezelfde x als het logo, COACH staat 10 px naast het logo, het etiket valt binnen de kop.
+  const bron = readFileSync(new URL("../custom_components/domotiapp_coach/frontend/src/header.js", import.meta.url), "utf8");
+  const regel = (sel) => (bron.match(new RegExp(`:host\\(\\[ao\\]\\) ${sel.replace(/[.#]/g, "\\$&")} \\{([^}]*)\\}`)) ?? [])[1] ?? "";
+  assert.ok(/display: grid;/.test(regel(".brand")) && /grid-template-columns: auto 1fr;/.test(regel(".brand")),
+    "logo en COACH op de eerste rij; 1fr, anders maakt het etiket de kolom van het logo breder");
+  assert.ok(/justify-items: start;/.test(regel(".brand")), "alles links");
+  assert.ok(/display: contents;/.test(regel(".brand-text")), "COACH en het etiket in het raster van de kop");
+  assert.ok(/grid-column: 1 \/ -1;/.test(regel(".abo")), "het etiket over de hele breedte, vanaf het logo");
+  assert.ok(bron.indexOf(":host([zn]) .brand-text { display: none; }") > bron.indexOf(":host([ao]) .brand-text"),
+    "alleen het logo wint nog van de stand ao");
+  assert.ok(!bron.includes(":host([ao]) .brand-text { flex-direction: column"), "niet meer onder COACH naast het logo");
 });
 
 proef("nergens DomotiApp in wat een mens van COACH ziet, alleen in technische namen (v0.225.0)", async () => {
