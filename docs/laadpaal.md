@@ -2154,3 +2154,18 @@ Proef 274 in test_coach.py, en de scenario's `opgegeven-doel-80`, `opgegeven-doe
 Dezelfde valse herstart zat ook in `herstart-groep` (04:49, "92%") en `groep-paal-en-batterij-los` (05:49, "91%"). In
 `herstart-groep` wacht de coach nu van 23:16 tot 00:07 op de goedkopere uren, met en zonder herstarts precies hetzelfde
 (€ 17,26 tegen € 17,42); de proef vergelijkt daarom met de nacht zonder herstarts in plaats van "nooit stil".
+
+## De tweede vraag naar de accustand komt bij elke beurt (v0.238.0)
+
+Zonder accustand vraagt de coach er twee keer om (`_async_ask_soc`). De eerste keer als hij wil laden, en de tweede
+keer als het vangnet ingrijpt ("is nog steeds niet doorgegeven ... laadt nu door"). Elke vraag heeft een eigen merk in
+`_soc_asked`: `<paal>` en `<paal>:deadline`. Dat merk wordt bewaard (`soc_gevraagd`, v0.173.0), zodat een herstart
+niet nog eens vraagt.
+
+Bij het afkoppelen (`_async_beurt_vergeten`) ging alleen `<paal>` weg. Het merk van het vangnet bleef staan, ook na een
+herstart. Daardoor kwam de tweede vraag per paal maar één keer in zijn hele leven. Dat werd gevonden op 17-11-2026, bij
+het nalezen voor de eigenaar. Hij zei: "ik zou nu kunnen rijden en is die leger en dan kan ik het vergeten om te updaten".
+- **Nu** gaan bij het afkoppelen allebei de merken weg. Een herstart midden in een beurt vraagt nog steeds niet opnieuw.
+- **Een woning waar het merk al van eerder staat**, raakt het kwijt bij het eerstvolgende afkoppelen met deze versie.
+  Hangt de auto er tijdens de update al aan, dan komt de tweede vraag pas bij de beurt daarna weer.
+- **Proef 276** beproeft het met twee beurten, een herstart midden in een beurt, en een herstart na het afkoppelen.
