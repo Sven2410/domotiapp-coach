@@ -2158,6 +2158,13 @@ class ChargerCoach:
         # dan zou `_soc_op` nooit meer tot rust komen.
         self._soc_ruw: dict[str, float] = {}
         self._soc_ijk: dict[str, tuple[float, float]] = {}
+        # Per laadpunt: welke opgegeven accustand het is en wat de eigen meting van de paal
+        # stond toen de coach hem voor het eerst zag (v0.234.0, `_typed_soc`).
+        self._typed_ijk: dict[str, tuple[str | None, float]] = {}
+        # En de opgegeven stand met alleen de teller erbij, zolang de coach daarmee rekent: de kale
+        # stand. Met de eigen meting erbij loopt hij elke ronde door, en dat is geen auto die zich
+        # meldt; dan zou `_soc_op` het oordeel "niet vol" niet meer laten wachten.
+        self._soc_opgegeven: dict[str, float] = {}
         # Per laadpunt: de accustand van de auto, wat de paal er sindsdien in deed, en of die
         # stand vastzit (v0.176.0, `_soc_vast_bij`). Overleeft een herstart (`accustand:<id>`).
         self._soc_vast: dict[str, dict[str, Any]] = {}
@@ -14229,7 +14236,7 @@ class ChargerCoach:
         # hier dus precies één ronde achter: net te laat om te zien dat de auto
         # zich mét het "klaar" van de paal meldde. Daarom hier nog een keer, op
         # het moment dat `car` gebouwd is.
-        stand = self._soc_ruw.get(device_id, car.soc_percent)
+        stand = self._soc_ruw.get(device_id, self._soc_opgegeven.get(device_id, car.soc_percent))
         if stand != self._soc_stand.get(device_id):
             self._soc_stand[device_id] = stand
             self._soc_op[device_id] = now
@@ -14427,6 +14434,7 @@ class ChargerCoach:
             )
         else:
             self._soc_ruw.pop(device_id, None)
+            self._soc_opgegeven.pop(device_id, None)
             soc = self._typed_soc(settings, device, profile)
             geschat = soc is not None
         if soc is None and not vast:
@@ -15263,6 +15271,7 @@ class ChargerCoach:
             return None
 
         percent = float(entry["percent"])
+        self._soc_opgegeven[device.get("id", "")] = percent
         meter = self._teller(device)
         since = entry.get("meter")
         # Tot v0.94.0 bewaarde het paneel de kale toestand van de teller, en die
@@ -15271,9 +15280,60 @@ class ChargerCoach:
         if meter is not None and since is not None and meter > 0 and float(since) > meter * 100:
             since = float(since) / 1000.0
         if meter is not None and since is not None:
-            geladen = max(0.0, meter - float(since)) * self._rend_nu.get(device.get("id", ""), CHARGE_EFFICIENCY)
-            percent += geladen / capacity * 100.0
+            rend = self._rend_nu.get(device.get("id", ""), CHARGE_EFFICIENCY)
+            teller = max(0.0, meter - float(since))
+            # De kale stand verandert alleen als de teller stapt, zoals tot v0.234.0.
+            self._soc_opgegeven[device.get("id", "")] = min(100.0, percent + teller * rend / capacity * 100.0)
+            geladen = teller + self._typed_staart(device.get("id", ""), entry, meter, float(since))
+            percent += geladen * rend / capacity * 100.0
         return min(100.0, percent)
+
+    def accustand_opgegeven(self, device_id: str) -> None:
+        """De bewoner gaf net een stand op: vanaf nu telt de eigen meting voor die stand."""
+        eigen = float((self._eigen.get(device_id) or {}).get("kwh") or 0.0)
+        self._typed_ijk[device_id] = (None, eigen)
+
+    def _typed_staart(self, device_id: str, entry: dict[str, Any], meter: float, since: float) -> float:
+        """Wat er na de laatste stap van de teller nog in ging, sinds de opgegeven stand (v0.234.0).
+
+        Thuis op 16-11-2026: 12% opgegeven bij teller 281,32, en de Ford stopte om 23:35 op zijn
+        doel van 80%. De teller van de Easee stond sinds 23:01 op 293,34, dus de coach rekende
+        12,02 kWh en 70%, terwijl er ongeveer 14,3 in ging. Gevolg: een kritieke melding "niet
+        vol", een herstart van de paal en 16 A om te wekken. Zoals `_geladen` en `_staart`: de
+        teller tot zijn laatste stap, en daarna wat de coach zelf per ronde mat (`_eigen`), maar
+        nooit van vóór de opgegeven stand. Na een herstart begint de eigen meting opnieuw, met de
+        bewaarde staart van de beurt erbij; wat er tijdens de herstart in ging telt pas als de
+        teller stapt. Zo rekent hij nooit hoger dan gemeten.
+        """
+        eigen = self._eigen.get(device_id) or {}
+        nu = float(eigen.get("kwh") or 0.0)
+        sleutel = f"{entry.get('car')}|{entry.get('percent')}|{entry.get('meter')}"
+        ijkpunt = self._typed_ijk.get(device_id)
+        if ijkpunt is None or (ijkpunt[0] is not None and ijkpunt[0] != sleutel):
+            ijkpunt = (sleutel, nu)
+        elif ijkpunt[0] is None:
+            ijkpunt = (sleutel, ijkpunt[1])
+        self._typed_ijk[device_id] = ijkpunt
+        # Stapte de teller deze ronde, dan dekt hij alles tot nu: de eigen meting legt die
+        # stap pas later in de ronde vast (`meter_bij`), en anders telt dat stuk twee keer.
+        if meter != eigen.get("meter_stand"):
+            return 0.0
+        staart = max(0.0, nu - max(ijkpunt[1], float(eigen.get("meter_bij") or 0.0)))
+        # De staart van vóór een herstart, maar alleen als hij volgt op de stand die de teller nu
+        # nog heeft (anders telt de teller hem al), en die stand van na het opgeven is (anders kan
+        # hij ook van daarvoor zijn).
+        sessie = self._sessie.get(device_id) or {}
+        bron = sessie if "staart_hervat" in sessie else {
+            "staart_hervat": (self._hervat.get(device_id) or {}).get("staart_kwh"),
+            "staart_teller": (self._hervat.get(device_id) or {}).get("staart_teller"),
+        }
+        try:
+            stand = float(bron.get("staart_teller"))
+        except (TypeError, ValueError):
+            stand = None
+        if stand is not None and abs(stand - meter) < 1e-6 and stand > since + 1e-6:
+            staart += float(bron.get("staart_hervat") or 0.0)
+        return staart
 
     # Waar de tijd aan opging, in woorden die een bewoner herkent. Zelfstandig
     # geformuleerd, zodat er "20 minuten naar ..." voor kan staan zonder dat het
@@ -15625,6 +15685,8 @@ class ChargerCoach:
             # Wat de coach zelf telde sinds de laatste stap van de teller (v0.112.0).
             # Zie `_staart`.
             "staart_kwh": round(self._staart(device_id, sessie), 4),
+            # En de stand van de teller waar die staart op volgt (v0.234.0, `_typed_staart`).
+            "staart_teller": (self._eigen.get(device_id) or {}).get("meter_stand"),
             "soc_begin": sessie.get("soc_begin"),
             "laadt_sinds": laadt_sinds.replace(microsecond=0).isoformat() if laadt_sinds else None,
             "plafond": [
@@ -16289,6 +16351,7 @@ class ChargerCoach:
             "geijkt": bool(bewaard.get("geijkt")),
             "ijk_kwh": float(bewaard.get("ijk_kwh") or 0.0),
             "staart_kwh": float(bewaard.get("staart_kwh") or 0.0),
+            "staart_teller": bewaard.get("staart_teller"),
             "soc_begin": bewaard.get("soc_begin"),
             "laadt_sinds": tijd(bewaard.get("laadt_sinds")),
             "plafond_reeks": reeks,
@@ -16489,6 +16552,7 @@ class ChargerCoach:
                     ijk_kwh=hervat["ijk_kwh"],
                     eigen_bij_begin=0.0,
                     staart_hervat=hervat.get("staart_kwh", 0.0),
+                    staart_teller=hervat.get("staart_teller"),
                     ingestapt=hervat["ingestapt"],
                 )
                 # Wat er tussen de laatste opslag en nu geladen werd staat nog
@@ -16580,7 +16644,7 @@ class ChargerCoach:
         # het verslag daardoor meteen bij de storing uitging in plaats van te
         # wachten tot de auto zich meldde. Zie `_soc_bijgeteld` en
         # `_soc_bezonken`.
-        gemeten = self._soc_ruw.get(device_id, car.soc_percent)
+        gemeten = self._soc_ruw.get(device_id, self._soc_opgegeven.get(device_id, car.soc_percent))
         if sessie.get("soc_begin") is None and car.soc_percent is not None:
             sessie["soc_begin"] = car.soc_percent
         # En de laatste, voor de kaart na het loskoppelen (v0.106.0): dan is de
@@ -16616,6 +16680,13 @@ class ChargerCoach:
                 geld, stap, watts_for(charger.max_amps or 16.0, car.phases), settings, now
             )
         eigen["watt"] = _watts(self.hass, device.get("entity")) or 0.0
+        # Wanneer hij ophield, voor de eindtijd in het verslag (v0.234.0): dat wacht nog op de
+        # accustand of een kwartier na een herstart, en thuis zei het op 16-11-2026 "tot 23:54"
+        # voor een auto die om 23:35 stopte. Zie ook `klaar_sinds`.
+        if charger.charging:
+            sessie.pop("gestopt", None)
+        elif eigen["liep"]:
+            sessie["gestopt"] = now
         eigen["liep"] = charger.charging
         if geld is not None:
             # Elke vijf minuten naar de opslag, en meteen als de beurt net
@@ -17081,12 +17152,14 @@ class ChargerCoach:
             # 21-09-2026: "ik vind dat en toen liep hij al onnodig. Alle
             # meldingen moeten gewoon duidelijk en kort zijn."
             begon = sessie["begon"]
+            # Het einde is wanneer de paal klaar zei, of later als hij daarna nog laadde (na een herstart).
+            gestopt = max((m for m in (sessie.get("gestopt"), sessie.get("klaar_sinds")) if m is not None), default=now)
             if sessie.get("ingestapt"):
                 verloop = t("{kwh} sinds {klok}.", kwh=kwh, klok=f"{begon:%H:%M}") if kwh else ""
             elif kwh:
-                verloop = f"{kwh}, " + t("{van} tot {tot}.", van=f"{begon:%H:%M}", tot=f"{now:%H:%M}")
+                verloop = f"{kwh}, " + t("{van} tot {tot}.", van=f"{begon:%H:%M}", tot=f"{gestopt:%H:%M}")
             else:
-                verloop = t("{van} tot {tot}.", van=f"{begon:%H:%M}", tot=f"{now:%H:%M}")
+                verloop = t("{van} tot {tot}.", van=f"{begon:%H:%M}", tot=f"{gestopt:%H:%M}")
             # "Zonder gevolg" alleen bij een auto die ook echt niet verder kwam;
             # niet in het verslag van een auto die daarna alsnog vol werd.
             nog = (

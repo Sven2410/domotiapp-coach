@@ -644,7 +644,11 @@ meldingen = [d[2]["message"] for d in verstuurd if d[0] == "notify"]
 print(f"  {meldingen}")
 controle("meldt dat 19:00 niet gehaald is",
          any("19:00 nog niet vol" in m for m in meldingen), f"{meldingen}")
-controle("noemt de accustand", any("90%" in m for m in meldingen), f"{meldingen}")
+# 90% opgegeven, plus wat de nagebouwde paal sindsdien meldde: die zegt de hele tijd 3070 W, en
+# sinds v0.234.0 telt de coach dat zelf mee, ook als de teller stilstaat.
+stand16 = f"op {coachB._auto_soc['dev-laadpaal']:.0f}%"
+controle("noemt de accustand", coachB._auto_soc["dev-laadpaal"] > 90.0 and any(stand16 in m for m in meldingen),
+         f"{stand16} {meldingen}")
 controle("en noemt de pauze als reden",
          any("naar de pauze die je zelf aanzette" in m for m in meldingen), f"{meldingen}")
 controle("en dat hij doorlaadt tot de auto vol is",
@@ -19387,6 +19391,66 @@ c273n = coachmod.ChargerCoach(hass273n)
 c273n.async_start()
 controle("na een herstart luistert de coach weer naar de knoppen",
          any(soort == "mobile_app_notification_action" for soort, _ in hass273n.bus.luisteraars), f"{hass273n.bus.luisteraars}")
+
+print("=== 274. een opgegeven accustand telt ook wat de teller nog niet zag (v0.234.0) ===")
+# Thuis op 16-11-2026: 12% opgegeven bij teller 281,32, de auto stopte om 23:35 op zijn doel van
+# 80%, en de teller van de paal stond sinds 23:01 op 293,34. Met alleen de teller zei de coach 70%.
+PAAL274 = dict(LAADPAAL, entities={**LAADPAAL["entities"], "lifetime_energy": "sensor.teller274"})
+PROFIEL274 = {"id": "car-1", "capacity_kwh": 19.7}
+inst274 = instellingen(car_soc=[{"device": "dev-laadpaal", "car": "car-1", "percent": 12.0, "meter": 281.32}])
+huis274 = {**huis(), "sensor.teller274": {"state": "281.32", "attributes": {"unit_of_measurement": "kWh"}}}
+hass274, _, coach274 = bouw(huis274, inst274)
+coach274._rend_nu["dev-laadpaal"] = 0.9475
+coach274._eigen["dev-laadpaal"] = {"kwh": 0.0, "watt": 0.0, "liep": True, "meter_stand": 281.32, "meter_bij": 0.0}
+soc274 = lambda: coach274._typed_soc(inst274, PAAL274, PROFIEL274)  # noqa: E731
+pct274 = lambda kwh: 12.0 + kwh * 0.9475 / 19.7 * 100.0  # noqa: E731
+controle("bij het opgeven telt alleen wat er opgegeven is", abs(soc274() - 12.0) < 1e-6, f"{soc274()}")
+coach274._eigen["dev-laadpaal"]["kwh"] = 3.0
+controle("de teller staat nog stil: de eigen meting telt", abs(soc274() - pct274(3.0)) < 1e-6, f"{soc274()}")
+# Dezelfde 12% nog eens opgeven, bij dezelfde teller: de 3 kWh daarvoor tellen dan niet meer.
+coach274.accustand_opgegeven("dev-laadpaal")
+controle("hetzelfde getal opnieuw opgeven begint opnieuw", abs(soc274() - 12.0) < 1e-6, f"{soc274()}")
+coach274._typed_ijk["dev-laadpaal"] = (coach274._typed_ijk["dev-laadpaal"][0], 0.0)
+bron274 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components" / "domotiapp_coach"
+           / "entiteit.py").read_text(encoding="utf-8")
+controle("de kaart en het paneel zeggen het de coach als er een stand is opgegeven",
+         "coach.accustand_opgegeven(device_id)" in bron274, "")
+# De teller stapt, en de eigen meting heeft die stap deze ronde nog niet vastgelegd.
+hass274.states.zet("sensor.teller274", "293.34", {"unit_of_measurement": "kWh"})
+controle("in de ronde dat de teller stapt telt alleen de teller, niet twee keer",
+         abs(soc274() - pct274(12.02)) < 1e-6, f"{soc274()}")
+coach274._eigen["dev-laadpaal"].update(kwh=12.1, meter_stand=293.34, meter_bij=12.1)
+coach274._eigen["dev-laadpaal"]["kwh"] = 14.43
+print(f"  teller 12,02 kWh, daarna zelf 2,33 kWh gemeten: {soc274():.1f}%")
+controle("daarna de teller tot zijn stap en de eigen meting erna: 81% en niet 70%",
+         abs(soc274() - pct274(12.02 + 2.33)) < 1e-6 and round(soc274()) == 81, f"{soc274()}")
+# Dezelfde stand nog een keer opgeven begint opnieuw bij de eigen meting van dat moment.
+inst274["car_soc"] = [{"device": "dev-laadpaal", "car": "car-1", "percent": 81.0, "meter": 293.34}]
+coach274.accustand_opgegeven("dev-laadpaal")
+controle("een nieuwe opgegeven stand telt niets van ervoor", abs(soc274() - 81.0) < 1e-6, f"{soc274()}")
+inst274["car_soc"] = [{"device": "dev-laadpaal", "car": "car-1", "percent": 12.0, "meter": 281.32}]
+
+# Na een herstart: de eigen meting begint opnieuw, en de bewaarde staart telt alleen als hij op de
+# tellerstand van nu volgt.
+def herstart274(staart_teller):
+    h, _, c = bouw(huis274, inst274)
+    h.states.zet("sensor.teller274", "293.34", {"unit_of_measurement": "kWh"})
+    c._rend_nu["dev-laadpaal"] = 0.9475
+    c._eigen["dev-laadpaal"] = {"kwh": 0.0, "watt": 0.0, "liep": True, "meter_stand": 293.34, "meter_bij": 0.0}
+    c._sessie["dev-laadpaal"] = {"staart_hervat": 1.0, "staart_teller": staart_teller}
+    c._typed_soc(inst274, PAAL274, PROFIEL274)
+    c._eigen["dev-laadpaal"]["kwh"] = 0.5
+    return c._typed_soc(inst274, PAAL274, PROFIEL274)
+controle("na een herstart: teller, bewaarde staart en wat er sindsdien gemeten is",
+         abs(herstart274(293.34) - pct274(12.02 + 1.0 + 0.5)) < 1e-6, f"{herstart274(293.34)}")
+controle("een staart van vóór de laatste stap telt niet: die zit al in de teller",
+         abs(herstart274(290.0) - pct274(12.02 + 0.5)) < 1e-6, f"{herstart274(290.0)}")
+controle("en ook niet als de teller sinds het opgeven nooit stapte",
+         abs(herstart274(281.32) - 12.0 - 0.5 * 0.9475 / 19.7 * 100.0) > 0.0, "")
+coach274._sessie["dev-laadpaal"] = {"begon": None}
+bewaard274 = coach274._sessie_bewaren("dev-laadpaal", coach274._sessie["dev-laadpaal"], dt.datetime(2026, 11, 16, 23, 30))
+controle("de bewaarde beurt weet bij welke tellerstand de staart hoort",
+         bewaard274.get("staart_teller") == 293.34, f"{bewaard274.get('staart_teller')}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
