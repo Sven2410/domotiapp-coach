@@ -1340,7 +1340,12 @@ class DacViewHistory extends DacElement {
     );
 
     const zinnen = [];
-    if (!roles.solar.length) {
+    // Zonder zonnepanelen is er geen omvormer om in te vullen (v0.236.0): bij "later" zegt hij dat, bij "nee" niets.
+    if (this.geenPanelen_()) {
+      if (this.settings_?.sources?.solar_panels === "later") {
+        zinnen.push(t("Zonnepanelen komen later. Zodra ze er zijn, staan hier ook je opwek en je zelfbenutting."));
+      }
+    } else if (!roles.solar.length) {
       zinnen.push(t(
         "Je opwekteller staat nog niet ingesteld, dus je ziet hier alleen wat er van het net kwam en wat er naar het net ging. Vul bij Installatie onder Meterstanden de teller van je omvormer in, dan komen je opwek, je verbruik en je zelfbenutting er ook bij te staan."
       ));
@@ -1661,8 +1666,9 @@ class DacViewHistory extends DacElement {
     // Met een thuisbatterij telt wat er uit de batterij kwam alleen als eigen
     // stroom voor het deel dat zon was (`herkomst`, v0.144.0): wat er 's nachts
     // van het net in ging blijft van het net, ook als hij het pas later afgeeft.
+    // Zonder zonnepanelen kwam alles van het net, en is dat altijd 0 %: dan staat het er niet (v0.236.0).
     totals.selfSufficient =
-      verbruikBekend && totals.used > 0 ? Math.max(0, (1 - sum("fromGrid") / totals.used) * 100) : null;
+      hasSolar && totals.used > 0 ? Math.max(0, (1 - sum("fromGrid") / totals.used) * 100) : null;
 
     this.paintTotals_(totals);
     this.paintLegend_();
@@ -1760,14 +1766,16 @@ class DacViewHistory extends DacElement {
       if (!row) return;
       this.paintTotals_(
         {
-          solar: row.solar,
-          used: row.used,
+          // Dezelfde tegels als de hele periode (v0.236.0): zonder opwekteller geen opwek, en zonder
+          // zonnepanelen wel het verbruik.
+          solar: hasSolar ? row.solar : null,
+          used: verbruikBekend ? row.used : null,
           bought: row.bought,
           sold: row.sold,
           accuIn: row.accuIn,
           accuUit: row.accuUit,
-          selfUse: row.solar > 0 ? Math.min(100, (row.zonZelf / row.solar) * 100) : null,
-          selfSufficient: row.used > 0 ? Math.max(0, (1 - row.fromGrid / row.used) * 100) : null,
+          selfUse: hasSolar && row.solar > 0 ? Math.min(100, (row.zonZelf / row.solar) * 100) : null,
+          selfSufficient: hasSolar && row.used > 0 ? Math.max(0, (1 - row.fromGrid / row.used) * 100) : null,
         },
         bucketTitle(this.period_, row.start)
       );
@@ -1812,6 +1820,8 @@ class DacViewHistory extends DacElement {
     const prices = this.prices_ ?? new Map();
     const rate = tariff(this.feed_, this.settings_?.contract);
     const hasSolar = this.meters_().solar.length > 0;
+    // Zonder zonnepanelen wel het verbruik, zoals op het scherm (v0.236.0).
+    const alleenVerbruik = !hasSolar && this.geenPanelen_();
     const gas = new Map((this.rows_?.gas ?? []).map((row) => [row.start.getTime(), row.value]));
     const totals = this.totals_ ?? {};
 
@@ -1853,6 +1863,7 @@ class DacViewHistory extends DacElement {
     // ---- de tabel per tijdvak ----
     const kop = [t("Periode")];
     if (hasSolar) kop.push(t("Opgewekt"), t("Verbruikt"), t("Eigen zon"));
+    else if (alleenVerbruik) kop.push(t("Verbruikt"));
     kop.push(t("Van het net"), t("Naar het net"));
     if (gas.size) kop.push(t("Gas"));
     if (water.size) kop.push(t("Water"));
@@ -1862,6 +1873,7 @@ class DacViewHistory extends DacElement {
       const prijs = prijsBij(row);
       const cellen = [bucketTitle(this.period_, row.start)];
       if (hasSolar) cellen.push(kwh(row.solar), kwh(row.used), kwh(row.zonZelf));
+      else if (alleenVerbruik) cellen.push(kwh(row.used));
       cellen.push(kwh(row.bought), kwh(row.sold));
       if (gas.size) cellen.push(`${aantal(gas.get(row.start.getTime()) ?? 0, 2)} m³`);
       if (water.size) cellen.push(`${aantal(water.get(row.start.getTime()) ?? 0, 2)} m³`);
@@ -1874,6 +1886,7 @@ class DacViewHistory extends DacElement {
     const som = (key) => rows.reduce((total, row) => total + row[key], 0);
     const totaalCellen = [t("Totaal")];
     if (hasSolar) totaalCellen.push(kwh(som("solar")), kwh(som("used")), kwh(som("zonZelf")));
+    else if (alleenVerbruik) totaalCellen.push(kwh(som("used")));
     totaalCellen.push(kwh(som("bought")), kwh(som("sold")));
     if (gas.size) {
       totaalCellen.push(`${aantal([...gas.values()].reduce((a, b) => a + b, 0), 2)} m³`);
@@ -1917,7 +1930,7 @@ class DacViewHistory extends DacElement {
 
     const energieVakjes = [
       hasSolar ? cel("Opgewekt", kwh(totals.solar)) : null,
-      hasSolar || this.geenPanelen_() ? cel("Verbruikt", kwh(totals.used)) : null,
+      hasSolar || alleenVerbruik ? cel("Verbruikt", kwh(totals.used)) : null,
       cel("Van het net", kwh(totals.bought)),
       cel("Naar het net", kwh(totals.sold)),
       this.accuTegels_ ? cel("Batterij geladen", kwh(totals.accuIn ?? 0)) : null,
@@ -2491,8 +2504,11 @@ class DacViewHistory extends DacElement {
     this.$("#totals-title").textContent = title ?? "";
 
     const rows = [];
-    if (totals.solar !== null) {
+    if (totals.solar !== null && totals.solar !== undefined) {
       rows.push({ label: t("Opgewekt"), value: energy(totals.solar), tone: "var(--dac-solar)" });
+    }
+    // Zonder zonnepanelen is het verbruik er ook zonder opwek (v0.236.0).
+    if (totals.used !== null && totals.used !== undefined) {
       rows.push({ label: t("Verbruikt"), value: energy(totals.used), tone: "var(--dac-house)" });
     }
     rows.push({ label: t("Van het net"), value: energy(totals.bought), tone: "var(--dac-grid-in)" });
@@ -2546,8 +2562,9 @@ class DacViewHistory extends DacElement {
   paintLegend_() {
     // De namen vertaald bij het tekenen; "Batterij" staat er letterlijk, want de proef
     // van de batterij in de grafiek (v0.126.2) zoekt `label: "Batterij"`.
+    // Eigen zon alleen met een opwekteller, zoals in het rapport (`metZon`, v0.236.0).
     const entries = [
-      { tone: "var(--dac-solar)", label: nt("Eigen zon gebruikt") },
+      ...(this.meters_().solar.length ? [{ tone: "var(--dac-solar)", label: nt("Eigen zon gebruikt") }] : []),
       ...(this.accuTegels_ ? [{ tone: "var(--dac-device-1)", label: "Batterij" }] : []),
       { tone: "var(--dac-grid-in)", label: nt("Van het net") },
       { tone: "var(--dac-grid-out)", label: nt("Naar het net") },
