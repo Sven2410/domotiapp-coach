@@ -2123,3 +2123,34 @@ Proef 81 in test_planner.py (het verbruik, de drempel, het moment, de klokwissel
 slim, de accustand weg, te weinig tijd, Easee en Alfen, een herstart, het leren met een herstart), de proef "de
 herinnering bij de paal" in test_rapport.mjs, en de scenario's `vast-vergeten-aan-te-sluiten` en
 `vast-op-tijd-aangesloten`.
+
+## Een opgegeven accustand loopt niet achter op de teller (v0.234.0)
+
+Thuis op 16-11-2026 gaf de eigenaar 12% op voor een auto zonder accusensor, bij teller 281,32. De auto laadde van 20:02
+tot 23:35 ongeveer 4 kW en stopte toen op zijn doel van 80%. De teller van de Easee stapt ongeveer eens per uur, en
+stond sinds 23:01 op 293,34. `_typed_soc` rekende alleen met de teller: 12,02 kWh, dus 70%. Daarop volgden een herstart
+van de paal, 16 A om te wekken, een kritieke melding "70%, niet vol" en een kwartier later het verslag "laadt niet
+verder en staat op 70%, 14,4 kWh, 20:02 tot 23:54". De coach telde zelf 14,35 kWh, en dat is 81%.
+
+Nu telt een opgegeven stand zoals `_geladen` en `_staart`: de teller tot zijn laatste stap, en daarna wat de coach zelf
+per ronde mat (`_eigen`), maar nooit van vóór de opgave (`_typed_staart`, `_typed_ijk`). In de ronde dat de teller
+stapt telt alleen de teller, want de eigen meting legt die stap pas later in de ronde vast. Na een herstart begint de
+eigen meting opnieuw. De bewaarde staart van de beurt telt alleen als hij op de tellerstand van nu volgt
+(`staart_teller`), en die stand van na de opgave is. Wat er tijdens de herstart en sinds de laatste opslag (tot vijf
+minuten) in ging, telt pas als de teller stapt. Zo rekent hij soms te laag en nooit te hoog: te hoog zou hem te vroeg
+laten stoppen.
+
+Het oordeel "niet vol" en het verslag wachten op de stand met alleen de teller erbij (`_soc_opgegeven`), zoals
+voorheen. De stand met de eigen meting loopt elke ronde door, en dat is geen auto die zich meldt (`_soc_bezonken`).
+Het verslag eindigt sindsdien op het moment dat de paal klaar zei, of later als hij daarna nog laadde (`gestopt`), en
+niet op het moment van het verslag.
+
+Wat er nog kan: een herstart in de minuten vóór de auto zijn doel haalt. In het scenario
+`opgegeven-doel-80-herstart` (herstart om 12:20, auto vol om 12:28) kent de coach 79% in plaats van 80%, en komt er
+dus nog één herstart en een melding. Voorheen was dat 71%.
+
+Proef 274 in test_coach.py, en de scenario's `opgegeven-doel-80`, `opgegeven-doel-80-herstart` en
+`opgegeven-grens-60` (een auto die echt op 60% stopt krijgt de melding nog wel, nu met 60% in plaats van 54%).
+Dezelfde valse herstart zat ook in `herstart-groep` (04:49, "92%") en `groep-paal-en-batterij-los` (05:49, "91%"). In
+`herstart-groep` wacht de coach nu van 23:16 tot 00:07 op de goedkopere uren, met en zonder herstarts precies hetzelfde
+(€ 17,26 tegen € 17,42); de proef vergelijkt daarom met de nacht zonder herstarts in plaats van "nooit stil".

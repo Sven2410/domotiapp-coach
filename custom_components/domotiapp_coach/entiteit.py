@@ -167,6 +167,9 @@ async def async_accustand(
         rows.append({"device": device_id, "car": car, "percent": float(percent), "meter": meter})
 
     settings = await store.async_save({"car_soc": rows})
+    coach = (hass.data.get(DOMAIN) or {}).get("coach")
+    if coach is not None and percent is not None:
+        coach.accustand_opgegeven(device_id)
     hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
     return settings
 

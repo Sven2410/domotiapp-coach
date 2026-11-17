@@ -2007,6 +2007,27 @@ klaar_equalizer = vast_zonnig.kopie(
     duur_uren=40.0,
     gebeurtenissen=[("07:30", "soc_opgeven", 30), ("+1 13:39", "equalizer_nul", None)],
 )
+# Een opgegeven accustand loopt niet achter op de teller (v0.234.0). Thuis op 16-11-2026 stopte een auto zonder
+# accusensor om 23:35 op zijn doel van 80%, tussen twee stappen van de teller van de Easee; de coach rekende alleen
+# met de teller, zei 70%, startte de paal opnieuw, bood 16 A om te wekken en stuurde een kritieke melding.
+opgegeven_doel = vast_zonnig.kopie(
+    naam="opgegeven-doel-80",
+    uitleg="geen accustand uit de auto, 30% opgegeven, de auto stopt op 80% en dat staat in het profiel; "
+           "de teller van de paal stapt eens per uur",
+    auto=replace(BUS, meldt_soc=False, laadgrens=80.0, doel=80.0),
+    gebeurtenissen=[("07:30", "soc_opgeven", 30)],
+)
+opgegeven_doel_herstart = opgegeven_doel.kopie(
+    naam="opgegeven-doel-80-herstart",
+    uitleg="hetzelfde, met een herstart om 11:00 en om 12:20, de laatste na de laatste stap van de teller",
+    gebeurtenissen=[("07:30", "soc_opgeven", 30), ("11:00", "herstart", None), ("12:20", "herstart", None)],
+)
+# Een auto die echt eerder stopt dan zijn doel krijgt de melding nog wel.
+opgegeven_grens = opgegeven_doel.kopie(
+    naam="opgegeven-grens-60",
+    uitleg="geen accustand uit de auto, 30% opgegeven, doel 80% maar de auto stopt zelf op 60%",
+    auto=replace(BUS, meldt_soc=False, laadgrens=60.0, doel=80.0),
+)
 # Een paal en een batterij op dezelfde kast (v0.164.0). In een klantwoning plande de batterij op 26-10-2026
 # 2,5 kW van het net in de uren dat de paal er 13 A per fase op zette, op een kast van 3x16 A. De regelaar
 # hield de zekering heel, maar het uurplan rekende met goedkope kWh die niet kwamen.
@@ -2080,6 +2101,7 @@ ALLE = [
     dyn_negatief, dyn_kwartier_later, dyn_geen_klaar_tijd,
     meter_teken, meter_teken_om, een_fase_krap, ford_geen_ruimte, eigen_marge, teller_achter, oven, puls_snelladen, auto_neemt_minder, zekering_sprong, zekering_sprong_hele, uitschieter_hele, uitschieter_hele_zonder, lastbewaker, warmtepomp, ford_bijkomen, ford_oude_opslag, warmtepomp_uit,
     geen_soc, soc_opgegeven, soc_traag, laadgrens, laadgrens_ingesteld,
+    opgegeven_doel, opgegeven_doel_herstart, opgegeven_grens,
     doel_onder_auto, soc_stappen, bijna_vol, auto_slaapt,
     pauze, pauze_vergeten, snelladen, kabel_eruit, oude_tijden,
     p1_weg, p1_lang_weg, paal_traag,

@@ -168,14 +168,16 @@ for naam, vl in V.items():
         # teller wint als hij hoger is (warmtepomp-nacht: 42,6 in het verslag, 41,8 in
         # het geld, 42,8 in de auto), of het geld als dat er zelf al iets boven zit
         # (easee-fasekeuze: 51,55 tegen 51,36). Alleen bij één laadbeurt, want dan is duidelijk
-        # welke regel bij welk verslag hoort.
+        # welke regel bij welk verslag hoort. Met 0,15 kWh speling sinds v0.234.0: zonder de valse
+        # herstart komt het verslag vóór de volgende stap van de teller, en dan telt `_geladen` de
+        # teller plus de eigen staart (groep-paal-en-batterij-los: 51,47 tegen 51,35 in het geld).
         laden = [b for b in vl.beurten if b.get("kind", "laden") == "laden"]
         vol = [m for m in meldingen(vl, "is vol") if " kWh, " in m]
         if len(laden) == 1 and len(vol) == 1:
             getal = re.search(r"(\d+(?:,\d+)?) kWh, ", vol[0])
             gezegd = float(getal.group(1).replace(",", ".")) if getal else None
             controle(f"{naam}: het verslag noemt minstens de kWh van het geld, en niet meer dan geld of auto",
-                     gezegd is not None and laden[0]["kwh"] - 0.05 <= gezegd <= max(laden[0]["kwh"], vl.geladen_kwh) + 0.1,
+                     gezegd is not None and laden[0]["kwh"] - 0.05 <= gezegd <= max(laden[0]["kwh"], vl.geladen_kwh) + 0.15,
                      f"verslag {gezegd} tegen {laden[0]['kwh']:.2f} in de beurt, {vl.geladen_kwh:.2f} geladen")
         # Bespaard is de maat (vanaf het inpluggen op vol vermogen) min wat er
         # betaald is, en nooit onder nul. De eigenaar: "een min getal bij besparen
@@ -2299,10 +2301,16 @@ if (vl := v("herstart-groep")) and (zonder := v("herstart-groep-zonder")):
     tussen = [r for r in vl.regels if eerst and eerst <= r.tijd <= laatst]
     print(f"  herstart-groep: laden {eerst} tot {laatst}, vol {vl.klaar_op} (zonder herstarts {zonder.klaar_op}), "
           f"{vl.wissels()} wissels (zonder {zonder.wissels()}), € {vl.kosten:.2f} (zonder € {zonder.kosten:.2f})")
-    controle("herstart-groep: na een herstart laadt hij gewoon door, geen 6 A 'net begonnen'",
-             not [r for r in tussen if "hold" in r.regel], f"{sorted({r.regel for r in tussen if 'hold' in r.regel})}")
-    controle("herstart-groep: de paal staat tussendoor niet stil",
-             all(r.paal_w > 1000 for r in tussen if r.regel.split('+')[0] not in ('complete',)), "")
+    # Naast dezelfde nacht zonder herstarts, en niet "nooit": sinds v0.234.0 telt de opgegeven stand ook wat de
+    # teller nog niet zag, en wacht hij van 23:16 tot 00:07 op de goedkopere uren na middernacht. Dat doet hij
+    # zonder herstarts net zo.
+    z_op = {r.tijd: r for r in zonder.regels}
+    hold_hg = [r.tijd for r in tussen if "hold" in r.regel and "hold" not in getattr(z_op.get(r.tijd), "regel", "")]
+    controle("herstart-groep: na een herstart laadt hij gewoon door, geen 6 A 'net begonnen'", not hold_hg, f"{hold_hg[:5]}")
+    stil_hg = [r.tijd for r in tussen if r.paal_w <= 1000 and r.regel.split('+')[0] != 'complete'
+               and getattr(z_op.get(r.tijd), "paal_w", 0.0) > 1000]
+    controle("herstart-groep: de paal staat tussendoor niet stil waar hij zonder herstarts laadt", not stil_hg,
+             f"{stil_hg[:5]}")
     controle("herstart-groep: vol op hetzelfde moment als zonder herstarts",
              vl.klaar_op is not None and zonder.klaar_op is not None
              and abs((vl.klaar_op - zonder.klaar_op).total_seconds()) <= 300, f"{vl.klaar_op} {zonder.klaar_op}")
@@ -3081,6 +3089,37 @@ if (eq_v := v("klaar-equalizer-dip")):
              all(r.regel == "complete" and r.amps == 0 for r in na_dip), f"{sorted({(r.regel, r.amps) for r in na_dip})}")
     controle("klaar-equalizer-dip: geen melding na de dip", not [m for t, m in eq_v.meldingen if t >= dip],
              f"{[m for t, m in eq_v.meldingen if t >= dip]}")
+
+# Een opgegeven accustand loopt niet achter op de teller (v0.234.0). Thuis op 16-11-2026 stopte een auto zonder
+# accusensor om 23:35 op zijn doel van 80%, tussen twee stappen van de teller; de coach zei 70%, herstartte de paal,
+# bood 16 A om te wekken en stuurde om 23:39 en 23:54 een melding.
+for naam_o in ("opgegeven-doel-80", "opgegeven-doel-80-herstart", "opgegeven-grens-60"):
+    if not (o_v := v(naam_o)):
+        continue
+    geschat = [(r.tijd, r.soc_coach, r.soc) for r in o_v.regels if r.soc_coach is not None]
+    hoogst = max((c - e for _, c, e in geschat), default=0.0)
+    print(f"  {naam_o}: de coach hooguit {hoogst:+.2f} procentpunt boven de auto; {[m for _, m in o_v.meldingen][1:]}")
+    controle(f"{naam_o}: de geschatte stand komt nooit boven de echte", hoogst < 0.5, f"{hoogst}")
+    stop_o = next((r for r in o_v.regels if r.status == "completed"), None)
+    controle(f"{naam_o}: bij het stoppen kent de coach de stand op hooguit 2 procentpunt",
+             stop_o is not None and abs(stop_o.soc_coach - stop_o.soc) <= 2.0, f"{stop_o}")
+    verslag_o = [m for _, m in o_v.meldingen if "kWh," in m]
+    controle(f"{naam_o}: het verslag eindigt op het moment dat hij stopte",
+             stop_o is not None and len(verslag_o) == 1 and f"tot {stop_o.tijd:%H:%M}." in verslag_o[0], f"{verslag_o}")
+if (o_v := v("opgegeven-doel-80")):
+    stop_o = next(r for r in o_v.regels if r.status == "completed")
+    na_o = [r for r in o_v.regels if r.tijd >= stop_o.tijd]
+    controle("opgegeven-doel-80: geen melding 'niet vol', alleen het verslag",
+             [m.split(chr(10))[0] for t, m in o_v.meldingen if t >= stop_o.tijd] == ["Bus geladen van 30 naar 80% (geschat)."],
+             f"{o_v.meldingen}")
+    controle("opgegeven-doel-80: geen herstart van de paal en geen wekstroom na het stoppen",
+             all(r.amps == 0 and "wake" not in r.regel for r in na_o), f"{sorted({(r.regel, r.amps) for r in na_o})}")
+if (o_v := v("opgegeven-grens-60")):
+    # Eerst de herstart, dan pas het verslag (eis 7), en allebei met 60%.
+    na_o = [m for _, m in o_v.meldingen][1:]
+    controle("opgegeven-grens-60: een auto die echt eerder stopt krijgt eerst één herstart en dan het verslag, met 60%",
+             len(na_o) == 2 and "opnieuw gestart" in na_o[0] and "laadt niet verder" in na_o[1]
+             and all("staat op 60%" in m for m in na_o), f"{na_o}")
 
 print(f"\n{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
