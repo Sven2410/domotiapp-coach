@@ -19,7 +19,7 @@ import logging
 import pathlib
 import re
 import secrets
-from datetime import timedelta
+from datetime import datetime, timedelta
 from aiohttp import web
 
 from homeassistant.components.http import HomeAssistantView
@@ -161,6 +161,11 @@ def async_register(hass: HomeAssistant) -> None:
     # Opruimen (v0.230.0): elk uur, en één keer nu, zodat het na een herstart of een uitgevallen dag ook klopt.
     from homeassistant.helpers.event import async_track_time_interval
 
-    async_track_time_interval(hass, lambda _nu: hass.async_create_task(async_opruimen(hass, gesloten=True)),
-                              OPRUIMEN_ELK)
+    # Een coroutinefunctie, geen lambda (v0.239.0). Een gewone functie draait Home Assistant in een thread van de
+    # executor, en daar weigert hij async_create_task: tot v0.239.0 liep het opruimen van elk uur daardoor nooit,
+    # en stond er elk uur een fout in het systeemlog.
+    async def _elk_uur(_nu: datetime) -> None:
+        await async_opruimen(hass, gesloten=True)
+
+    async_track_time_interval(hass, _elk_uur, OPRUIMEN_ELK)
     hass.async_create_task(async_opruimen(hass, gesloten=True))

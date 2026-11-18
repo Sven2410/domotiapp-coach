@@ -296,6 +296,22 @@ verwijderen goed?"; op het voorstel (een dag uit het zicht, na 30 dagen de foto'
 
 Proef 271, met de grenzen, een herstart en heropenen. De proef "gesloten is gesloten" in test_rapport.mjs.
 
+**Elk uur, ook echt (v0.239.0).** Tot v0.239.0 liep de ronde van elk uur nooit. `async_register` gaf een gewone
+`lambda` aan `async_track_time_interval`, en zo'n functie (geen coroutine, geen `@callback`) draait Home Assistant in een
+thread van de executor. Daar weigert hij `hass.async_create_task`. In een klantwoning stond daardoor van 17 tot
+18-11-2026 elk uur "calls hass.async_create_task from a thread other than the event loop" in het systeemlog, plus
+"coroutine 'async_opruimen' was never awaited". Er werd alleen opgeruimd bij een start van Home Assistant: losse foto's
+na een uur, en de foto's en tickets na 30 en 90 dagen. Dat een gesloten ticket na een dag uit `list` gaat, rekent
+`lijst` in tickets.py zelf uit, en dat werkte wel.
+
+- Nu is het een coroutinefunctie (`_elk_uur`), die Home Assistant zelf op de lus draait.
+- Het harnas (`tests/harnas.py`) doet net als Home Assistant. `@callback` merkt een functie, en `async_track_time_interval`
+  en `async_call_later` weigeren een functie die geen coroutinefunctie en geen `@callback` is. Zo valt een volgende
+  klok in een thread al in de proeven op, in elk bestand dat het harnas gebruikt.
+- Proef 277 zet de klok van bijlagen.py, draait de ronde zoals Home Assistant dat doet en ziet een ticket van 91
+  dagen dicht weggaan. Daarnaast leest hij de bron: nergens een `lambda` met `async_create_task`. Met de oude lambda
+  vallen vier controles om.
+
 ## Elke melding opent de plek waar je er iets mee doet (v0.232.0)
 
 De eigenaar op 16-11-2026: "Ja ik wil werkende klikbare meldingen. Ook als ik de melding krijg van de coach van zet je

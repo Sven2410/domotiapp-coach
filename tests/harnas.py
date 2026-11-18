@@ -54,7 +54,15 @@ class HomeAssistant:  # noqa: D101
 
 
 core.HomeAssistant = HomeAssistant
-core.callback = lambda func: func
+
+
+def _callback(func):
+    """Zoals @callback in Home Assistant: het merkt de functie, zodat een klok weet dat hij op de lus mag."""
+    func._hass_callback = True
+    return func
+
+
+core.callback = _callback
 
 
 class Event:  # noqa: D101
@@ -85,8 +93,31 @@ start = types.ModuleType("homeassistant.helpers.start")
 start.async_at_started = lambda *a, **k: (lambda: None)
 gebeurtenis = types.ModuleType("homeassistant.helpers.event")
 gebeurtenis.async_track_state_change_event = lambda *a, **k: (lambda: None)
-gebeurtenis.async_track_time_interval = lambda *a, **k: (lambda: None)
-gebeurtenis.async_call_later = lambda *a, **k: (lambda: None)
+
+
+def _job_op_de_lus(doel) -> None:
+    """Wat Home Assistant met een klok doet (v0.239.0): een coroutinefunctie of een @callback draait op de lus,
+    al het andere in een thread van de executor. Daar mag niets van de lus, dus dat weigert dit harnas meteen."""
+    while hasattr(doel, "func") and hasattr(doel, "args"):  # functools.partial, zoals HassJob die uitpakt
+        doel = doel.func
+    if asyncio.iscoroutinefunction(doel) or getattr(doel, "_hass_callback", False):
+        return
+    raise RuntimeError(f"{getattr(doel, '__qualname__', doel)} is geen coroutinefunctie en geen @callback: "
+                       "Home Assistant draait hem in een thread van de executor")
+
+
+def _klok(*a, **k):
+    _job_op_de_lus(a[1])
+    return lambda: None
+
+
+def _later(*a, **k):
+    _job_op_de_lus(a[2])
+    return lambda: None
+
+
+gebeurtenis.async_track_time_interval = _klok
+gebeurtenis.async_call_later = _later
 opslag = types.ModuleType("homeassistant.helpers.storage")
 
 
