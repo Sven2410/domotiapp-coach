@@ -19307,7 +19307,7 @@ controle("de ronde in bijlagen.py ruimt op zonder fout, en wat twee dagen dicht 
     opslag264.async_get_tickets(hass271)._store._data["tickets"]) == 2, "")
 bron271 = (pathlib.Path(__file__).resolve().parent.parent / "custom_components/domotiapp_coach/bijlagen.py").read_text()
 controle("de ronde draait elk uur en één keer bij het starten",
-         "async_track_time_interval(hass, lambda _nu: hass.async_create_task(async_opruimen(hass, gesloten=True))," in bron271
+         "async_track_time_interval(hass, _elk_uur, OPRUIMEN_ELK)" in bron271
          and "    hass.async_create_task(async_opruimen(hass, gesloten=True))" in bron271
          and bij265.OPRUIMEN_ELK == dt.timedelta(hours=1), "")
 
@@ -19582,6 +19582,66 @@ c276c = herstart213(hass276)
 asyncio.run(c276c._async_geheugen_laden())
 derde276 = beurt276(c276c, hass276)
 controle("afgekoppeld en weer een herstart: de volgende beurt weer allebei", len(derde276) == 2, f"{derde276}")
+
+print("=== 277. het opruimen van de tickets loopt elk uur echt, op de lus en niet in een thread (v0.239.0) ===")
+# In een klantwoning stond van 17 tot 18-11-2026 elk uur "calls hass.async_create_task from a thread other than the
+# event loop" (bijlagen.py), plus "coroutine 'async_opruimen' was never awaited": een gewone lambda aan de klok draait
+# Home Assistant in een thread van de executor, en het opruimen van elk uur liep dus nooit.
+klok277 = sys.modules["homeassistant.helpers.event"]
+try:
+    klok277.async_track_time_interval(None, lambda _nu: None, dt.timedelta(hours=1))
+    geweigerd277 = False
+except RuntimeError:
+    geweigerd277 = True
+
+
+async def _co277(_nu):
+    return None
+
+
+controle("het harnas weigert een gewone functie aan de klok, zoals Home Assistant die in een thread zet",
+         geweigerd277, "")
+controle("en neemt een coroutinefunctie en een @callback wel",
+         klok277.async_track_time_interval(None, _co277, dt.timedelta(hours=1)) is not None
+         and klok277.async_call_later(None, 60, coachmod.callback(lambda _nu: None)) is not None, "")
+hass277, _, _ = bouw(huis(), instellingen())
+map277 = _tmp265.mkdtemp()
+hass277.config.path = lambda *delen: str(pathlib.Path(map277, *delen))
+hass277.http = _types.SimpleNamespace(register_view=lambda _view: None)
+gezet277 = []
+_echt277 = klok277.async_track_time_interval
+
+
+def _vang277(*a, **k):
+    gezet277.append(a[1])
+    return _echt277(*a, **k)
+
+
+klok277.async_track_time_interval = _vang277
+try:
+    bij265.async_register(hass277)
+    fout277 = None
+except RuntimeError as e:
+    fout277 = str(e)
+finally:
+    klok277.async_track_time_interval = _echt277
+asyncio.run(hass277.afmaken())  # het opruimen bij de start, dat async_register er al bij zette
+controle("bijlagen.py zet zijn klok zonder fout", fout277 is None and len(gezet277) == 1, f"{fout277}")
+# Een ticket dat 91 dagen dicht is: de ronde van elk uur haalt het weg, het open ticket blijft.
+asyncio.run(opslag264.async_get_tickets(hass277).async_wijzig(lambda d: (
+    tk264.nieuw(d, "storing", "oud", "u-1", "Bewoner", coachmod.dt_util.now() - dt.timedelta(days=92)),
+    tk264.zet_stand(d, 1, "klaar", coachmod.dt_util.now() - dt.timedelta(days=91)),
+    tk264.nieuw(d, "storing", "open", "u-1", "Bewoner", coachmod.dt_util.now()))))
+if gezet277 and asyncio.iscoroutinefunction(gezet277[0]):
+    asyncio.run(gezet277[0](coachmod.dt_util.now()))
+over277 = [t["id"] for t in opslag264.async_get_tickets(hass277)._store._data["tickets"]]
+controle("de ronde van elk uur ruimt echt op: het ticket van 91 dagen dicht weg, het open ticket blijft",
+         over277 == [2], f"{over277}")
+bronnen277 = {b.name: b.read_text() for b in
+              (pathlib.Path(__file__).resolve().parent.parent / "custom_components/domotiapp_coach").glob("*.py")}
+lambda277 = [f"{naam}:{nr}" for naam, bron in bronnen277.items() for nr, regel in enumerate(bron.splitlines(), 1)
+             if "lambda" in regel and "async_create_task" in regel]
+controle("nergens in de coach een lambda die async_create_task doet", not lambda277, f"{lambda277}")
 
 print()
 print(f"{GOED} goed, {FOUT} fout")
