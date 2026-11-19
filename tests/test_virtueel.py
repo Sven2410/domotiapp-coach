@@ -3103,6 +3103,27 @@ for naam_h, terug_h, melding_h in (
              not [t for t, m in h_v.meldingen if t < terug_t and "offline" not in m],
              f"{[(t, m) for t, m in h_v.meldingen if t < terug_t]}")
 
+# Herladen tijdens een internetstoring (v0.240.0): de paal na het herladen in de storing nog eens zodra de auto in de
+# cloud terug is, en dan laadt de bus die om 15:30 erin gaat.
+for naam_i in ("internet-storing", "internet-storing-herstart", "alfen-internet-storing"):
+    if not (i_v := v(naam_i)):
+        continue
+    dag_i = i_v.regels[0].tijd
+    internet_i = dag_i.replace(hour=14, minute=56)
+    herladen_i = [t.strftime("%H:%M") for t in i_v.paal_herladen]
+    print(f"  {naam_i}: paal herladen {herladen_i}, terug {i_v.paal_terug and f'{i_v.paal_terug:%H:%M}'}, "
+          f"meldingen {[(t.strftime('%a %H:%M'), m[:60]) for t, m in i_v.meldingen]}")
+    controle(f"{naam_i}: één keer herladen in de storing, en één keer nadat het internet terug is",
+             len(herladen_i) == 2 and herladen_i[0] < "13:00" and "14:56" <= herladen_i[1] <= "15:16", f"{herladen_i}")
+    controle(f"{naam_i}: de paal is binnen twintig minuten na het internet terug",
+             i_v.paal_terug is not None and i_v.paal_terug <= internet_i + dt.timedelta(minutes=20), f"{i_v.paal_terug}")
+    controle(f"{naam_i}: de bus die om 15:30 erin gaat, laadt en is op tijd vol", gehaald(i_v) and i_v.geladen_kwh > 1.0,
+             f"{i_v.geladen_kwh}")
+    controle(f"{naam_i}: per integratie hoogstens één melding dat hij niet opkomt, en niets over de paal na zijn terugkeer",
+             len(meldingen(i_v, "komt niet op")) <= 2
+             and not [m for t, m in i_v.meldingen if i_v.paal_terug and t >= i_v.paal_terug and "offline" in m],
+             f"{i_v.meldingen}")
+
 # Klaar blijft klaar (v0.209.0). In een klantwoning sprong een Easee na een dip van de Equalizer van completed naar
 # awaiting_start, en plande de coach de beurt opnieuw.
 if (eq_v := v("klaar-equalizer-dip")):

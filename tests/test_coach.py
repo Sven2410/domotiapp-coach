@@ -19643,6 +19643,134 @@ lambda277 = [f"{naam}:{nr}" for naam, bron in bronnen277.items() for nr, regel i
              if "lambda" in regel and "async_create_task" in regel]
 controle("nergens in de coach een lambda die async_create_task doet", not lambda277, f"{lambda277}")
 
+print("=== 278. herladen tijdens een internetstoring: nog eens als het internet terug is (v0.240.0) ===")
+# Een klantwoning op 17-11-2026: het internet weg van 11:10 tot 14:56. De coach herlaadde de paal na een uur stil,
+# midden in de storing; zonder internet bleef die op loaded zonder apparaat, en ook na de storing dood, tot iemand
+# hem met de hand herlaadde. De integratie van de auto kwam om 15:01 vanzelf terug: dat is het teken.
+NU278 = dt.datetime(2026, 11, 17, 10, 0)
+
+
+def storing278(domein, herstart=None, auto_terug=True, auto_flakkert=False):
+    inst = instellingen(devices=[LAADPAAL])
+    inst["sources"]["extra"] = {"a": "sensor.paal278_status", "b": "sensor.paal278_w", "c": "sensor.auto278_soc"}
+    hass, _, coach = bouw({}, inst)
+    asyncio.run(coach._async_geheugen_laden())
+    entries = {k: types.SimpleNamespace(domain=d, title=n, state="loaded", disabled_by=None)
+               for k, d, n in [("e-paal", domein, "Paal"), ("e-auto", "auto", "Auto")]}
+    bij = {"sensor.paal278_status": "e-paal", "sensor.paal278_w": "e-paal", "sensor.auto278_soc": "e-auto"}
+    wereld = {"internet": True, "paal": True, "herladen": [], "gemeld": []}
+
+    def zet(moment):
+        stempel = moment.replace(tzinfo=dt.timezone.utc)
+        hass.states.zet("sensor.paal278_status", "disconnected" if wereld["paal"] else "unavailable", last_updated=stempel)
+        hass.states.zet("sensor.paal278_w", "0" if wereld["paal"] else "unavailable", last_updated=stempel)
+
+    async def herlaad(entry_id):
+        wereld["herladen"].append((entry_id, wereld["nu"]))
+        # Zonder internet vindt de paal zijn server niet en blijft hij dood; met internet is hij er meteen.
+        if entry_id == "e-paal" and wereld["internet"] and not wereld["paal"]:
+            wereld["paal"] = True
+            zet(wereld["nu"])
+
+    async def tell(bericht, kritiek=False, telefoon=True, **_):
+        wereld["gemeld"].append((wereld["nu"], bericht, kritiek))
+
+    hass.config_entries = types.SimpleNamespace(async_get_entry=lambda eid: entries.get(eid), async_reload=herlaad,
+                                                flow=types.SimpleNamespace(async_progress=lambda: []))
+    er = types.ModuleType("homeassistant.helpers.entity_registry")
+    er.async_get = lambda hass: types.SimpleNamespace(
+        async_get=lambda eid: types.SimpleNamespace(config_entry_id=bij[eid]) if eid in bij else None)
+    oud = sys.modules.get("homeassistant.helpers.entity_registry")
+    sys.modules["homeassistant.helpers.entity_registry"] = er
+    zet(NU278)
+    hass.states.zet("sensor.auto278_soc", "64", last_updated=NU278.replace(tzinfo=dt.timezone.utc))
+    try:
+        for m in range(0, 420):
+            nu = NU278 + dt.timedelta(minutes=m)
+            wereld["nu"] = nu
+            if nu == NU278.replace(hour=11, minute=10):
+                wereld["internet"], wereld["paal"] = False, False
+                zet(nu)
+                hass.states.zet("sensor.auto278_soc", "unavailable", last_updated=nu.replace(tzinfo=dt.timezone.utc))
+            if nu == NU278.replace(hour=14, minute=56):
+                wereld["internet"] = True
+            if auto_terug and nu == NU278.replace(hour=15, minute=1):
+                hass.states.zet("sensor.auto278_soc", "31", last_updated=nu.replace(tzinfo=dt.timezone.utc))
+            if auto_flakkert and NU278.replace(hour=12, minute=30) <= nu < NU278.replace(hour=14, minute=50):
+                # Een auto die elk half uur even terugkomt, terwijl het internet van de paal er nog niet is.
+                stand = "31" if (nu.minute // 15) % 2 == 0 else "unavailable"
+                if hass.states.get("sensor.auto278_soc").state != stand:
+                    hass.states.zet("sensor.auto278_soc", stand, last_updated=nu.replace(tzinfo=dt.timezone.utc))
+            if herstart is not None and nu == NU278.replace(hour=herstart[0], minute=herstart[1]):
+                coach._meldingen_onthouden()
+                coach = herstart213(hass)
+                asyncio.run(coach._async_geheugen_laden())
+            coach._async_tell = tell
+            asyncio.run(coach._async_integraties(inst, nu))
+    finally:
+        sys.modules["homeassistant.helpers.entity_registry"] = oud
+    return wereld, coach
+
+
+for domein278 in ("easee", "alfen"):
+    for herstart278 in (None, (13, 30)):
+        w278, c278 = storing278(domein278, herstart278)
+        paal278 = [f"{m:%H:%M}" for e, m in w278["herladen"] if e == "e-paal"]
+        kritiek278 = [(f"{m:%H:%M}", b) for m, b, k in w278["gemeld"] if k]
+        weer278 = [f"{m:%H:%M}" for m, b, k in w278["gemeld"] if "Paal doet het weer" in b]
+        uitleg278 = f"{domein278}{' met een herstart om 13:30' if herstart278 else ''}"
+        print(f"  {uitleg278}: paal herladen {paal278}, kritiek {kritiek278}, weer {weer278}")
+        controle(f"{uitleg278}: de paal één keer in de storing en één keer nadat de auto terug is, binnen een kwartier",
+                 len(paal278) == 2 and paal278[0] < "13:00" and "15:01" <= paal278[1] <= "15:16", f"{paal278}")
+        controle(f"{uitleg278}: de paal is terug, met één keer doet het weer",
+                 w278["paal"] and len(weer278) == 1 and weer278[0] <= "15:31", f"{weer278}")
+        controle(f"{uitleg278}: per integratie hoogstens één kritieke melding",
+                 len([b for _m, b in kritiek278 if "Paal" in b]) == 1 and len(kritiek278) <= 2, f"{kritiek278}")
+        controle(f"{uitleg278}: terug, dan begint een volgende storing weer bij nul",
+                 "e-paal" not in c278._integratie_opnieuw and "e-paal" not in c278._integratie_stil, "")
+
+# Komt er niets terug, dan geen teken en niet nog eens: zoals v0.188.0.
+w278b, _c = storing278("easee", auto_terug=False)
+paal278b = [f"{m:%H:%M}" for e, m in w278b["herladen"] if e == "e-paal"]
+controle("zonder teken (de auto blijft ook weg): één keer herladen, niet elk kwartier", len(paal278b) == 1, f"{paal278b}")
+# Een auto die steeds even terugkomt terwijl het internet er nog niet is: hoogstens INTEGRATIE_OPNIEUW keer extra.
+w278c, _c = storing278("easee", auto_flakkert=True)
+paal278c = [f"{m:%H:%M}" for e, m in w278c["herladen"] if e == "e-paal"]
+print(f"  een auto die flakkert: paal herladen {paal278c}")
+controle("bij elk teken nog eens, maar hoogstens drie keer extra per storing",
+         len(paal278c) == 1 + coachmod.INTEGRATIE_OPNIEUW and not w278c["paal"], f"{paal278c}")
+controle("het teken en de telling staan in de opslag",
+         all(k in str(coachmod.async_get_geheugen(_c.hass)._store._data) for k in ("integratie_opnieuw", "integratie_leeg")),
+         "")
+
+# Geen "komt niet terug na herladen" als de paal weer online zegt (19-11-2026: terug om 16:10:41, melding 16:10:49).
+_h278, _s278, c278d = bouw(huis(), instellingen(devices=[LAADPAAL]))
+gemeld278d = []
+
+
+async def tell278d(bericht, kritiek=False, telefoon=True, **_):
+    gemeld278d.append(bericht)
+
+
+c278d._async_tell = tell278d
+NU278D = dt.datetime(2026, 11, 19, 16, 10, 43)
+c278d._offline[LAADPAAL["id"]] = {"sinds": NU278D.replace(hour=10, minute=9, second=0),
+                                  "herladen": NU278D.replace(hour=10, minute=14, second=0), "herlaadde": True,
+                                  "aan": NU278D - dt.timedelta(seconds=2), "vers": True}
+asyncio.run(c278d._async_offline_melden(NU278D, LAADPAAL, True))
+controle("de paal zegt weer online met iets wat hij in de storing niet zei: geen melding dat hij niet terugkomt",
+         gemeld278d == [], f"{gemeld278d}")
+c278d._offline[LAADPAAL["id"]].pop("vers")
+asyncio.run(c278d._async_offline_melden(NU278D, LAADPAAL, True))
+controle("online met alleen de oude stand (v0.210.0): de melding komt wel",
+         len(gemeld278d) == 1 and "komt niet terug na herladen" in gemeld278d[0], f"{gemeld278d}")
+gemeld278d.clear()
+c278d._offline[LAADPAAL["id"]].pop("aan")
+c278d._offline[LAADPAAL["id"]]["gemeld"] = False
+asyncio.run(c278d._async_offline_melden(NU278D + dt.timedelta(minutes=1), LAADPAAL, True))
+controle("weer weg: dan komt de melding wel, één keer",
+         len(gemeld278d) == 1 and "komt niet terug na herladen" in gemeld278d[0], f"{gemeld278d}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

@@ -1284,6 +1284,9 @@ class Scenario:
     # automaat van de paal uit staat (v0.210.0). Een Easee in een klantwoning op 09-11-2026: 17:59. Met 0 is er
     # geen integratie om te herladen.
     paal_cache_min: int = 0
+    # De integraties van de paal en van de auto, voor een internetstoring (v0.240.0, `internet_weg`): een paal die
+    # zonder internet herladen wordt, blijft dood tot hij met internet herladen wordt, zoals een Easee.
+    internet_integraties: bool = False
     # De herinnering om de auto aan te sluiten bij de paal (v0.212.0), zoals `reminder` in de instellingen, of None.
     herinnering: dict | None = None
     # Wat "oven" aanzet, in watt; valt over de fasen zoals `Huis.verdeling`.
@@ -1385,6 +1388,8 @@ class Verloop:
     paal_offline_opdrachten: list = field(default_factory=list)
     # Wanneer de coach de integratie van de paal herlaadde (v0.210.0, `paal_cache_min`).
     paal_herladen: list = field(default_factory=list)
+    # En wanneer de paal na een internetstoring weer iets zei (v0.240.0, `internet_weg`).
+    paal_terug: dt.datetime | None = None
     # Hoe vaak een Alfen op zijn veilige stroom terugviel omdat de coach
     # zijn limiet niet op tijd opnieuw schreef. Hoort nul te zijn.
     paal_terugvallen: int = 0
@@ -1518,6 +1523,9 @@ class Verloop:
 
 # --- de instellingen van de coach --------------------------------------------
 
+# Alles wat de integratie van de paal geeft (v0.240.0): in een internetstoring valt dat samen stil.
+PAAL_SENSOREN = ("online", "status", "stroom", "vermogen", "teller", "dyn", "max", "circuit", "alfen_charging",
+                 "alfen_connected", "alfen_fasen", "alfen_limit", "alfen_mode3")
 E = {
     "status": "sensor.v_paal_status",
     "stroom": "sensor.v_paal_stroom",
@@ -1963,6 +1971,10 @@ class Wereld:
         self.online_sinds: dt.datetime | None = None
         # Tot wanneer de integratie na herladen of een herstart online zegt (v0.210.0, `paal_cache_min`).
         self.cache_online_tot: dt.datetime | None = None
+        # Een internetstoring (v0.240.0): tot wanneer, sinds wanneer, en of de integratie van de paal dood is.
+        self.internet_tot: dt.datetime | None = None
+        self.internet_sinds: dt.datetime | None = None
+        self.paal_dood_sinds: dt.datetime | None = None
         self.online_was = True
         self.reden = ""
         self.oven_w = s.oven_w
@@ -2283,6 +2295,14 @@ class Wereld:
                 z(E[naam], weg)
             else:
                 del self.weg[naam]
+        # Het internet weg (v0.240.0): de auto in de cloud zegt niets, en een paal waarvan de integratie zijn server
+        # niet vond ook niet. De auto komt vanzelf terug, de paal pas na herladen met internet.
+        if self.internet_tot is not None and nu < self.internet_tot:
+            for naam in ("soc", "auto_status"):
+                z(E[naam], weg, last_updated=self.internet_sinds.replace(tzinfo=dt.timezone.utc))
+        if self.paal_dood_sinds is not None:
+            for naam in PAAL_SENSOREN:
+                z(E[naam], weg, last_updated=self.paal_dood_sinds.replace(tzinfo=dt.timezone.utc))
 
         prijzen_weg = self.prijzen_weg_tot is not None and nu < self.prijzen_weg_tot
         if self.s.contract.startswith("dynamisch") and prijzen_weg:
@@ -2518,6 +2538,11 @@ class Wereld:
             # unavailable.
             self.voorspeller_weg_tot = self.nu + dt.timedelta(minutes=int(arg))
             return f"de zonvoorspeller geeft {arg} minuten niets"
+        if actie == "internet_weg":
+            # Het internet ligt `arg` minuten weg (v0.240.0); de paal en de auto in de cloud vallen stil.
+            self.internet_sinds = self.paal_dood_sinds = self.nu
+            self.internet_tot = self.nu + dt.timedelta(minutes=int(arg))
+            return f"het internet valt {arg} minuten weg"
         if actie == "sensor_weg":
             naam, minuten = arg
             self.weg[naam] = self.nu + dt.timedelta(minutes=int(minuten))
@@ -2584,7 +2609,8 @@ class Diensten:
             staat = self.hass.states.get(data.get("entity_id"))
             if staat is not None and staat.state == "unavailable":
                 return
-        if (self.wereld.paal_weg_tot is not None and self.wereld.nu < self.wereld.paal_weg_tot
+        if (((self.wereld.paal_weg_tot is not None and self.wereld.nu < self.wereld.paal_weg_tot)
+             or self.wereld.paal_dood_sinds is not None)
                 and (domein == "easee" or (domein == "number" and data.get("entity_id") == E["alfen_limit"]))):
             self.verloop.paal_geweigerd += 1
             raise OSError("Failed to connect")
@@ -2842,25 +2868,38 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
     jaarbalans(coach, s)
     # Het register van Home Assistant: de sensoren van de Growatt hangen aan zijn omvormer.
     register = types.ModuleType("homeassistant.helpers.entity_registry")
+    paal_ids = {E[naam] for naam in PAAL_SENSOREN} if s.internet_integraties else {E["online"]}
     register.async_get = lambda _hass: types.SimpleNamespace(
         async_get=lambda entity_id: types.SimpleNamespace(device_id="v-growatt-omvormer")
         if entity_id in (E["bat_soc"], E["gw_laden"], E["gw_ontladen"], E["gw_in"], E["gw_uit"])
         else types.SimpleNamespace(device_id="virtueel", config_entry_id="v-paal-integratie", platform=s.paal.merk)
-        if entity_id == E["online"] and s.paal_cache_min else None)
+        if entity_id in paal_ids and (s.paal_cache_min or s.internet_integraties)
+        else types.SimpleNamespace(device_id="virtueel-auto", config_entry_id="v-auto-integratie", platform="auto")
+        if entity_id in (E["soc"], E["auto_status"]) and s.internet_integraties else None)
     sys.modules["homeassistant.helpers.entity_registry"] = register
-    if s.paal_cache_min:
+    if s.paal_cache_min or s.internet_integraties:
         # De integratie van de paal (v0.210.0). Met de automaat uit zegt hij na herladen nog `paal_cache_min`
         # minuten online, met de oude stand, zoals een Easee. De titel is een e-mailadres, zoals bij een Easee.
         paal_integratie = types.SimpleNamespace(
             domain=s.paal.merk, title="iemand@voorbeeld.nl", state="loaded", disabled_by=None,
             entry_id="v-paal-integratie")
 
+        auto_integratie = types.SimpleNamespace(
+            domain="auto", title="Auto", state="loaded", disabled_by=None, entry_id="v-auto-integratie")
+
         async def herlaad_paal(entry_id):
+            if entry_id != "v-paal-integratie":
+                return
             verloop.paal_herladen.append(wereld.nu)
-            if wereld.paal.uit:
+            if wereld.paal.uit and s.paal_cache_min:
                 wereld.cache_online_tot = wereld.nu + dt.timedelta(minutes=s.paal_cache_min)
+            # Herladen met internet brengt een dode paal meteen terug, zonder blijft hij dood (v0.240.0).
+            if wereld.paal_dood_sinds is not None and not (wereld.internet_tot is not None and wereld.nu < wereld.internet_tot):
+                wereld.paal_dood_sinds = None
+                verloop.paal_terug = wereld.nu
         hass.config_entries = types.SimpleNamespace(
-            async_get_entry=lambda eid: paal_integratie if eid == "v-paal-integratie" else None,
+            async_get_entry=lambda eid: paal_integratie if eid == "v-paal-integratie"
+            else auto_integratie if eid == "v-auto-integratie" and s.internet_integraties else None,
             async_reload=herlaad_paal, flow=types.SimpleNamespace(async_progress=lambda: []))
 
     # De klok van Home Assistant is de klok van de wereld.
@@ -2959,6 +2998,10 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
                 laatste_ronde = nu
             elif laatste_ronde is None or nu - laatste_ronde >= dt.timedelta(seconds=60):
                 await coach._round(nu)
+                # Wat `_tick` na elke ronde doet: onthouden voor na een herstart (v0.240.0). Zonder dit verloor een
+                # herstart hier alles sinds het laatste moment dat de coach zelf iets bewaarde, en meer dan in het echt.
+                coach._meldingen_onthouden()
+                await coachmod.async_get_geheugen(hass).async_bewaar(dtutil.utcnow(), coachmod.GEHEUGEN_ELKE)
                 laatste_ronde = nu
             # De regelaar van de batterij loopt op het tempo van de meter, los
             # van de ronde. Zie `_async_regel_tik` in coach.py.

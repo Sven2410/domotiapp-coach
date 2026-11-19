@@ -2113,6 +2113,8 @@ herlaadde de coach om 11:59 wel.
 
 Proef 228 in test_coach.py, ook zonder het teruglezen uit de opslag (dan herlaadt hij twee keer).
 
+Sinds v0.240.0 nog eens als het internet terug is: zie `docs/laadpaal.md`, Herladen tijdens een internetstoring.
+
 ### Niet bij een omvormer die slaapt, en niet bij een helper (v0.190.0)
 
 In een klantwoning gaat de omvormer elke avond bij zonsondergang van het netwerk, en komt hij 's ochtends

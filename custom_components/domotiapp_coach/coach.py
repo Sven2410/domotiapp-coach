@@ -516,6 +516,12 @@ INTEGRATIE_STIL = timedelta(hours=1)
 # controle (`INTEGRATIE_CONTROLE` na de start). Stil sinds de opstart: de laatste die stilviel deed dat
 # binnen dit venster rond de start van de coach, ervoor of erna.
 INTEGRATIE_OPSTART = timedelta(minutes=15)
+# Nog eens herladen als het internet terug is (v0.240.0). In een klantwoning op 17 en 19-11-2026 lag het internet
+# uren weg. De coach herlaadde de Easee na een uur stil, midden in de storing; die kon zijn server niet vinden, bleef
+# op loaded zonder apparaat, en kwam ook na de storing niet terug, tot iemand hem met de hand herlaadde. Met internet
+# was hij binnen twee seconden terug. Het teken dat het internet er weer is: een andere integratie die helemaal stil
+# was, meldt weer iets. Elk teken na het laatste herladen geeft nog één keer, hoogstens zo vaak per storing.
+INTEGRATIE_OPNIEUW = 3
 # Hoeveel opstarts en herladens per integratie de coach onthoudt (v0.217.0, `_async_opstart_leren`).
 OPSTART_LEREN = 5
 # Na een opstart eerst herstellen, dan melden (v0.203.0). In een klantwoning kwam op 04-11-2026 na een
@@ -1949,6 +1955,12 @@ class ChargerCoach:
         self._integratie_om: datetime | None = None
         # Per geladen integratie die helemaal stil was: wanneer de coach hem herlaadde (v0.188.0).
         self._integratie_stil: dict[str, datetime] = {}
+        # Het teken dat het internet terug is (v0.240.0, `_internet_terug_bijhouden`): per integratie die bij een
+        # controle helemaal stil was sinds wanneer, wanneer er de laatste keer een terugkwam, en per integratie hoe
+        # vaak de coach hem daarna nog eens herlaadde.
+        self._integratie_leeg: dict[str, datetime] = {}
+        self._integratie_terug: datetime | None = None
+        self._integratie_opnieuw: dict[str, int] = {}
         # De eerste controle van deze start (v0.195.0); hoort bij deze start, dus niet in de opslag.
         self._integratie_start: datetime | None = None
         # Hoe lang elke integratie na de opstart nodig had (v0.217.0): per config entry de integratie en
@@ -3147,6 +3159,7 @@ class ChargerCoach:
         # Offline: wat de paal nu zegt hoort bij de storing, en de proef van online begint de volgende keer opnieuw.
         rec.pop("aan", None)
         rec.pop("geschreven", None)
+        rec.pop("vers", None)
         if self._tekens_bij(device, rec):
             self._offline_onthouden(device_id)
         if rec.get("herladen") is None and _tussen(rec["sinds"], now) >= PAAL_OFFLINE_HERLADEN:
@@ -3191,6 +3204,8 @@ class ChargerCoach:
             rij = gezien.get(entity_id)
             if rij is None:
                 gezien[entity_id] = [waarde]
+                # Iets wat de paal in de hele storing niet zei: de integratie is er echt weer (v0.240.0).
+                rec["vers"] = True
                 self._offline_onthouden(device.get("id", ""))
             elif waarde not in rij:
                 nieuw = True
@@ -3237,6 +3252,13 @@ class ChargerCoach:
         device_id = device.get("id", "")
         rec = self._offline.get(device_id)
         if rec is None or rec.get("gemeld"):
+            return
+        # Zegt de paal weer online, met waarden die hij in de storing niet had, dan geen "komt niet terug" (v0.240.0).
+        # In een klantwoning op 19-11-2026 was alles van de paal in de storing unavailable; na herladen met de hand
+        # was hij om 16:10:41 terug, en kreeg de bewoner om 16:10:49 toch die melding, want online alleen is nog
+        # niet bewezen (`_paal_doet_iets`, v0.210.0). Een integratie die na herladen de oude stand uit de cloud
+        # geeft, heeft niets nieuws en krijgt de melding wel. Valt hij weer weg, dan telt het weer.
+        if rec.get("aan") is not None and rec.get("vers"):
             return
         van, tot = PAAL_OFFLINE_RUST
         nacht = now.time() >= van or now.time() < tot
@@ -3426,6 +3448,7 @@ class ChargerCoach:
             "gemeld": bool(rec.get("gemeld")),
             "wilde": bool(rec.get("wilde")),
             "herlaadde": bool(rec.get("herlaadde")),
+            "vers": bool(rec.get("vers")),
             "tekens": {e: list(r) for e, r in (rec.get("tekens") or {}).items()},
         }
         self._onthoud(f"paal-offline:{device_id}", data, meteen=True)
@@ -3823,6 +3846,7 @@ class ChargerCoach:
         except Exception:  # noqa: BLE001 - zonder register geen controle
             _LOGGER.debug("kon de integraties niet nakijken", exc_info=True)
             return
+        self._internet_terug_bijhouden(settings, per_entry, now)
         entries = list(per_entry)
         inloggen = self._inloggen_gevraagd()
         for entry_id in entries:
@@ -3879,6 +3903,35 @@ class ChargerCoach:
                       "het doet.", naam=naam),
                     kritiek=True,
                 )
+
+    def _internet_terug_bijhouden(self, settings: dict[str, Any], per_entry: dict[str, list[str]], now: datetime) -> None:
+        """Of er een integratie terugkwam die helemaal stil was: het teken dat het internet er weer is (v0.240.0).
+
+        Bij elke controle: een integratie waarvan alles wat de coach gebruikt `unavailable` is, staat in
+        `_integratie_leeg`. Meldt hij bij een volgende controle weer iets, dan is dat moment `_integratie_terug`.
+        Een omvormer telt niet: die gaat elke avond weg en komt elke ochtend terug, ook zonder storing. Zie
+        `INTEGRATIE_OPNIEUW` en `_async_stil_herladen`. Alles staat in de opslag, dus een herstart halverwege
+        de storing ziet het teken ook.
+        """
+        zon = zon_entiteiten(settings)
+        anders = False
+        for entry_id, entity_ids in per_entry.items():
+            staten = [s for s in (self.hass.states.get(e) for e in entity_ids) if s is not None]
+            if not staten or set(entity_ids) <= zon:
+                continue
+            if all(str(s.state) == "unavailable" for s in staten):
+                if entry_id not in self._integratie_leeg:
+                    self._integratie_leeg[entry_id] = now
+                    anders = True
+            elif self._integratie_leeg.pop(entry_id, None) is not None:
+                self._integratie_terug = now
+                anders = True
+                _LOGGER.info("de integratie %s was helemaal stil en meldt weer iets", entry_id)
+        for entry_id in [e for e in self._integratie_leeg if e not in per_entry]:
+            self._integratie_leeg.pop(entry_id, None)
+            anders = True
+        if anders:
+            self._meldingen_onthouden()
 
     def _per_integratie(self, settings: dict[str, Any]) -> dict[str, list[str]]:
         """Elke entiteit van de coach bij de config entry van haar integratie (v0.166.0)."""
@@ -4084,6 +4137,7 @@ class ChargerCoach:
         if not staten:
             return
         if any(str(s.state) != "unavailable" for s in staten):
+            self._integratie_opnieuw.pop(entry_id, None)
             if self._integratie_stil.pop(entry_id, None) is not None:
                 self._integratie_gemeld.discard(entry_id)
                 _LOGGER.info("de integratie %s meldt weer iets na het herladen", naam)
@@ -4112,8 +4166,22 @@ class ChargerCoach:
         herladen = self._integratie_stil.get(entry_id)
         if herladen is not None and opstart and herladen < start:
             self._integratie_stil.pop(entry_id, None)
+            self._integratie_opnieuw.pop(entry_id, None)
             herladen = None
         if herladen is not None:
+            # Het internet is er weer (v0.240.0): een andere integratie die helemaal stil was, kwam na dit herladen
+            # terug. Dan nog één keer, want een integratie die zonder internet herladen is komt niet vanzelf.
+            terug = self._integratie_terug
+            keer = self._integratie_opnieuw.get(entry_id, 0)
+            if terug is not None and terug > herladen and keer < INTEGRATIE_OPNIEUW:
+                self._integratie_opnieuw[entry_id] = keer + 1
+                await self._async_stil_herladen_nu(
+                    entry, entry_id, naam, sinds, meelezen,
+                    f", en na het herladen van {herladen.isoformat(timespec='minutes')} kwam er een andere "
+                    f"integratie terug; de coach herlaadt hem nog eens ({keer + 1} van {INTEGRATIE_OPNIEUW})",
+                    now,
+                )
+                return
             if entry_id not in self._integratie_gemeld and now - herladen >= INTEGRATIE_CONTROLE:
                 self._integratie_gemeld.add(entry_id)
                 await self._async_tell(
@@ -4129,6 +4197,15 @@ class ChargerCoach:
         if await self._async_is_helper(entry.domain):
             _LOGGER.debug("de integratie %s (%s) is een helper; de coach herlaadt hem niet", naam, entry.domain)
             return
+        await self._async_stil_herladen_nu(
+            entry, entry_id, naam, sinds, meelezen,
+            ", al sinds de opstart; de coach herlaadt hem" if opstart else "; de coach herlaadt hem", now,
+        )
+
+    async def _async_stil_herladen_nu(
+        self, entry: Any, entry_id: str, naam: str, sinds: datetime, meelezen: bool, waarom: str, now: datetime
+    ) -> None:
+        """Het herladen van `_async_stil_herladen` zelf: eerst het moment in de opslag, dan herladen."""
         self._integratie_stil[entry_id] = now
         try:
             self._meldingen_onthouden()
@@ -4137,8 +4214,7 @@ class ChargerCoach:
             _LOGGER.exception("kon het herladen van %s niet bewaren", naam)
         (_LOGGER.info if meelezen else _LOGGER.warning)(
             "de integratie %s (%s) staat op loaded, maar alles wat de coach ervan gebruikt is sinds %s "
-            "unavailable%s; de coach herlaadt hem", naam, entry.domain, sinds.isoformat(timespec="minutes"),
-            ", al sinds de opstart" if opstart else "",
+            "unavailable%s", naam, entry.domain, sinds.isoformat(timespec="minutes"), waarom,
         )
         self._herladen_om[entry_id] = now
         try:
@@ -18064,7 +18140,7 @@ class ChargerCoach:
                     self._offline[sleutel.split(":", 1)[1]] = {
                         "sinds": sinds, "herladen": _uit_geheugen(data.get("herladen")),
                         "gemeld": bool(data.get("gemeld")), "wilde": bool(data.get("wilde")),
-                        "herlaadde": bool(data.get("herlaadde")),
+                        "herlaadde": bool(data.get("herlaadde")), "vers": bool(data.get("vers")),
                         "tekens": {
                             str(e): [str(w) for w in r] for e, r in (data.get("tekens") or {}).items()
                             if isinstance(r, list)
@@ -18222,6 +18298,9 @@ class ChargerCoach:
             "inloggen": sorted(self._integratie_inloggen),
             "integratie_stuk": {k: _naar_geheugen(v) for k, v in sorted(self._integratie_stuk.items())},
             "integratie_stil": {k: _naar_geheugen(v) for k, v in sorted(self._integratie_stil.items())},
+            "integratie_leeg": {k: _naar_geheugen(v) for k, v in sorted(self._integratie_leeg.items())},
+            "integratie_terug": _naar_geheugen(self._integratie_terug),
+            "integratie_opnieuw": dict(sorted(self._integratie_opnieuw.items())),
             "zon_wakker": _naar_geheugen(self._zon_wakker),
             "temp": sorted(str(k) for k in self._temp_gemeld),
             "vriezer": sorted([list(k) for k in self._vriezer_gemeld]),
@@ -18256,6 +18335,13 @@ class ChargerCoach:
         self._integratie_inloggen |= {str(k) for k in lijst("inloggen")}
         self._integratie_stuk.update(momenten("integratie_stuk"))
         self._integratie_stil.update(momenten("integratie_stil"))
+        self._integratie_leeg.update(momenten("integratie_leeg"))
+        if self._integratie_terug is None and data.get("integratie_terug"):
+            self._integratie_terug = _uit_geheugen(data["integratie_terug"])
+        opnieuw = data.get("integratie_opnieuw")
+        for k, v in (opnieuw.items() if isinstance(opnieuw, dict) else ()):
+            if isinstance(v, int) and not isinstance(v, bool):
+                self._integratie_opnieuw[str(k)] = v
         if self._zon_wakker is None and data.get("zon_wakker"):
             self._zon_wakker = _uit_geheugen(data["zon_wakker"])
         self._temp_gemeld |= {str(k) for k in lijst("temp")}

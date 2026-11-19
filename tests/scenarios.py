@@ -2004,6 +2004,28 @@ alfen_offline_herladen = alfen_zonnig.kopie(
     paal_cache_min=18,
     gebeurtenissen=[("11:00", "automaat", False), ("15:00", "automaat", True)],
 )
+# Herladen tijdens een internetstoring (v0.240.0). In een klantwoning op 17-11-2026 lag het internet weg van 11:10 tot
+# 14:56. De coach herlaadde de Easee midden in de storing; die bleef daarna dood tot iemand hem met de hand herlaadde.
+internet_storing = vast_bewolkt.kopie(
+    naam="internet-storing",
+    uitleg="vast-bewolkt; het internet weg van 11:10 tot 14:56, de paal komt pas terug na herladen met internet, "
+           "de auto in de cloud vanzelf; om 15:30 de bus erin",
+    kabel_erin="15:30",
+    internet_integraties=True,
+    gebeurtenissen=[("11:10", "internet_weg", 226)],
+)
+internet_storing_herstart = internet_storing.kopie(
+    naam="internet-storing-herstart",
+    uitleg="internet-storing, en om 13:30 een herstart van Home Assistant",
+    gebeurtenissen=[("11:10", "internet_weg", 226), ("13:30", "herstart", None)],
+)
+alfen_internet_storing = alfen_zonnig.kopie(
+    naam="alfen-internet-storing",
+    uitleg="alfen-vast-zonnig met de internetstoring van internet-storing",
+    kabel_erin="15:30",
+    internet_integraties=True,
+    gebeurtenissen=[("11:10", "internet_weg", 226)],
+)
 # Klaar blijft klaar (v0.209.0). In een klantwoning was een auto op 07-11-2026 om 04:38 klaar op een geschatte
 # 72%; op 08-11 om 13:39 zette de Equalizer de paal op 0 A, de Easee sprong naar awaiting_start, en de coach
 # plande opnieuw, wekte om 20:00 en meldde om 20:20 als kritiek dat de auto geen stroom afnam.
@@ -2098,6 +2120,7 @@ ALLE = [
     vast_vergeten, vast_op_tijd_erin,
     alfen_auto_weg, alfen_auto_weg_gast, alfen_auto_terug, alfen_auto_oprit, paal_offline, paal_offline_nacht, klaar_equalizer,
     paal_offline_herladen, paal_offline_herladen_nacht, alfen_offline_herladen,
+    internet_storing, internet_storing_herstart, alfen_internet_storing,
     groep_paal_batterij, groep_paal_batterij_los, groep_paal_batterij_zonder_meter,
     alfen_zonnig, alfen_dyn, alfen_paal_weg, klant_paal_weg, alfen_doel_80, alfen_laadgrens,
     alfen_drie_zon, alfen_fasen_zon, alfen_fasen_wisselend, alfen_fasen_helder, alfen_drie_dyn, alfen_fasen_dyn,

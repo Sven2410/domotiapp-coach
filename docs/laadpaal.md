@@ -2169,3 +2169,42 @@ het nalezen voor de eigenaar. Hij zei: "ik zou nu kunnen rijden en is die leger 
 - **Een woning waar het merk al van eerder staat**, raakt het kwijt bij het eerstvolgende afkoppelen met deze versie.
   Hangt de auto er tijdens de update al aan, dan komt de tweede vraag pas bij de beurt daarna weer.
 - **Proef 276** beproeft het met twee beurten, een herstart midden in een beurt, en een herstart na het afkoppelen.
+
+## Herladen tijdens een internetstoring: nog eens als het internet terug is (v0.240.0)
+
+In een klantwoning lag het internet op 17-11-2026 weg van 11:10 tot 14:56, en op 19-11 van 09:54 tot 15:41. Home
+Assistant bleef draaien, maar alle integraties met een cloud vielen stil. De coach herlaadde de Easee na een uur stil
+(`_async_stil_herladen`, v0.188.0), midden in de storing. Zonder internet vond die zijn server niet ("Unexpected error
+creating device ... DNS"), bleef op `loaded` zonder apparaat, en kwam ook na de storing niet terug. Herladen doet de
+coach één keer per storing, dus de paal bleef dood tot iemand hem met de hand herlaadde. Op 17-11 was dat toevallig
+de herstart van 18:35. Op 19-11 werd hij om 16:10:39 met de hand herladen, en om 16:10:41 was hij er weer. Met
+internet helpt herladen dus meteen.
+
+- **Het teken dat het internet terug is** (`_internet_terug_bijhouden`): een andere integratie waarvan alles wat de
+  coach gebruikt bij een controle `unavailable` was, meldt weer iets. Op 17-11 was dat de auto, om 15:01. Een
+  omvormer telt niet, want die gaat elke avond weg en komt elke ochtend terug.
+- **Dan nog één keer herladen:** een integratie die de coach in de storing herlaadde en die nog stil is, herlaadt
+  hij bij de controle waarin hij dat teken ziet. Elk teken na zijn laatste herladen geeft nog één keer, hoogstens
+  `INTEGRATIE_OPNIEUW` (3) keer per storing. Eén keer was te krap: op 19-11 kwam de batterij al om 14:41 terug, een uur
+  voordat het internet er volgens de verbindingsmeter weer was. Komt er niets terug, dan herlaadt hij niet nog eens,
+  zoals v0.188.0.
+- **De melding** "komt niet op" blijft één keer per integratie. Is hij terug, dan "doet het weer" in de geschiedenis,
+  en begint een volgende storing weer bij nul.
+- **Een herstart halverwege:** het teken, welke integraties stil waren, en hoe vaak hij al nog eens herlaadde, staan
+  in de opslag (`integratie_leeg`, `integratie_terug` en `integratie_opnieuw` in `meldingen`). Het moment gaat er
+  vóór het herladen in, net als bij v0.188.0.
+- **Geen "komt niet terug na herladen" als de paal er al is** (`_async_offline_melden`). Op 19-11 om 16:10:49 kreeg de
+  bewoner die melding toch, acht seconden nadat de paal terug was. Online alleen is nog niet terug (v0.210.0), en
+  een status die de paal in de hele storing niet gaf, telde de eerste keer niet als nieuw. Nu: zegt de paal online,
+  met iets wat hij in de storing niet zei (`vers`, in de opslag), dan komt die melding niet. Een Easee die na
+  herladen de oude stand uit de cloud geeft (v0.210.0), heeft niets nieuws en krijgt hem wel.
+- **Voor elke integratie**, dus Easee en Alfen, de auto en de batterij. Een Alfen hangt niet aan de cloud, maar een
+  netwerkstoring geeft hetzelfde beeld.
+
+Proef 278 in test_coach.py, voor Easee en Alfen, met en zonder een herstart om 13:30; zonder teken herlaadt hij niet
+nog eens, en een auto die steeds even terugkomt geeft hoogstens drie keer extra. In het virtuele huis de scenario's
+`internet-storing`, `internet-storing-herstart` en `alfen-internet-storing` (gebeurtenis `internet_weg`,
+`internet_integraties`). Daar gaat de bus om 15:30 erin en is hij op tijd vol. Het virtuele huis bewaart nu na elke
+ronde wat `_tick` bewaart. Daarvoor verloor een herstart daar alles sinds het laatste moment dat de coach zelf iets
+wegschreef, en kwam "komt niet op" na een herstart nog eens.
+
