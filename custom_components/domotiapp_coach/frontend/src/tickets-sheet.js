@@ -141,6 +141,26 @@ function berichtHtml(b, userId) {
 }
 
 /**
+ * Of Coach Assist nu aan dit ticket of het gesprek werkt (v0.243.0): `bezig.tot` is een echt moment met tijdzone, dus
+ * naast `Date.now()` en niet naast de klok van het huis. Na `tot` niet meer, ook als er geen antwoord kwam.
+ */
+export function bezigNu(ticket, nu = Date.now()) {
+  const tot = Date.parse(ticket?.bezig?.tot ?? "");
+  return Number.isFinite(tot) && tot > nu;
+}
+
+/**
+ * Drie bewegende puntjes aan de kant van Coach Assist, zolang hij bezig is (v0.243.0). De eigenaar op 25-11-2026:
+ * "Laat ook zien dat een bericht in behandeling is met 3 puntjes die bewegen etc anap je? Zo weet de klant dat je
+ * aan het nadenken bent". Met `prefers-reduced-motion` staan ze stil.
+ */
+const bezigHtml = () => `
+    <div class="bericht zij bezig-bubbel" role="status" aria-label="${esc(t("Coach Assist is bezig"))}">
+      <div class="b-naam"><img class="b-logo" src="${LOGO_URL}" alt="" draggable="false"><strong>Coach Assist</strong></div>
+      <span class="puntjes" aria-hidden="true"><i></i><i></i><i></i></span>
+    </div>`;
+
+/**
  * De berichten als html, zoals WhatsApp (v0.224.0): de eigen rechts, Coach Assist en huisgenoten links, elk met de naam
  * erboven, en per dag een scheiding. De eigenaar op 15-11-2026: "kijk even goed hoe whatsapp het doet. Blokken rechts van
  * je eigen tekst, blokken links van de antwoorden. En duidelijk aangeven of het de gebruiker is met de naam of de coach",
@@ -153,7 +173,13 @@ function berichtHtml(b, userId) {
  * die de gebruiker koos; die staat dan op zijn plek in het gesprek. Een ticket is kort: daar alleen de scheiding.
  * Een foto als plaatje met `data-foto`, het adres zet het paneel erin.
  */
-export function gesprekHtml(ticket, nu = huisNu(), { userId = "", gekozen = "" } = {}) {
+export function gesprekHtml(ticket, nu = huisNu(), { userId = "", gekozen = "", bezigOp = Date.now() } = {}) {
+  // Zolang Coach Assist bezig is, onderaan de puntjes (v0.243.0).
+  const puntjes = bezigNu(ticket, bezigOp) ? bezigHtml() : "";
+  return berichtenHtml(ticket, nu, userId, gekozen) + puntjes;
+}
+
+function berichtenHtml(ticket, nu, userId, gekozen) {
   const berichten = ticket?.berichten ?? [];
   if (!berichten.length && ticket?.id === GESPREK) {
     return `<p class="leeg">${t("Stel hier je vraag over je installatie, bijvoorbeeld hoe vol je accu is.")}</p>`;
@@ -299,6 +325,14 @@ const css = /* css */ `
   .bericht.zij .b-naam strong { color: rgb(25,143,217); }
   .b-logo { width: 16px; height: 16px; flex: 0 0 auto; object-fit: contain; }
   .bericht p { margin: 2px 0 0; font-size: 13px; line-height: 1.45; color: var(--dac-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* Coach Assist is bezig (v0.243.0): drie puntjes die om de beurt opveren; stil met minder beweging. */
+  .bezig-bubbel { padding-bottom: 8px; }
+  .puntjes { display: inline-flex; gap: 4px; align-items: center; height: 14px; margin-top: 4px; }
+  .puntjes i { width: 7px; height: 7px; border-radius: 50%; background: var(--dac-ink-3); animation: puntje 1.2s infinite ease-in-out; }
+  .puntjes i:nth-child(2) { animation-delay: 0.15s; }
+  .puntjes i:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes puntje { 0%, 60%, 100% { transform: translateY(0); opacity: 0.45; } 30% { transform: translateY(-4px); opacity: 1; } }
+  @media (prefers-reduced-motion: reduce) { .puntjes i { animation: none; opacity: 0.7; } }
   .b-tijd { display: block; text-align: right; font-size: 11px; color: var(--dac-ink-3); margin-top: 2px; }
   .dag { display: flex; justify-content: center; margin: 6px 0 2px; }
   .dag span {
@@ -363,6 +397,7 @@ export class DacTicketsSheet extends DacElement {
     this.fotoAdres = null;
     this.pakket_ = null;
     this.opnieuwKlok_ = null;
+    this.bezigKlok_ = null;
     this.laatsteVraag_ = "";
     this.laatsteTicket_ = "";
     this.laatsteReactie_ = "";
@@ -711,6 +746,10 @@ export class DacTicketsSheet extends DacElement {
     this.$("#dicht-blok").hidden = !dicht;
     if (ticketOnder) vak.scrollTop = vak.scrollHeight;
     this.vulFotos_(vak);
+    // De puntjes gaan vanzelf weg als `bezig` verloopt zonder antwoord (v0.243.0): dan nog een keer tekenen.
+    clearTimeout(this.bezigKlok_);
+    const totEen = [this.gesprek_, ticket].map((tk) => Date.parse(tk?.bezig?.tot ?? "")).filter((x) => x > Date.now());
+    if (totEen.length) this.bezigKlok_ = setTimeout(() => this.paint_(), Math.min(...totEen) - Date.now() + 500);
     for (const knop of this.$$("[data-soort]")) knop.setAttribute("aria-pressed", String(knop.dataset.soort === this.soort_));
     // Het pakket: de naam, wat er vandaag over is, en op nul het veld dicht met de weg naar een storing.
     const over = vragenOver(this.pakket_);

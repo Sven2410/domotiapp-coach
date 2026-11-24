@@ -770,7 +770,7 @@ proef("iedereen ziet alle personen (v0.114.0, was: een bewoner alleen zichzelf)"
 });
 // De DomotiTech Bot (v0.220.0): het venster toont, de coach bewaart. Tekst is tekst, nooit html.
 const { ongelezenTickets, ticketNieuw, ticketsHtml, gesprekHtml, TICKET_SOORTEN, GESPREK, afzender, eigen, dagTekst,
-  vragenOver, vragenOverTekst, pakketOver, ticketsOverTekst, uitAdres } = await import(
+  vragenOver, vragenOverTekst, pakketOver, ticketsOverTekst, uitAdres, bezigNu } = await import(
   "../custom_components/domotiapp_coach/frontend/src/tickets-sheet.js"
 );
 proef("de DomotiTech Bot: de stip, de lijst, het gesprek en de foto, en tekst als tekst (v0.220.0)", () => {
@@ -7640,6 +7640,27 @@ proef("een venster open: de pagina erachter staat stil, en dicht weer zoals hij 
   assert.ok(!/250,\s*178,\s*25/.test(bron("tickets-sheet.js")), "geen waarschuwingsoranje in de bot");
   assert.ok(bron("tickets-sheet.js").includes("var(--dac-accent-soft)"));
   assert.ok(bron("theme.js").includes("overscroll-behavior: contain;"));
+});
+// Coach Assist is bezig (v0.243.0): drie puntjes onderaan, aan zijn kant, tot het antwoord er is of `tot` voorbij is.
+proef("Coach Assist bezig: de puntjes komen en gaan (v0.243.0)", () => {
+  const nu = Date.parse("2026-11-25T10:00:00+01:00");
+  const vraag = { id: 1, van: "klant", naam: "Bewoner", tekst: "Waarom laadt de accu?", at: "2026-11-25T10:00:00+01:00" };
+  const bezig = { sinds: "2026-11-25T10:00:30+01:00", tot: "2026-11-25T10:15:30+01:00" };
+  const gesprek = { id: GESPREK, soort: "vraag", berichten: [vraag], gelezen: {}, bezig };
+  assert.equal(bezigNu(gesprek, nu), true);
+  const met = gesprekHtml(gesprek, new Date(2026, 10, 25, 10, 1), { userId: "u-1", bezigOp: nu });
+  assert.ok(met.includes('class="bericht zij bezig-bubbel"') && met.includes('class="puntjes"'), "de puntjes aan de kant van Coach Assist");
+  assert.ok(met.indexOf("bezig-bubbel") > met.indexOf("Waarom laadt"), "onderaan, na de vraag");
+  assert.ok(met.includes('role="status"') && met.includes('aria-label="Coach Assist is bezig"'), "met een naam voor een schermlezer");
+  const verlopen = gesprekHtml(gesprek, new Date(2026, 10, 25, 10, 20), { userId: "u-1", bezigOp: Date.parse("2026-11-25T10:16:00+01:00") });
+  assert.ok(!verlopen.includes("bezig-bubbel"), "na tot weg, ook zonder antwoord");
+  const zonder = gesprekHtml({ ...gesprek, bezig: undefined }, new Date(2026, 10, 25, 10, 1), { userId: "u-1", bezigOp: nu });
+  assert.ok(!zonder.includes("bezig-bubbel"), "zonder bezig geen puntjes");
+  const leeg = gesprekHtml({ id: GESPREK, berichten: [], bezig }, new Date(2026, 10, 25, 10, 1), { bezigOp: nu });
+  assert.ok(leeg.includes("bezig-bubbel"), "ook in een leeg gesprek");
+  const ticket = { id: 3, soort: "storing", stand: "nieuw", berichten: [vraag], bezig };
+  assert.ok(gesprekHtml(ticket, new Date(2026, 10, 25, 10, 1), { bezigOp: nu }).includes("bezig-bubbel"), "en in een ticket");
+  assert.equal(bezigNu({ bezig: { tot: "geen tijd" } }, nu), false, "een tijd die niet te lezen is telt niet");
 });
 
 for (const [naam, fn] of proeven) {

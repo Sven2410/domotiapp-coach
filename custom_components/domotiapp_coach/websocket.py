@@ -2110,6 +2110,32 @@ async def async_tickets_answer(
 
 @websocket_api.websocket_command(
     {
+        vol.Required("type"): "domotiapp_coach/tickets/busy",
+        vol.Required("ticket_id"): int,
+        vol.Optional("minuten"): vol.All(int, vol.Range(min=0)),
+    }
+)
+@websocket_api.async_response
+async def async_tickets_busy(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """Coach Assist werkt aan het gesprek of een ticket (v0.243.0): de puntjes, `minuten` lang (standaard 15,
+    hoogstens 120; 0 haalt ze weg). Alleen een beheerder, net als een antwoord, en zonder pushmelding."""
+    from .tickets import zet_bezig
+
+    if not getattr(connection.user, "is_admin", False):
+        connection.send_error(msg["id"], "unauthorized", t("Alleen een beheerder zet Coach Assist op bezig."))
+        return
+    ticket = await _ticket_wijzig(hass, connection, msg,
+                                  lambda data: zet_bezig(data, msg["ticket_id"], msg.get("minuten"), dt_util.now()))
+    if ticket is None:
+        return
+    _ticket_gebeurtenis(hass, ticket, None)
+    connection.send_result(msg["id"], _ticket_uit(ticket))
+
+
+@websocket_api.websocket_command(
+    {
         vol.Required("type"): "domotiapp_coach/tickets/set_state",
         vol.Required("ticket_id"): int,
         vol.Required("stand"): str,
@@ -2174,6 +2200,7 @@ def async_register(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, async_tickets_reply)
     websocket_api.async_register_command(hass, async_tickets_read)
     websocket_api.async_register_command(hass, async_tickets_answer)
+    websocket_api.async_register_command(hass, async_tickets_busy)
     websocket_api.async_register_command(hass, async_tickets_set_state)
     websocket_api.async_register_command(hass, async_tickets_set_plan)
     websocket_api.async_register_command(hass, async_store_report)

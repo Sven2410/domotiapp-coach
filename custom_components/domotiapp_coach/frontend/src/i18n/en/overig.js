@@ -212,6 +212,7 @@ export const OVERIG = {
   "1 bericht": "1 message",
   "{n} berichten": "{n} messages",
   "Oudere berichten": "Older messages",
+  "Coach Assist is bezig": "Coach Assist is working on it",
   "Eerdere dagen": "Earlier days",
   "Nog 1 vraag vandaag": "1 question left today",
   "Nog {n} vragen vandaag": "{n} questions left today",
