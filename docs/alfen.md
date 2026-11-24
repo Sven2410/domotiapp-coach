@@ -176,5 +176,9 @@ worden, in de eerste woning, met de toestanden-logger erbij (`plus=alfen`):
 - Wat "auto aangesloten" en "auto laadt" doen bij een auto die zelf stopt
   (laadgrens in de auto) tegenover een auto die vol is.
 
+**Een Alfen die de stroom aanneemt en op `B1` blijft** (v0.241.0): dan zeggen de kaart en de meldingen dat de paal
+de stroom tegenhoudt, niet dat de auto niets neemt. Zie `docs/laadpaal.md`, "Een paal die de stroom aanneemt en
+niets vrijgeeft".
+
 In de eerste woning stuurt evcc op dit moment de Alfen; nooit allebei tegelijk,
 net als bij de batterij (zie `VREEMD_RONDEN`).

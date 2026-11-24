@@ -368,6 +368,29 @@ fout_easee = [naam for naam, vl in V.items()
               if vl.scenario.paal.merk != "alfen" and (vl.fase_wissels or vl.regels_met("fasewissel"))]
 controle("fasen: geen enkel scenario aan een Easee wisselt", not fout_easee, f"{fout_easee}")
 
+# Een Alfen die de stroom aanneemt en op B1 blijft (v0.241.0): de kaart en beide meldingen noemen de paal,
+# en niets zegt meer dat de kabel eruit moet. Ook na een herstart halverwege maar één keer.
+for naam in ("alfen-houdt-tegen", "alfen-houdt-tegen-herstart"):
+    if (vl := v(naam)):
+        controle(f"{naam}: de kaart zegt dat de paal de stroom tegenhoudt",
+                 bool(vl.regels_met("paal-houdt-tegen")) and not [r for r in vl.regels_met("waiting-for-car")
+                                                                    if r.tijd.hour < 11], "")
+        controle(f"{naam}: de melding na het proefladen noemt de paal, één keer",
+                 len(meldingen(vl, "geeft geen stroom vrij aan Bus. De coach probeerde het 3 keer.")) == 1,
+                 f"{[m for _, m in vl.meldingen]}")
+        controle(f"{naam}: de melding na 20 minuten aanbod noemt de paal, één keer",
+                 len(meldingen(vl, "geeft al 20 minuten geen stroom vrij aan Bus")) == 1, f"{[m for _, m in vl.meldingen]}")
+        controle(f"{naam}: geen melding over de kabel of de auto die niets neemt",
+                 not meldingen(vl, "kabel") and not meldingen(vl, "geen stroom af"), f"{[m for _, m in vl.meldingen]}")
+        controle(f"{naam}: daarna op zon en op tijd vol", gehaald(vl) and vl.kosten < 1.5,
+                 f"{vl.soc_bij_klaar_tijd} {vl.kosten:.2f}")
+if (vl := v("alfen-auto-wordt-niet-wakker")):
+    controle("alfen, auto neemt niets (B2): het blijft de auto, niet de paal",
+             not vl.regels_met("paal-houdt-tegen") and not meldingen(vl, "vrij aan"), f"{[m for _, m in vl.meldingen]}")
+fout_tegen = [naam for naam, vl in V.items()
+              if not naam.startswith("alfen-houdt-tegen") and vl.regels_met("paal-houdt-tegen")]
+controle("geen ander scenario, Easee of Alfen, houdt de stroom tegen", not fout_tegen, f"{fout_tegen}")
+
 if (vl := v("vast-bewolkt")):
     controle("bewolkt: op tijd vol", gehaald(vl), f"{vl.soc_bij_klaar_tijd}")
     # Vóór acht uur komt er alleen net bij als aanvulling onder de ondergrens

@@ -235,5 +235,7 @@
   "Het is {kamer}, en je wilt {doel}. Hij gaat {werk} {wanneer}.": "It is {kamer}, and you want {doel}. It will start {werk} {wanneer}.",
   "Even proefladen: de coach kijkt of de auto stroom aanneemt, en wacht daarna weer.": "A short test charge: the coach checks that the car takes power, then waits again.",
   "Er is {kw} zon over. De coach zet hem aan om te {werk} naar {doel}; het is nu {kamer}.": "There is {kw} of spare solar. The coach is switching it on, {werk} to {doel}; it is {kamer} now.",
-  "Stroom kost nu {prijs}, onder het gemiddelde van vandaag ({gemiddeld}). De coach zet hem aan om te {werk} naar {doel}; het is nu {kamer}.": "Electricity costs {prijs} now, below today's average ({gemiddeld}). The coach is switching it on, {werk} to {doel}; it is {kamer} now."
+  "Stroom kost nu {prijs}, onder het gemiddelde van vandaag ({gemiddeld}). De coach zet hem aan om te {werk} naar {doel}; het is nu {kamer}.": "Electricity costs {prijs} now, below today's average ({gemiddeld}). The coach is switching it on, {werk} to {doel}; it is {kamer} now.",
+  "De coach biedt {amps} A aan, maar de paal geeft niets vrij aan de auto.": "The coach offers {amps} A, but the charger releases nothing to the car.",
+  "De paal houdt de stroom zelf tegen. Kijk in de app van de paal of daar iets het laden tegenhoudt; helpt dat niet, herstart de paal.": "The charger itself is holding the power back. Check the charger's app for anything blocking charging; if that does not help, restart the charger."
 }

@@ -1616,6 +1616,23 @@ alfen_een_fase_vers = alfen_een_fase.kopie(
     naam="alfen-een-fase-zon-vers", uitleg="dezelfde dag, de stroom meldt elke ronde",
     paal=Paal(merk="alfen", fasen_keuze=1),
 )
+# Een Alfen die de stroom van de coach aanneemt en toch niets aan de auto geeft (v0.241.0). In een
+# klantwoning op 21-11-2026: Tesla om 12:00 erin, 13 A aangenomen, modus 3 bleef B1 met 0 A toegepast,
+# en twee kritieke meldingen die zeiden dat de kabel eruit moest. Hier houdt de paal vier uur tegen,
+# met proefladen aan zodat ook die melding langskomt; daarna laadt de bus op zon en is hij op tijd vol.
+alfen_houdt_tegen = alfen_zonnig.kopie(
+    naam="alfen-houdt-tegen", uitleg="een Alfen die de limiet aanneemt en tot 11:00 op B1 blijft: de paal krijgt de schuld, niet de auto",
+    auto=replace(BUS, proefladen=True), gebeurtenissen=[("07:00", "paal_houdt_tegen", 240)],
+)
+alfen_houdt_tegen_herstart = alfen_houdt_tegen.kopie(
+    naam="alfen-houdt-tegen-herstart", uitleg="hetzelfde, met een herstart van Home Assistant om 09:30",
+    gebeurtenissen=[("07:00", "paal_houdt_tegen", 240), ("09:30", "herstart", None)],
+)
+# En een Alfen met een auto die zelf niets neemt: die staat op B2, en dan blijft het de auto.
+alfen_auto_slaapt = auto_slaapt.kopie(
+    naam="alfen-auto-wordt-niet-wakker", uitleg="auto-wordt-niet-wakker aan een Alfen: B2, dus de melding over de auto",
+    paal=Paal(merk="alfen"),
+)
 alfen_doel_80 = doel_onder_auto.kopie(
     naam="alfen-doel-80", uitleg="doel-80 aan een Alfen: de 0 blijft elke minuut komen, anders laadt de paal na zijn geldigheidsduur op 16 A door",
     paal=Paal(merk="alfen"),
@@ -2124,7 +2141,7 @@ ALLE = [
     groep_paal_batterij, groep_paal_batterij_los, groep_paal_batterij_zonder_meter,
     alfen_zonnig, alfen_dyn, alfen_paal_weg, klant_paal_weg, alfen_doel_80, alfen_laadgrens,
     alfen_drie_zon, alfen_fasen_zon, alfen_fasen_wisselend, alfen_fasen_helder, alfen_drie_dyn, alfen_fasen_dyn,
-    alfen_een_fase, alfen_een_fase_vers,
+    alfen_een_fase, alfen_een_fase_vers, alfen_houdt_tegen, alfen_houdt_tegen_herstart, alfen_auto_slaapt,
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,
     vast_grote_auto, vast_zonder_voorspelling, vast_sensoren, vast_voorspelling_mis,
     vast_geen_klaar_tijd, vast_krap, vast_onhaalbaar,

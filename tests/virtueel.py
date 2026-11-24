@@ -482,6 +482,10 @@ class Paal:
     # Een Easee die klaar is en van de Equalizer 0 A krijgt, springt naar `awaiting_start` (v0.209.0,
     # `equalizer_nul`). Tot de kabel eruit gaat.
     wacht_na_klaar: bool = False
+    # Een Alfen die de limiet wel aanneemt en hem niet aan de auto geeft (v0.241.0): modus 3 blijft op B1,
+    # en er gaat geen stroom in, tot dit moment. Zoals in een klantwoning op 21-11-2026 van 12:00 tot de
+    # volgende ochtend 06:00.
+    houdt_tegen_tot: dt.datetime | None = None
 
     def opdracht(self, dienst: str, data: dict, nu: dt.datetime) -> None:
         self.ontvangen.append((nu, dienst, dict(data)))
@@ -503,6 +507,8 @@ class Paal:
             self.gestart = self.dyn_limit >= MIN_AMPS
 
     def stap(self, nu: dt.datetime) -> None:
+        if self.houdt_tegen_tot is not None and nu >= self.houdt_tegen_tot:
+            self.houdt_tegen_tot = None
         # Een limiet met houdbaarheid vervalt: dan staat er weer het maximum.
         if self.ttl_tot is not None and nu >= self.ttl_tot:
             self.dyn_limit = self.max_amps
@@ -519,6 +525,8 @@ class Paal:
             self.terugvallen += 1
 
     def aanbod(self) -> float:
+        if self.houdt_tegen_tot is not None:
+            return 0.0
         return min(self.dyn_limit, self.max_amps) if self.kabel and not self.uit else 0.0
 
     def status(self, auto: Auto) -> str:
@@ -2117,7 +2125,7 @@ class Wereld:
             z(E["alfen_connected"], "off" if status == "disconnected" else "on")
             z(E["alfen_charging"], "on" if status == "charging" else "off")
             z(E["alfen_mode3"], {"disconnected": "A", "charging": "C2"}.get(
-                status, "B2" if self.paal.dyn_limit >= MIN_AMPS else "B1"))
+                status, "B2" if self.paal.dyn_limit >= MIN_AMPS and self.paal.houdt_tegen_tot is None else "B1"))
             z(E["alfen_limit"], w(f"{self.paal.dyn_limit:.1f}", "A"))
             if self.paal.fasen_keuze is not None:
                 z(E["alfen_fasen"], {"state": "1 Phase" if self.paal.fasen_keuze == 1 else "3 Phases",
@@ -2554,6 +2562,10 @@ class Wereld:
             self.online_was = not self.paal.uit
             self.cache_online_tot = None
             return "de automaat van de paal gaat " + ("aan" if arg else "uit")
+        if actie == "paal_houdt_tegen":
+            # Een Alfen die `arg` minuten niets vrijgeeft, ook met de limiet erop (v0.241.0).
+            self.paal.houdt_tegen_tot = self.nu + dt.timedelta(minutes=int(arg))
+            return f"de paal geeft {arg} minuten niets vrij aan de auto"
         if actie == "equalizer_nul":
             # Een klare auto: de Equalizer zet de paal even op 0 A, en de Easee springt naar awaiting_start.
             self.paal.wacht_na_klaar = True

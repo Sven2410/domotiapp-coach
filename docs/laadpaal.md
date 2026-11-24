@@ -2079,6 +2079,42 @@ teruggelezen limiet, of als hij klopt, gaat de melding over de auto, zoals altij
 
 Proef 251 in test_coach.py.
 
+## Een paal die de stroom aanneemt en niets vrijgeeft: de paal, niet de auto (v0.241.0)
+
+In een klantwoning stak de bewoner op 21-11-2026 om 12:00 een Tesla in een Alfen. De coach schreef 13 A, en de paal
+nam dat aan (de teruggelezen limiet stond op 13). Toch bleef de modus 3-toestand op `B1`, "aangesloten, de paal biedt
+niets aan" (IEC 61851), en de toegepaste stroom op 0 A. De Tesla zei `no_power`. Om 12:20 kwam de kritieke melding
+"neemt al 20 minuten geen stroom af ... trek de kabel eruit", en na het proefladen nog een met "Trek de kabel er even
+uit". Op de kaart: "Kijk of het laden in de auto zelf is uitgesteld of geblokkeerd." Alle drie wezen de auto aan. Het
+gebeurde ook op 04-11 en 23-11. Op 04-11 kwam de paal pas los na twee herstarts. Op 22-11 en 24-11 kwam hij vanzelf los
+toen de coach na uren 0 A bij de geplande start weer stroom zette. Wat hem tegenhield is niet gevonden; de paal hangt
+aan een backoffice, en wat die doet staat niet in Home Assistant.
+
+**Het teken** (`_houdt_tegen` in coach.py, `Charger.paal_houdt_tegen`): modus 3 op `B1`, de kabel erin, en de
+teruggelezen limiet (`dynamic_limit`) minstens `MIN_AMPS`. Na de 0 A van de coach staat een Alfen ook op `B1`, en dan
+telt het niet. Zonder teruggelezen limiet telt `B1` alleen. Op `B2` (aanbod, de auto neemt niets) blijft het de auto.
+Een paal zonder modus 3-toestand, zoals een Easee, houdt nooit tegen. Een veld voor de toegepaste stroom is er niet:
+`B1` met de limiet aangenomen zegt het al.
+
+**Wat de bewoner ziet:**
+- Op de kaart, na dezelfde minuut als bij de auto (`WAITING_SECONDS`): "De coach biedt 13 A aan, maar de paal geeft
+  niets vrij aan de auto." Plan: "De paal houdt de stroom zelf tegen. Kijk in de app van de paal of daar iets het
+  laden tegenhoudt; helpt dat niet, herstart de paal." (`+paal-houdt-tegen`). In Historie: "een paal die de stroom
+  zelf tegenhield".
+- Na 20 minuten aanbod: "Laadpaal geeft al 20 minuten geen stroom vrij aan Tesla, hoewel de coach 13 A aanbiedt. ...
+  De paal houdt de stroom zelf tegen: kijk in de app van de paal ..., en herstart de paal als dat niet helpt." De
+  melding van v0.209.0 (een limiet die niet aangenomen is) gaat voor.
+- Na drie mislukte proeven: "Laadpaal geeft geen stroom vrij aan Tesla. De coach probeerde het 3 keer. ..." Hield de
+  paal bij de laatste proef tegen, dan deze; anders die over de kabel, zoals altijd.
+
+De coach blijft het elke ronde proberen, zoals nu. Herstarten doet hij niet: bij alfen_modbus is daar geen knop voor,
+en een paal uitzetten is niet aan de coach. Een ronde die tegengehouden werd telt niet als een auto die niets nam
+voor het gemeten plafond (`auto_neemt_niets`).
+
+Proef 279 in test_coach.py, proef 8 in test_planner.py, en in het virtuele huis `alfen-houdt-tegen` (de paal houdt
+van 07:00 tot 11:00 tegen, de bus is daarna op zon om 15:11 vol), dezelfde met een herstart om 09:30 (elke melding
+één keer), en `alfen-auto-wordt-niet-wakker` (`B2`: geen woord over de paal). Niet aan een echte Alfen beproefd.
+
 ## Een herinnering als de auto niet aan de paal hangt (v0.212.0)
 
 In een klantwoning werd de bus op 08-11-2026 vergeten aan te sluiten. Om 20:09 stond hij op 18%, de klaar-tijd was

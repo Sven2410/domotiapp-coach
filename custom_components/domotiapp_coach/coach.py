@@ -2718,6 +2718,21 @@ class ChargerCoach:
             self._stil_sinds.pop(device_id, None)
         return "ready_to_charge"
 
+    def _houdt_tegen(self, entities: dict[str, Any]) -> bool:
+        """Of de paal de stroom zelf tegenhoudt: modus 3 op B1 met de limiet van de coach erop (v0.241.0).
+
+        B1 is "aangesloten, de paal biedt niets aan" (IEC 61851). Na de 0 A van de coach is dat gewoon, en
+        daarom telt het alleen als de teruggelezen limiet minstens de ondergrens is; zonder teruggelezen
+        limiet telt B1 alleen. Een Alfen in een klantwoning nam op 21-11-2026 om 12:00 13 A aan en bleef
+        tot 06:00 de volgende ochtend op B1, met 0 A toegepast; de Tesla zei `no_power`. Bij 04-11 en
+        23-11 net zo. Een paal zonder modus 3-toestand (een Easee) houdt hier nooit iets tegen.
+        """
+        modus = _text(self.hass, entities.get("mode3")).strip().upper()
+        if not modus.startswith("B1"):
+            return False
+        limiet = _number(self.hass, entities.get("dynamic_limit"))
+        return limiet is None or limiet >= MIN_AMPS - 0.5
+
     def _sensoren(self, settings: dict[str, Any]) -> dict[str, str]:
         """Elke sensor waar de coach op rekent, met hoe de bewoner hem kent.
 
@@ -14218,6 +14233,7 @@ class ChargerCoach:
             # coach zelf de rem is. Zie `throttled_by_coach` in planner.py.
             limit_amps=_number(self.hass, entities.get("dynamic_limit")),
             circuit_amps=self._groep_amps(entities),
+            paal_houdt_tegen=verbonden and self._houdt_tegen(entities),
         )
         # Hoe lang de paal al onder zijn limiet blijft. Een naijl na een stap
         # omhoog is na de aanloop voorbij; een verschil dat daarna blijft staan
@@ -14866,6 +14882,8 @@ class ChargerCoach:
             return
         proef["pogingen"] += 1
         proef["laatste"] = now
+        # Hield de paal zelf de stroom tegen, dan noemt de melding de paal en niet de kabel (v0.241.0).
+        proef["tegen"] = charger.paal_houdt_tegen
         if proef["pogingen"] < PROEF_POGINGEN:
             proef["fase"], proef["sinds"] = "pauze", now
             _LOGGER.info(
@@ -14874,6 +14892,19 @@ class ChargerCoach:
             )
             return
         proef["fase"] = "mislukt"
+        if proef.get("tegen"):
+            await self._async_tell(
+                t(
+                    "{naam} geeft geen stroom vrij aan {auto}. De coach probeerde het {keer} keer. De paal "
+                    "houdt de stroom zelf tegen: kijk in de app van de paal of daar iets het laden tegenhoudt, "
+                    "en herstart de paal als dat niet helpt.",
+                    auto=self._hoe_heet(car),
+                    naam=_hoofdletter(device.get("name") or t("de laadpaal")),
+                    keer=PROEF_POGINGEN,
+                ),
+                kritiek=True, plek=self._plek(device),
+            )
+            return
         await self._async_tell(
             t(
                 "{auto} aan {naam} neemt geen stroom aan. De coach probeerde het {keer} keer. "
@@ -15443,6 +15474,7 @@ class ChargerCoach:
         "held-back": nt("de lastbewaking van je aansluiting"),
         "balancer-paused": nt("de lastbewaking van je aansluiting"),
         "waiting-for-car": nt("een auto die geen stroom afnam"),
+        "paal-houdt-tegen": nt("een paal die de stroom zelf tegenhield"),
         "waiting-for-auth": nt("een paal die op goedkeuring wachtte"),
         "no-soc": nt("wachten op je accustand"),
         "wait-for-sun": nt("wachten op je eigen zon"),
@@ -16701,6 +16733,7 @@ class ChargerCoach:
             # klaar-tijdregel om 20:01 aan het werk.
             auto_neemt_niets = (
                 charger.complete or "waiting-for-car" in decision.rule or "+proef" in decision.rule
+                or "paal-houdt-tegen" in decision.rule
             )
             if grid is not None:
                 plafond = ceiling_amps(grid, car, charger)
@@ -17147,6 +17180,22 @@ class ChargerCoach:
                         "{paal} neemt al {minuten} minuten de stroom van de coach niet aan en blijft op {limiet} A "
                         "staan.{stand} Zo wordt {klok} niet gehaald. Kijk of de paal stroom en internet heeft.",
                         paal=_hoofdletter(naam), minuten=minuten, limiet=f"{limiet:.0f}",
+                        stand=(" " + t("{auto} staat op {pct}%.", auto=_hoofdletter(self._hoe_heet(car)),
+                                       pct=round(car.soc_percent)) if car.soc_percent is not None else ""),
+                        klok=f"{window.deadline:%H:%M}",
+                    ),
+                    kritiek=True, plek=self._plek(device),
+                )
+            elif charger.paal_houdt_tegen:
+                # De paal heeft de stroom wel, en geeft hem niet aan de auto (v0.241.0): een Alfen op B1
+                # in een klantwoning op 21-11-2026, waar deze melding de kabel van de auto aanwees.
+                await self._async_tell(
+                    t(
+                        "{paal} geeft al {minuten} minuten geen stroom vrij aan {auto}, hoewel de coach "
+                        "{amps} A aanbiedt.{stand} Zo wordt {klok} niet gehaald. De paal houdt de stroom zelf "
+                        "tegen: kijk in de app van de paal of daar iets het laden tegenhoudt, en herstart de "
+                        "paal als dat niet helpt.",
+                        paal=_hoofdletter(naam), minuten=minuten, auto=self._hoe_heet(car), amps=decision.amps,
                         stand=(" " + t("{auto} staat op {pct}%.", auto=_hoofdletter(self._hoe_heet(car)),
                                        pct=round(car.soc_percent)) if car.soc_percent is not None else ""),
                         klok=f"{window.deadline:%H:%M}",
