@@ -30,6 +30,7 @@ import calendar
 import copy
 import dataclasses
 import datetime as dt
+import logging
 import math
 import random
 import sys
@@ -616,6 +617,15 @@ class Vaatwasser:
     # stappen van een tiende kWh, en geen vermogenssensor. De knop Starten is er
     # alleen als de machine een start aanneemt, zoals bij Home Connect Local.
     miele: bool = False
+    # Even van het netwerk (v0.242.0): tot dit moment zegt elke entiteit van de machine `unavailable`, behalve
+    # de stekker. De machine zelf doet wat hij deed. Zoals een vaatwasser met Home Connect Local in een
+    # klantwoning in de nacht van 15 op 16-11-2026.
+    offline_tot: dt.datetime | None = None
+    # Zoveel drukken op start gaan nog mis met een verbinding die dichtgaat (`Cannot write to closing
+    # transport`, 16-11-2026 om 02:44).
+    druk_fout: int = 0
+    # De keuzelijst van het programma en de startknop zijn weg, de status niet (21 tot 24-11-2026).
+    keuze_weg: bool = False
 
     # toestand
     status: str = "ready"
@@ -1420,6 +1430,9 @@ class Verloop:
     vw_gevraagd: list = field(default_factory=list)
     # Of de vaatwasser aan het eind vrijgegeven stond (ready_devices).
     vw_vrij_eind: bool = False
+    # De regel van de vaatwasser per ronde, als hij veranderde (v0.242.0), en de ERROR-regels van de coach.
+    vw_regels: list = field(default_factory=list)
+    log_fouten: list = field(default_factory=list)
     # De boiler: wanneer de stroom erop en eraf ging, wat erin ging en wat dat
     # kostte, hoe leeg het vat onderweg werd en hoe vol het was op de
     # klaar-tijd. Dat laatste is waar het om gaat: er hoort warm water te zijn
@@ -2264,6 +2277,8 @@ class Wereld:
                 z(E["vw_start"], "unavailable" if (vw.deur_open or draait) else "unknown")
             else:
                 z(E["vw_programma"], vw.programma)
+                # De knop van de cloud is er altijd (v0.242.0: tenzij `keuze_weg`, hieronder).
+                z(E["vw_start"], "unknown")
             if vw.lokaal and not vw.eindtijd_tijdstip:
                 rest = vw.resterend(nu)
                 z(E["vw_rest"], "unknown" if rest is None else w(f"{rest / 60:.4f}", "h"))
@@ -2278,6 +2293,15 @@ class Wereld:
                 z(E["vw_rest"], "unknown" if rest is None else w(str(rest), "min"))
             z(E["vw_deur"], "on" if vw.deur_open else "off")
             z(E["vw_vermogen"], w(f"{self.vw_w:.0f}", "W"))
+        if self.vaatwasser is not None and (self.vaatwasser.keuze_weg or (
+                self.vaatwasser.offline_tot is not None and nu < self.vaatwasser.offline_tot)):
+            vw = self.vaatwasser
+            weg = ["vw_programma", "vw_start"] if not (vw.offline_tot and nu < vw.offline_tot) else [
+                "vw_status", "vw_programma", "vw_actief", "vw_rest", "vw_deur", "vw_afstand", "vw_start", "vw_teller"]
+            if vw.keuze_weg and vw.lokaal:
+                weg.append("vw_actief")
+            for naam in weg:
+                z(E[naam], "unavailable")
         if self.boiler is not None:
             z(E["boiler_switch"], "on" if self.boiler.aan else "off")
             z(E["boiler_vermogen"], w(f"{self.boiler_w:.0f}", "W"))
@@ -2521,6 +2545,16 @@ class Wereld:
                 self.vaatwasser.status = "ready"
                 self.vaatwasser.gestart_op = None
             return "de bewoner geeft de vaatwasser vrij: ingeruimd en nu starten"
+        if actie == "vaatwasser_offline":
+            # De vaatwasser is `arg` minuten van het netwerk (v0.242.0).
+            self.vaatwasser.offline_tot = self.nu + dt.timedelta(minutes=int(arg))
+            return f"de vaatwasser is {arg} minuten van het netwerk"
+        if actie == "vaatwasser_druk_fout":
+            self.vaatwasser.druk_fout = int(arg)
+            return f"de volgende {arg} keer drukken op start gaat mis: de verbinding gaat dicht"
+        if actie == "vaatwasser_keuze_weg":
+            self.vaatwasser.keuze_weg = bool(arg)
+            return "de keuzelijst en de startknop van de vaatwasser zijn " + ("weg" if arg else "terug")
         if actie == "vaatwasser_deur":
             self.vaatwasser.deur_open = bool(arg)
             # Home Connect staat na een beurt op "finished" tot de deur opengaat.
@@ -2692,6 +2726,12 @@ class Diensten:
             # De integratie laat de knop meteen volgen; de echte doet dat binnen een tel.
             self.wereld.bat_knoppen(self.hass)
         elif domein == "button" and data.get("entity_id") == E["vw_start"]:
+            vw = self.wereld.vaatwasser
+            if vw is not None and vw.druk_fout > 0:
+                # De verbinding gaat dicht terwijl de coach drukt (v0.242.0); de druk komt nergens.
+                vw.druk_fout -= 1
+                self.verloop.vw_gedrukt.append(self.wereld.nu)
+                raise ConnectionResetError("Cannot write to closing transport")
             self.verloop.vw_gedrukt.append(self.wereld.nu)
             # Home Assistant slaat een dienst op een onbeschikbare entiteit
             # stilzwijgend over; de druk telt wel, want hij was vergeefs.
@@ -3020,6 +3060,10 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
             if wereld.batterij is not None:
                 await coach._async_regel_tik()
             besluit = coach.state.get("paal") or {}
+            if wereld.vaatwasser is not None:
+                regel = (coach.state.get("vaatwasser") or {}).get("rule")
+                if regel and (not verloop.vw_regels or verloop.vw_regels[-1][1] != regel):
+                    verloop.vw_regels.append((nu, regel))
             # Een domme vaatwasser: zegt de coach "zet hem aan", dan doet de
             # bewoner dat zoveel minuten later, als hij dat doet.
             if wereld.vaatwasser is not None and not wereld.vaatwasser.slim:
@@ -3149,7 +3193,16 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
             vorige = (regel.regel, regel.amps)
             wereld.verstrijk(stap_s + UITLOOP_S)
 
-    asyncio.run(lus())
+    class _Fouten(logging.Handler):
+        def emit(self, record):
+            if record.levelno >= logging.ERROR:
+                verloop.log_fouten.append((wereld.nu, record.getMessage()))
+    vanger = _Fouten()
+    coachmod._LOGGER.addHandler(vanger)
+    try:
+        asyncio.run(lus())
+    finally:
+        coachmod._LOGGER.removeHandler(vanger)
     asyncio.run(hass.afmaken())
     try:
         verloop.beurten = asyncio.run(coachmod.async_get_beurten(hass).async_list())

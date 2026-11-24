@@ -19790,6 +19790,86 @@ controle("de paal geeft de reden in Historie, en telt niet als een auto die niet
 controle("het teken gaat in de Charger mee, alleen met de kabel erin",
          "paal_houdt_tegen=verbonden and self._houdt_tegen(entities)" in bron279, "")
 
+print("=== 280. een vaatwasser die even van het netwerk is: offline, het laatste programma, een start die niet aankomt (v0.242.0) ===")
+# Een klantwoning, 16-11, 17-11, 21-11 en 23-11-2026. Zie docs/vaatwasser.md.
+inst280 = _copy267.deepcopy(inst56)
+inst280["ready_devices"] = []
+huis280 = _copy267.deepcopy(huis56)
+hass280, _s280, c280 = bouw(huis280, inst280)
+gemeld280 = []
+
+
+async def tell280(bericht, kritiek=False, telefoon=True, **_):
+    gemeld280.append((bericht, kritiek))
+c280._async_tell = tell280
+asyncio.run(c280._async_geheugen_laden())
+
+
+async def ronde280(coach, nu):
+    coach.hass.services.verstuurd.clear()
+    await coach.hass.afmaken()
+    await coach._round(nu)
+    await coach.hass.afmaken()
+    return coach.state.get("dev-vaatwasser") or {}, [d for d in coach.hass.services.verstuurd if d[0] == "button"]
+
+asyncio.run(ronde280(c280, dt.datetime(2026, 9, 7, 18, 30)))
+controle("het programma dat hij ziet gaat in het geheugen",
+         coachmod.async_get_geheugen(hass280)._items.get(
+             "programma_laatst:dev-vaatwasser", {}).get("data", {}).get("key") == "eco_50",
+         f"{coachmod.async_get_geheugen(hass280)._items.get('programma_laatst:dev-vaatwasser')}")
+asyncio.run(coachmod.async_get_geheugen(hass280).async_bewaar(dt.datetime(2026, 9, 7, 16, 30)))
+# Een herstart, en de keuzelijst komt niet terug.
+c280b = coachmod.ChargerCoach(hass280)
+c280b._sleep = lambda seconds: asyncio.sleep(0)
+c280b._async_tell = tell280
+asyncio.run(c280b._async_geheugen_laden())
+hass280.states.zet("select.vaatwasser_programma", "unavailable")
+inst280["ready_devices"] = ["dev-vaatwasser"]
+b280, k280 = asyncio.run(ronde280(c280b, dt.datetime(2026, 9, 7, 19, 5)))
+controle("na een herstart, met de keuzelijst weg: plannen met het laatste programma, niet 'kies een programma'",
+         b280.get("rule") == "wait-for-start" and b280.get("program") == "eco_50", f"{b280.get('rule')} {b280.get('program')}")
+# Offline: de status zegt niets. Op de kaart "even niet bereikbaar", en het geplande moment blijft.
+hass280.states.zet("sensor.vaatwasser_status", "unavailable")
+b280, k280 = asyncio.run(ronde280(c280b, dt.datetime(2026, 9, 7, 19, 10)))
+controle("offline: de regel offline, met 'even niet bereikbaar' en het geplande moment",
+         b280.get("rule") == "offline" and b280.get("reason", "").startswith("Hij is even niet bereikbaar.")
+         and (b280.get("starts_at") or "").endswith("T01:00:00") and not k280, f"{b280}")
+controle("en de startsensor houdt het moment", sensormod.start_tekst(b280, dt.datetime(2026, 9, 7, 19, 10)) == "morgen om 01:00",
+         f"{sensormod.start_tekst(b280, dt.datetime(2026, 9, 7, 19, 10))}")
+# Om 01:00 terug, en de druk gaat mis: geen uitzondering, een waarschuwing, en de volgende ronde opnieuw.
+hass280.states.zet("sensor.vaatwasser_status", "ready")
+hass280.states.zet("select.vaatwasser_programma", "dishcare_dishwasher_program_eco_50")
+echte280 = hass280.services.async_call
+START_FOUTEN280 = coachmod.START_FOUTEN
+fout280 = {"n": START_FOUTEN280}
+
+
+async def kapot280(domein, dienst, data=None, blocking=False, **rest):
+    if domein == "button" and fout280["n"] > 0:
+        fout280["n"] -= 1
+        raise ConnectionResetError("Cannot write to closing transport")
+    return await echte280(domein, dienst, data, blocking=blocking, **rest)
+hass280.services.async_call = kapot280
+for i in range(START_FOUTEN280):
+    asyncio.run(ronde280(c280b, dt.datetime(2026, 9, 8, 1, i, 30)))
+sessie280 = c280b._programma["dev-vaatwasser"]
+controle("vijf keer niet aangekomen: geen ERROR, niet als gedrukt geteld, en één melding",
+         sessie280["fouten"] == START_FOUTEN280 and sessie280["gedrukt"] is None and sessie280["pogingen"] == 0
+         and [m for m, _ in gemeld280 if "de start kwam niet aan" in m] == [
+             "De coach probeerde Vaatwasser 5 keer te starten, maar de start kwam niet aan. Kijk of de machine aan staat en verbinding heeft."],
+         f"{sessie280} {gemeld280}")
+hass280.services.async_call = echte280
+b280, k280 = asyncio.run(ronde280(c280b, dt.datetime(2026, 9, 8, 1, 6, 30)))
+controle("en met de verbinding terug drukt hij gewoon", k280 == [("button", "press", {"entity_id": "button.vaatwasser_start"})],
+         f"{k280}")
+# Hij draait, en valt weg: hij blijft draaien, geen nieuwe start.
+hass280.states.zet("sensor.vaatwasser_status", "run")
+asyncio.run(ronde280(c280b, dt.datetime(2026, 9, 8, 1, 8, 30)))
+hass280.states.zet("sensor.vaatwasser_status", "unavailable")
+b280, k280 = asyncio.run(ronde280(c280b, dt.datetime(2026, 9, 8, 2, 0, 30)))
+controle("draaide hij, dan draait hij nog als hij weg is", b280.get("rule") == "running" and b280.get("running") and not k280,
+         f"{b280.get('rule')} {k280}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

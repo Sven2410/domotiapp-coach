@@ -81,10 +81,15 @@ core.State = State
 excepties = types.ModuleType("homeassistant.exceptions")
 
 
-class ServiceNotFound(Exception):  # noqa: D101
+class HomeAssistantError(Exception):  # noqa: D101
     pass
 
 
+class ServiceNotFound(HomeAssistantError):  # noqa: D101
+    pass
+
+
+excepties.HomeAssistantError = HomeAssistantError
 excepties.ServiceNotFound = ServiceNotFound
 
 helpers = types.ModuleType("homeassistant.helpers")
