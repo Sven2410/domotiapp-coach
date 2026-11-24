@@ -194,6 +194,16 @@ d = decide(nu, [], zonnig, sven_auto(), paal(laadt=False), venster(nu),
 print(f"  {d.rule}: {d.reason}")
 controle("wacht op de auto", d.rule.endswith("+waiting-for-car"))
 controle("geen loze belofte", "neemt nog niets af" in d.reason)
+# Een paal die de stroom aanneemt en zelf tegenhoudt (v0.241.0, een Alfen op B1): dan de paal, niet de auto.
+from dataclasses import replace as _vervang
+d = decide(nu, [], zonnig, sven_auto(), _vervang(paal(laadt=False), paal_houdt_tegen=True), venster(nu),
+           tariff=VAST, sun=ZON_RUIM, waking=False, asking_seconds=90)
+print(f"  {d.rule}: {d.reason} {d.plan}")
+controle("houdt de paal tegen, dan zegt de kaart dat", d.rule.endswith("+paal-houdt-tegen") and d.charge
+         and "de paal geeft niets vrij" in d.reason and "herstart de paal" in d.plan, d.rule)
+d = decide(nu, [], zonnig, sven_auto(), _vervang(paal(laadt=False), paal_houdt_tegen=True), venster(nu),
+           tariff=VAST, sun=ZON_RUIM, waking=False, asking_seconds=3)
+controle("en ook de paal krijgt eerst een minuut", "+paal-houdt-tegen" not in d.rule, d.rule)
 
 print("=== 9. een auto die gewoon laadt, wordt niet gewekt ===")
 d = decide(nu, [], zonnig, sven_auto(), paal(laadt=True, amps=5.7), venster(nu),

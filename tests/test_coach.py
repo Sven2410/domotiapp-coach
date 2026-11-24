@@ -19771,6 +19771,25 @@ asyncio.run(c278d._async_offline_melden(NU278D + dt.timedelta(minutes=1), LAADPA
 controle("weer weg: dan komt de melding wel, één keer",
          len(gemeld278d) == 1 and "komt niet terug na herladen" in gemeld278d[0], f"{gemeld278d}")
 
+print("=== 279. een Alfen die de stroom aanneemt en niets vrijgeeft: de paal krijgt de schuld (v0.241.0) ===")
+# Een klantwoning op 21-11-2026: Tesla om 12:00 erin, 13 A aangenomen, modus 3 bleef B1 met 0 A toegepast. De
+# kaart en twee kritieke meldingen zeiden dat de auto niets nam en dat de kabel eruit moest.
+_i279, h279, c279, _b279 = bouw250(ALFEN)
+tegen279 = []
+for modus, dyn in (("B1", "13"), ("B1", "0"), ("B2", "13"), ("C2", "13"), ("A", "13"), ("B1", "unavailable")):
+    h279.states.zet("sensor.alfen_modus3", modus)
+    h279.states.zet("sensor.laadpaal_dyn", dyn)
+    tegen279.append(c279._houdt_tegen(ALFEN["entities"]))
+controle("B1 met de limiet erop houdt tegen; na de 0 A van de coach, op B2, C2 of A niet; zonder teruggelezen limiet B1 alleen",
+         tegen279 == [True, False, False, False, False, True], f"{tegen279}")
+controle("een paal zonder modus 3-toestand (Easee) houdt nooit tegen",
+         not c279._houdt_tegen(LAADPAAL["entities"]) and not c279._houdt_tegen({}), "")
+bron279 = (BRONMAP / "coach.py").read_text(encoding="utf-8")
+controle("de paal geeft de reden in Historie, en telt niet als een auto die niets nam voor het plafond",
+         '"paal-houdt-tegen": nt(' in bron279 and 'or "paal-houdt-tegen" in decision.rule' in bron279, "")
+controle("het teken gaat in de Charger mee, alleen met de kabel erin",
+         "paal_houdt_tegen=verbonden and self._houdt_tegen(entities)" in bron279, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

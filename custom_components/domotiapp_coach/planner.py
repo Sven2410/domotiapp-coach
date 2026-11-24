@@ -580,6 +580,10 @@ class Charger:
     # `circuit_ceiling`: de auto trekt soms meer dan er gevraagd is, en boven
     # deze grens grijpt de paal zelf in.
     circuit_amps: float | None = None
+    # De paal heeft de limiet van de coach, en geeft toch niets vrij aan de auto (v0.241.0): een Alfen
+    # die op B1 blijft staan ("aangesloten, geen aanbod") terwijl hij de stroom aannam. Dan ligt het
+    # aan de paal en niet aan de auto. Onwaar voor een paal zonder modus 3-toestand, zoals een Easee.
+    paal_houdt_tegen: bool = False
     # Wat er sinds het inpluggen gemiddeld voor deze paal overbleef, in ampère:
     # het plafond van elke ronde (zekering, lastbewaker, wat het huis trok)
     # gemiddeld over de tijd. Een meting van déze beurt en geen patroon over
@@ -3512,6 +3516,23 @@ def _wake(
                     "hoort hij dit zelf goed te keuren."
                 ),
                 rule=f"{decision.rule}+waiting-for-auth",
+                holding=decision.holding,
+                needs_soc=decision.needs_soc,
+            )
+        # En een paal die de stroom van de coach wel heeft, maar hem zelf niet aan de auto geeft
+        # (v0.241.0). Een Alfen in een klantwoning bleef op 04-11, 21-11 en 23-11-2026 uren op B1 met
+        # 13 A aangenomen en 0 A toegepast, en de kaart zei dat de auto niets nam. Wat hem tegenhield
+        # is niet gevonden: de paal kwam twee keer vanzelf los, één keer pas na een herstart.
+        if charger.paal_houdt_tegen:
+            return Decision(
+                True,
+                decision.amps,
+                t("De coach biedt {amps} A aan, maar de paal geeft niets vrij aan de auto.", amps=decision.amps),
+                plan=t(
+                    "De paal houdt de stroom zelf tegen. Kijk in de app van de paal of daar iets het laden "
+                    "tegenhoudt; helpt dat niet, herstart de paal."
+                ),
+                rule=f"{decision.rule}+paal-houdt-tegen",
                 holding=decision.holding,
                 needs_soc=decision.needs_soc,
             )
