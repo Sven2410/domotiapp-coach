@@ -23,7 +23,7 @@ from functools import partial
 from typing import Any
 
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.exceptions import ServiceNotFound
+from homeassistant.exceptions import HomeAssistantError, ServiceNotFound
 from homeassistant.helpers.event import (
     async_call_later,
     async_track_state_change_event,
@@ -718,6 +718,12 @@ AUTO_STORING = ("fault", "error", "storing")
 START_WACHT = timedelta(minutes=3)
 START_POGINGEN = 2
 START_OPNIEUW = timedelta(minutes=5)
+# Zo vaak mag een druk op start niet aankomen (de verbinding dicht) voor de bewoner het hoort (v0.242.0).
+START_FOUTEN = 5
+# Vrijgegeven, en de coach ziet geen programma: zo lang na de vrijgave één melding (v0.242.0), of eerder als
+# de klaar-tijd binnen `GEEN_PROGRAMMA_KLAAR` komt.
+GEEN_PROGRAMMA_MELDEN = timedelta(hours=1)
+GEEN_PROGRAMMA_KLAAR = timedelta(hours=2)
 
 # Een apparaat zonder startknop, op een meetstekker (merk "overig"). De coach
 # ziet aan het vermogen of hij draait: boven DRAAI_W is draaien, en klaar is
@@ -2149,6 +2155,9 @@ class ChargerCoach:
         # vrijgegeven, wanneer de coach op start drukte, wanneer hij ging
         # draaien, en de tellers voor het verslag. Zie `_one_programma`.
         self._programma: dict[str, dict[str, Any]] = {}
+        # Het laatste programma dat een apparaat liet zien, per apparaat (v0.242.0): daarmee plant hij als het
+        # programma even niet te zien is. In het geheugen als `programma_laatst:<id>`.
+        self._programma_laatst: dict[str, str] = {}
         # Per boiler wat er deze ronde bekend is: sinds wanneer er stroom op
         # staat, wanneer hij voor het laatst iets trok, en de tellers voor
         # Bespaard. Wat hij geléérd heeft staat in de instellingen, want dat
@@ -5765,7 +5774,10 @@ class ChargerCoach:
         # De eerste ronde waarin deze coach het apparaat ziet: liep er toen al
         # een beurt, dan is dit een herstart middenin.
         eerste = not sessie.get("gezien")
-        sessie["gezien"] = True
+        if device_id not in self._programma_laatst:
+            laatst = self._geheugen_terug.pop(f"programma_laatst:{device_id}", None)
+            if isinstance(laatst, dict) and laatst.get("key"):
+                self._programma_laatst[device_id] = str(laatst["key"])
 
         # Zonder startknop is het een apparaat op een meetstekker: de coach
         # zegt wanneer, de bewoner drukt, en het vermogen zegt of hij draait.
@@ -5831,14 +5843,34 @@ class ChargerCoach:
         else:
             # Geen sensor die het programma zegt: de bewoner koos het op de kaart.
             programma = programma_van(device.get("program") or None, tabel)
+        # Wat erop staat, onthouden; en als het even niet te zien is, het laatst bekende (v0.242.0). In een
+        # klantwoning kwamen na een beurt op 21-11-2026 de keuzelijst en de startknop van een vaatwasser niet
+        # meer terug. Op 23-11 gaf de bewoner hem om 19:54 vrij, en de hele nacht stond er "kies een
+        # programma", zonder melding; hij draaide niet. Alleen als het apparaat het programma zelf meldt, en
+        # alleen bij `unavailable`: een programma dat de coach niet kent, blijft onbekend.
+        bronnen = [k for k in ("program", "program_select") if entities.get(k)]
+        if programma is not None and bronnen:
+            if self._programma_laatst.get(device_id) != programma.key:
+                self._programma_laatst[device_id] = programma.key
+        elif bronnen and any(_text(self.hass, entities[k]).strip().lower() == "unavailable" for k in bronnen):
+            programma = sessie.get("programma") or next(
+                (p for p in tabel if p.key == self._programma_laatst.get(device_id)), None
+            )
+        if device_id in self._programma_laatst:
+            # Met de dag erbij, zodat hij elke dag opnieuw bewaard wordt en niet na `GEHEUGEN_MAX_UREN` vervalt.
+            self._onthoud(f"programma_laatst:{device_id}",
+                          {"key": self._programma_laatst[device_id], "dag": now.date().isoformat()})
         deur = _text(self.hass, entities.get("door")).strip().lower()
         deur_open = None if not deur else deur in ("open", "on")
         watts = _watts(self.hass, device.get("entity"))
 
+        offline = False
         if handmatig:
             status = self._status_uit_vermogen(sessie, now, watts)
         else:
             ruw = _text(self.hass, entities.get("status")).strip().lower().split(".")[-1]
+            # Even van het netwerk (v0.242.0): de status zegt niets. Geen nieuwe toestand.
+            offline = bool(entities.get("status")) and ruw in ("unavailable", "")
             # In de woorden van Home Connect, ook bij Miele (v0.124.0); zie
             # `programma_van` voor dezelfde afspraak bij het programma.
             status = _programma_stand(ruw)
@@ -5858,6 +5890,18 @@ class ChargerCoach:
             elif status in DRAAIT or status in KLAAR:
                 sessie["afgebroken"] = False
                 sessie["onderbroken_om"] = None
+        # Zag de coach hem draaien voordat hij wegviel, dan draait hij tot hij terug is (v0.242.0). In een
+        # klantwoning op 21-11-2026 viel een vaatwasser om 20:12 weg in de droogfase. De coach zag geen
+        # draaien meer, de keuze "nu starten" stond nog, en hij wilde hem om 20:18 opnieuw starten, met de
+        # kritieke melding "zet de machine aan" over een machine die al waste.
+        if offline and sessie["gestart"] is not None:
+            status = "run"
+        # De eerste ronde na een herstart is de eerste waarin hij weer iets zegt: pas dan kan hij zien of een
+        # bewaarde beurt nog loopt.
+        if offline:
+            eerste = False
+        else:
+            sessie["gezien"] = True
 
         klep = ""
         if zonder_vrijgave and not alleen_lezen:
@@ -5873,7 +5917,7 @@ class ChargerCoach:
         if not released and sessie["gestart"] is None:
             # Vrijgave ingetrokken voor er iets gebeurde: schone lei.
             self._programma[device_id] = {**sessie, "vrijgegeven": None, "gedrukt": None,
-                                          "pogingen": 0, "gemeld": set(), "programma": None,
+                                          "pogingen": 0, "fouten": 0, "gemeld": set(), "programma": None,
                                           "gevraagd": None, "eind": None, "eind_gezien": None,
                                           "knop_weg": None}
             sessie = self._programma[device_id]
@@ -5884,7 +5928,7 @@ class ChargerCoach:
         apparaat = Apparaat(
             status=status, released=released, program=programma, door_open=deur_open,
             manual=handmatig, start_now=nu_starten, door_release=klep,
-            vrijgave=VRIJGAVE_WOORD.get(soort, ""),
+            vrijgave=VRIJGAVE_WOORD.get(soort, ""), offline=offline and status not in DRAAIT,
         )
         decision = plan_programma(
             now, self._prices(settings), self._tarief(settings),
@@ -6035,6 +6079,27 @@ class ChargerCoach:
         }
         await self._async_noteer_programma(device, device_id, now)
 
+        # Vrijgegeven, en geen programma te zien, ook geen laatst bekend: één melding (v0.242.0). Een regel op de
+        # kaart ziet niemand 's nachts; in een klantwoning bleef een vaatwasser zo op 23-11-2026 van 19:54 tot de
+        # ochtend staan. Na een uur, of eerder als de klaar-tijd dichtbij komt. Eén keer per vrijgave.
+        vrij_sinds = sessie.get("vrijgegeven")
+        if (
+            mag and released and not alleen_lezen and not handmatig and programma is None
+            and not draait and status not in KLAAR and vrij_sinds is not None
+            and "geen-programma" not in sessie["gemeld"]
+            and (
+                now - vrij_sinds >= GEEN_PROGRAMMA_MELDEN
+                or (window.enabled and window.deadline is not None
+                    and window.deadline > now and _tussen(now, window.deadline) <= GEEN_PROGRAMMA_KLAAR)
+            )
+        ):
+            sessie["gemeld"].add("geen-programma")
+            await self._async_tell(
+                t("{naam} is vrijgegeven, maar laat geen programma zien. Zet hem even aan en kies een programma, "
+                  "dan plant de coach hem.", naam=naam),
+                kritiek=True, plek=self._plek(device),
+            )
+
         # Klaar: verslag, opslag, vrijgave eraf.
         if status in KLAAR or (sessie["gestart"] is not None and not draait and status in ("ready", "inactive", "")):
             if sessie["gestart"] is not None and "klaar" not in sessie["gemeld"]:
@@ -6119,9 +6184,9 @@ class ChargerCoach:
         if gedrukt is None:
             if sessie["pogingen"] >= START_POGINGEN:
                 return
-            await self._async_druk(device, "start")
-            sessie["gedrukt"] = now
-            sessie["pogingen"] += 1
+            if await self._async_start_druk(device, naam, sessie, now):
+                sessie["gedrukt"] = now
+                sessie["pogingen"] += 1
             return
         if now - gedrukt >= START_WACHT and "start-mislukt" not in sessie["gemeld"]:
             sessie["gemeld"].add("start-mislukt")
@@ -6136,9 +6201,33 @@ class ChargerCoach:
                 kritiek=True, plek=self._plek(device),
             )
         if now - gedrukt >= START_OPNIEUW and sessie["pogingen"] < START_POGINGEN:
+            if await self._async_start_druk(device, naam, sessie, now):
+                sessie["gedrukt"] = now
+                sessie["pogingen"] += 1
+
+    async def _async_start_druk(self, device: dict[str, Any], naam: str, sessie: dict[str, Any], now: datetime) -> bool:
+        """Op start drukken; onwaar als de druk niet aankwam (v0.242.0).
+
+        In een klantwoning op 16-11 en 17-11-2026 om 02:44 ging de verbinding met de vaatwasser dicht op het
+        moment dat de coach drukte: `Cannot write to closing transport`. Dat werd een ERROR met de hele
+        traceback ("kon ... niet beoordelen"), en de wachter gaf alarm. Een start die niet aankomt is geen
+        kapot apparaat: één waarschuwing, en de volgende ronde opnieuw. Pas na `START_FOUTEN` keer een melding.
+        """
+        try:
             await self._async_druk(device, "start")
-            sessie["gedrukt"] = now
-            sessie["pogingen"] += 1
+            return True
+        except (HomeAssistantError, OSError, TimeoutError) as fout:
+            sessie["fouten"] = int(sessie.get("fouten") or 0) + 1
+            _LOGGER.warning("de start van %s kwam niet aan (%s); opnieuw zodra hij bereikbaar is",
+                            device.get("id"), fout)
+            if sessie["fouten"] >= START_FOUTEN and "start-fout" not in sessie["gemeld"]:
+                sessie["gemeld"].add("start-fout")
+                await self._async_tell(
+                    t("De coach probeerde {naam} {keer} keer te starten, maar de start kwam niet aan. Kijk of de "
+                      "machine aan staat en verbinding heeft.", naam=naam, keer=sessie["fouten"]),
+                    kritiek=True, plek=self._plek(device),
+                )
+            return False
 
     @staticmethod
     def _lege_programma_sessie(now: datetime) -> dict[str, Any]:
@@ -6146,6 +6235,7 @@ class ChargerCoach:
             "vrijgegeven": None,   # wanneer de bewoner hem vrijgaf
             "gedrukt": None,       # wanneer de coach het laatst op start drukte
             "pogingen": 0,
+            "fouten": 0,           # drukken die niet aankwamen (v0.242.0)
             "gestart": None,       # wanneer hij ging draaien
             "door_coach": False,   # of de coach hem startte of erom vroeg
             "kwh": 0.0,
@@ -18424,6 +18514,7 @@ class ChargerCoach:
             return
         data: dict[str, Any] = {k: _naar_geheugen(sessie.get(k)) for k in self._PROGRAMMA_MOMENTEN}
         data["pogingen"] = int(sessie.get("pogingen") or 0)
+        data["fouten"] = int(sessie.get("fouten") or 0)
         data["gemeld"] = sorted(sessie.get("gemeld") or ())
         data["klep_uitruimen"] = bool(sessie.get("klep_uitruimen"))
         data["klep_open_gezien"] = bool(sessie.get("klep_open_gezien"))
@@ -18444,6 +18535,7 @@ class ChargerCoach:
             sessie[sleutel] = _uit_geheugen(data.get(sleutel))
         try:
             sessie["pogingen"] = max(0, int(data.get("pogingen") or 0))
+            sessie["fouten"] = max(0, int(data.get("fouten") or 0))
         except (TypeError, ValueError):
             pass
         sessie["gemeld"] = {str(g) for g in data.get("gemeld") or []}

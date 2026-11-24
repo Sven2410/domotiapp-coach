@@ -616,3 +616,57 @@ eigen veld; daarmee vervalt zijn keuze van 29-09-2026.
 Proef 245 in test_coach.py (dubbel: vrij en nu; nog eens: niets; enkel voor later en dan dubbel; een oude druk na een
 herstart; dezelfde druk in allebei; tijdens de beurt niets; na de beurt weer; een knop-helper, en dat de coach naar
 de knop luistert) en de proef "de nu-startknop" in test_rapport.mjs. Elke beveiliging is met een mutatie nagekeken.
+
+## Even van het netwerk: offline, het laatste programma, een start die niet aankomt (v0.242.0)
+
+In een klantwoning viel de lokale verbinding met een vaatwasser (Home Connect Local) vaak weg. Vier keer liep
+het daardoor mis:
+
+- **15 op 16-11-2026**: van 20:17 tot 02:47 zeker zeventien keer `ready` en `unavailable`. Telkens stond er op de kaart
+  "De coach herkent het gekozen programma niet ... Kies een programma op het apparaat", terwijl het programma er
+  gewoon op stond.
+- **16-11 en 17-11, rond 02:44**: de coach drukte op start terwijl de verbinding dichtging (`Cannot write to closing
+  transport`). Dat werd een ERROR met de hele traceback ("kon ... niet beoordelen"), en de wachter gaf alarm. Drie
+  minuten later was de machine terug en draaide hij alsnog.
+- **21-11, 20:12**: weg midden in de droogfase van een beurt met "ingeruimd en nu starten". De coach zag geen draaien
+  meer, de keuze stond nog, en hij wilde hem opnieuw starten, met de kritieke melding "zet de machine aan" over een
+  machine die al waste. Het ging toen alleen goed omdat de vrijgave al uit stond toen hij terugkwam.
+- **23-11, 19:54**: na de beurt van 21-11 kwamen de keuzelijst en de startknop niet meer terug. Vrijgegeven met de
+  deur dicht, en de hele nacht "kies een programma" op de kaart, zonder melding. Hij draaide niet.
+
+**Offline is geen nieuwe toestand** (`offline` in `_one_programma`, `Apparaat.offline`). Zegt de status `unavailable`
+(of niets), dan:
+- Zag de coach hem draaien, dan draait hij tot hij terug is. Geen start, geen melding. Komt hij terug met `finished`
+  of `ready`, dan is de beurt klaar, zoals altijd.
+- Anders het plan van een bereikbaar apparaat, maar zonder te drukken (`offline` in `plan_programma`): "Hij is even
+  niet bereikbaar." met wat hij anders zou zeggen, of "De coach start hem zodra hij terug is." als het nu het moment
+  is. Het geplande moment blijft op de startsensor (`gepland_om` in sensor.py). Komt hij na dat moment terug, dan
+  start hij meteen, zoals altijd.
+- Na een herstart is de eerste ronde waarin hij weer iets zegt de eerste: pas dan kijkt de coach of een bewaarde beurt
+  nog loopt.
+
+**Het laatste programma** (`_programma_laatst`, in het geheugen als `programma_laatst:<id>`, met de dag erbij zodat
+het niet na 48 uur vervalt): meldt het apparaat zelf geen programma en staat een van zijn programma-entiteiten op
+`unavailable`, dan plant de coach met het programma dat hij het laatst zag. Op het moment van starten zegt de
+bestaande melding dan dat de machine een start niet aanneemt. Een programma dat de coach niet kent, blijft onbekend.
+
+**Een start die niet aankomt** (`_async_start_druk`): een fout bij het drukken (`HomeAssistantError`, `OSError`, een
+time-out) is één waarschuwing in het log, telt niet als gedrukt, en de volgende ronde drukt hij opnieuw. Na
+`START_FOUTEN` (5) keer één kritieke melding: "De coach probeerde ... 5 keer te starten, maar de start kwam niet aan.
+Kijk of de machine aan staat en verbinding heeft."
+
+**Vrijgegeven, en geen programma te zien**, ook geen laatst bekend: één kritieke melding, een uur na de vrijgave of
+eerder als de klaar-tijd binnen twee uur komt (`GEEN_PROGRAMMA_MELDEN`, `GEEN_PROGRAMMA_KLAAR`): "Vaatwasser is
+vrijgegeven, maar laat geen programma zien. Zet hem even aan en kies een programma, dan plant de coach hem." Eén keer
+per vrijgave, ook over een herstart heen. Alleen als de coach mag sturen, niet bij alleen uitlezen of een domme
+vaatwasser.
+
+Voor elke integratie hetzelfde: Home Connect, Home Connect Local en Miele lezen hun status en programma langs
+dezelfde weg. Aanzetten op afstand (de schakelaar van de stroom) doet de coach nog steeds nergens.
+
+Proef 280 in test_coach.py, en in het virtuele huis `vaatwasser-offline-bij-start` en dezelfde met Home Connect Local
+(de druk van 01:59 komt niet aan, drie minuten weg, om 02:04 draait hij), `vaatwasser-offline-midden` en dezelfde met
+een herstart terwijl hij weg is (één druk, één verslag), `vaatwasser-keuze-weg` (plannen met het laatste programma,
+om 02:02 de melding, om 02:31 draait hij) en `vaatwasser-keuze-weg-onbekend` (om 20:00 één melding, ook na een
+herstart om 21:00 niet nog eens). Het virtuele huis houdt nu ook de ERROR-regels van de coach bij (`log_fouten`).
+Niet in het echt beproefd.

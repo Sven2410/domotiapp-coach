@@ -5048,6 +5048,9 @@ class Apparaat:
     # bij een wasmachine of droger, waar de knop "Mag draaien" heet
     # (`VRIJGAVE_WOORD`).
     vrijgave: str = "ingeruimd"
+    # Het apparaat is even van het netwerk (v0.242.0): zijn status zegt `unavailable`. Dan plant de coach
+    # met wat hij weet en drukt hij niet; zie `plan_programma`.
+    offline: bool = False
 
 
 # Hoe de vrijgave per soort apparaat heet, in de teksten van de coach. Dezelfde
@@ -5268,6 +5271,24 @@ def plan_programma(
             ),
             plan=t("Daarna kiest de coach het goedkoopste moment binnen je schema."),
             rule="not-released",
+        )
+
+    # Even van het netwerk (v0.242.0): het plan van een bereikbaar apparaat, maar niet drukken, en op de kaart
+    # zeggen waarom. In een klantwoning in de nacht van 15 op 16-11-2026 viel een vaatwasser zeventien keer
+    # weg, en elke keer stond er "kies een programma", terwijl het programma er gewoon op stond.
+    if apparaat.offline:
+        besluit = plan_programma(now, prices, tariff, forecast, window, replace(apparaat, offline=False), surplus_w)
+        if besluit.rule == "no-program":
+            # Wat erop staat is niet te zien zolang hij weg is: dat is geen programma dat ontbreekt.
+            return Decision(False, 0, t("Hij is even niet bereikbaar. De coach plant hem zodra hij terug is."),
+                            rule="offline")
+        return replace(
+            besluit,
+            charge=False,
+            reason=t("Hij is even niet bereikbaar.") + " " + (
+                t("De coach start hem zodra hij terug is.") if besluit.charge else besluit.reason
+            ),
+            rule="offline",
         )
 
     # Een apparaat zonder startknop: de coach zegt het, de bewoner drukt.

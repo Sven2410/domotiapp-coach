@@ -237,5 +237,8 @@
   "Er is {kw} zon over. De coach zet hem aan om te {werk} naar {doel}; het is nu {kamer}.": "There is {kw} of spare solar. The coach is switching it on, {werk} to {doel}; it is {kamer} now.",
   "Stroom kost nu {prijs}, onder het gemiddelde van vandaag ({gemiddeld}). De coach zet hem aan om te {werk} naar {doel}; het is nu {kamer}.": "Electricity costs {prijs} now, below today's average ({gemiddeld}). The coach is switching it on, {werk} to {doel}; it is {kamer} now.",
   "De coach biedt {amps} A aan, maar de paal geeft niets vrij aan de auto.": "The coach offers {amps} A, but the charger releases nothing to the car.",
-  "De paal houdt de stroom zelf tegen. Kijk in de app van de paal of daar iets het laden tegenhoudt; helpt dat niet, herstart de paal.": "The charger itself is holding the power back. Check the charger's app for anything blocking charging; if that does not help, restart the charger."
+  "De paal houdt de stroom zelf tegen. Kijk in de app van de paal of daar iets het laden tegenhoudt; helpt dat niet, herstart de paal.": "The charger itself is holding the power back. Check the charger's app for anything blocking charging; if that does not help, restart the charger.",
+  "Hij is even niet bereikbaar.": "It is briefly unreachable.",
+  "De coach start hem zodra hij terug is.": "The coach starts it as soon as it is back.",
+  "Hij is even niet bereikbaar. De coach plant hem zodra hij terug is.": "It is briefly unreachable. The coach plans it as soon as it is back."
 }

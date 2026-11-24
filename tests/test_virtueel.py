@@ -1273,6 +1273,49 @@ if (vl := v("vaatwasser-na-klaartijd-nu")):
              len(vl.vw_gedrukt) == 1 and len(meldingen(vl, "Vaatwasser is gestart")) == 1
              and len(meldingen(vl, "Vaatwasser is klaar")) == 1, f"{vl.vw_gedrukt} {[m for _, m in vl.meldingen]}")
 
+# Een vaatwasser die even van het netwerk is (v0.242.0).
+def _vw_m(vl, tekst):
+    return [m for _, m in vl.meldingen if tekst in m]
+
+
+for naam in ("vaatwasser-offline-bij-start", "vaatwasser-lokaal-offline-bij-start"):
+    if (vl := v(naam)):
+        regels = [r for _, r in vl.vw_regels]
+        controle(f"{naam}: een start die niet aankomt is geen fout in het systeemlog", not vl.log_fouten,
+                 f"{vl.log_fouten}")
+        controle(f"{naam}: zolang hij weg is 'even niet bereikbaar', nooit 'kies een programma'",
+                 "offline" in regels and "no-program" not in regels, f"{vl.vw_regels}")
+        controle(f"{naam}: daarna start hij alsnog, één beurt, en vóór 07:00 klaar",
+                 len(vl.vw_beurten) == 1 and vl.vw_klaar is not None and vl.vw_klaar.hour < 7, f"{vl.vw_beurten}")
+        controle(f"{naam}: twee keer gedrukt (de mislukte en de goede), geen kritieke melding",
+                 len(vl.vw_gedrukt) == 2 and not _vw_m(vl, "neemt nu geen start aan") and not _vw_m(vl, "kwam niet aan"),
+                 f"{vl.vw_gedrukt} {[m for _, m in vl.meldingen]}")
+for naam in ("vaatwasser-offline-midden", "vaatwasser-offline-midden-herstart"):
+    if (vl := v(naam)):
+        controle(f"{naam}: weg midden in het programma: één druk, geen tweede start",
+                 len(vl.vw_gedrukt) == 1 and len(vl.vw_beurten) == 1, f"{vl.vw_gedrukt} {vl.vw_beurten}")
+        controle(f"{naam}: geen melding over een start, en één verslag",
+                 not _vw_m(vl, "neemt nu geen start aan") and not _vw_m(vl, "niet gaan draaien")
+                 and len(_vw_m(vl, "is klaar")) == 1, f"{[m for _, m in vl.meldingen]}")
+        controle(f"{naam}: na het einde staat de vrijgave eraf", not vl.vw_vrij_eind, "")
+        klaar_om = [t for t, m in vl.meldingen if "is klaar" in m]
+        controle(f"{naam}: het verslag komt pas als hij echt klaar is, niet als hij wegvalt",
+                 klaar_om and vl.vw_beurten and vl.vw_beurten[0][1] is not None and klaar_om[0] >= vl.vw_beurten[0][1],
+                 f"{klaar_om} {vl.vw_beurten}")
+if (vl := v("vaatwasser-keuze-weg")):
+    regels = [r for _, r in vl.vw_regels]
+    controle("keuze weg: plant met het laatst bekende programma, geen 'kies een programma'",
+             "no-program" not in regels and "wait-for-start" in regels, f"{vl.vw_regels}")
+    controle("keuze weg: om de geplande start één melding dat de machine aan moet, geen over het programma",
+             len(_vw_m(vl, "neemt nu geen start aan")) == 1 and not _vw_m(vl, "laat geen programma zien"),
+             f"{[m for _, m in vl.meldingen]}")
+    controle("keuze weg: met de knop terug draait hij en is hij voor 07:00 klaar",
+             len(vl.vw_beurten) == 1 and vl.vw_klaar is not None and vl.vw_klaar.hour < 7, f"{vl.vw_beurten}")
+if (vl := v("vaatwasser-keuze-weg-onbekend")):
+    gemeld = [t for t, m in vl.meldingen if "laat geen programma zien" in m]
+    controle("geen programma te zien: één melding een uur na de vrijgave, ook na een herstart niet nog eens",
+             len(gemeld) == 1 and gemeld[0].hour == 20 and gemeld[0].minute <= 1, f"{gemeld}")
+
 if (vl := v("vaatwasser-herstart")):
     print(f"  herstart: gestart {vw_klok(vl.vw_gestart)}, klaar {vw_klok(vl.vw_klaar)}, {vl.vw_kwh:.2f} kWh, meldingen {[m for _, m in vl.meldingen if 'Vaatwasser' in m]}")
     controle("herstart: gestart om 02:00, en na de herstart om 03:00 zegt hij niet nog eens dat hij draait",

@@ -870,6 +870,41 @@ vaatwasser_herstart = vaatwasser_avond.kopie(
     naam="vaatwasser-herstart", uitleg="dynamisch, om 19:00 vrijgegeven, en om 03:00 herstart Home Assistant midden in de beurt: de telling gaat door en het verslag gaat over de hele beurt",
     gebeurtenissen=[("19:00", "vaatwasser_vrijgeven", None), ("+1 03:00", "herstart", None)],
 )
+# Een vaatwasser die even van het netwerk is (v0.242.0), naar een klantwoning in de nacht van 15 op 16-11-2026
+# en 16 op 17-11: de druk op start van 01:59 gaat mis (de verbinding gaat dicht), van 02:00 tot 02:03 zegt alles
+# `unavailable`, en daarna start hij alsnog. Met de cloud en met Home Connect Local.
+vaatwasser_offline_start = vaatwasser_avond.kopie(
+    naam="vaatwasser-offline-bij-start", uitleg="de start van 01:59 komt niet aan en hij is drie minuten weg: geen fout, 'even niet bereikbaar' op de kaart, en daarna start hij alsnog",
+    gebeurtenissen=[("19:00", "vaatwasser_vrijgeven", None), ("01:00", "vaatwasser_druk_fout", 1),
+                    ("02:00", "vaatwasser_offline", 3)],
+)
+vaatwasser_offline_start_lokaal = vaatwasser_offline_start.kopie(
+    naam="vaatwasser-lokaal-offline-bij-start", uitleg="hetzelfde met Home Connect Local", vaatwasser=LOKAAL,
+)
+# 21-11-2026: "ingeruimd en nu starten", en midden in het programma 50 minuten weg, tot na het einde. Tot
+# v0.242.0 zag de coach geen draaien meer en wilde hij opnieuw starten, met een kritieke melding.
+vaatwasser_offline_midden = vaatwasser_avond.kopie(
+    naam="vaatwasser-offline-midden", uitleg="nu starten om 19:00, en van 22:00 tot 22:50 weg, over het einde heen: één start, geen melding over een start, één verslag",
+    gebeurtenissen=[("19:00", "vaatwasser_nu_starten", None), ("22:00", "vaatwasser_offline", 50)],
+)
+vaatwasser_offline_midden_herstart = vaatwasser_offline_midden.kopie(
+    naam="vaatwasser-offline-midden-herstart", uitleg="hetzelfde, met een herstart van Home Assistant om 22:20 terwijl hij weg is",
+    gebeurtenissen=[("19:00", "vaatwasser_nu_starten", None), ("22:00", "vaatwasser_offline", 50),
+                    ("22:20", "herstart", None)],
+)
+# 23-11-2026: de keuzelijst en de startknop kwamen na een beurt niet terug. Zag de coach het programma eerder,
+# dan plant hij daarmee, en zegt hij op het moment van starten dat de machine aan moet.
+vaatwasser_keuze_weg = vaatwasser_avond.kopie(
+    naam="vaatwasser-keuze-weg", uitleg="de keuzelijst en de startknop zijn sinds 18:30 weg: plannen met het laatst bekende programma, om 02:00 'zet de machine aan', en om 02:30 terug",
+    gebeurtenissen=[("18:30", "vaatwasser_keuze_weg", True), ("19:00", "vaatwasser_vrijgeven", None),
+                    ("02:30", "vaatwasser_keuze_weg", False)],
+)
+# En zonder dat de coach het programma ooit zag: één melding na een uur, ook over een herstart heen.
+vaatwasser_keuze_weg_onbekend = vaatwasser_avond.kopie(
+    naam="vaatwasser-keuze-weg-onbekend", uitleg="de keuzelijst en de startknop zijn er vanaf het begin niet: om 20:00 één melding dat hij geen programma laat zien, ook na een herstart om 21:00",
+    gebeurtenissen=[("18:25", "vaatwasser_keuze_weg", True), ("19:00", "vaatwasser_vrijgeven", None),
+                    ("21:00", "herstart", None)],
+)
 vaatwasser_uiterlijk = vaatwasser_avond.kopie(
     naam="vaatwasser-uiterlijk-starten", uitleg="om 19:00 vrijgegeven met uiterlijk starten om 22:00: dan gaat hij om 22:00, ook al is de nacht goedkoper",
     vaatwasser_uiterlijk="22:00",
@@ -2142,6 +2177,8 @@ ALLE = [
     alfen_zonnig, alfen_dyn, alfen_paal_weg, klant_paal_weg, alfen_doel_80, alfen_laadgrens,
     alfen_drie_zon, alfen_fasen_zon, alfen_fasen_wisselend, alfen_fasen_helder, alfen_drie_dyn, alfen_fasen_dyn,
     alfen_een_fase, alfen_een_fase_vers, alfen_houdt_tegen, alfen_houdt_tegen_herstart, alfen_auto_slaapt,
+    vaatwasser_offline_start, vaatwasser_offline_start_lokaal, vaatwasser_offline_midden,
+    vaatwasser_offline_midden_herstart, vaatwasser_keuze_weg, vaatwasser_keuze_weg_onbekend,
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,
     vast_grote_auto, vast_zonder_voorspelling, vast_sensoren, vast_voorspelling_mis,
     vast_geen_klaar_tijd, vast_krap, vast_onhaalbaar,

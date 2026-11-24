@@ -60,7 +60,8 @@ def gepland_om(stand: dict[str, Any] | None) -> datetime | None:
     besluit een `starts_at`. De coach rekent in lokale tijd zonder tijdzone
     (`_moment`); een sensor met een tijdstip hoort er een te hebben.
     """
-    if not stand or stand.get("rule") != "wait-for-start" or stand.get("running"):
+    # Ook als hij even niet bereikbaar is (v0.242.0): dan blijft het geplande moment staan.
+    if not stand or stand.get("rule") not in ("wait-for-start", "offline") or stand.get("running"):
         return None
     rauw = stand.get("starts_at")
     if not rauw:
