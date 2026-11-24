@@ -70,6 +70,12 @@ FOTOS_WEG = timedelta(days=30)
 TICKET_WEG = timedelta(days=90)
 GESPREK_WEG = timedelta(days=90)
 
+# Bezig (v0.243.0): zolang Coach Assist aan een vraag werkt, staan er drie bewegende puntjes in het gesprek of het
+# ticket. Standaard zoveel minuten, hoogstens `BEZIG_MAX`; daarna geldt het niet meer, ook zonder antwoord. De eigenaar
+# op 25-11-2026: "Laat ook zien dat een bericht in behandeling is met 3 puntjes die bewegen".
+BEZIG_STANDAARD = 15
+BEZIG_MAX = 120
+
 # Het pakket: hoe lang de naam mag zijn, en hoeveel vragen per dag hoogstens.
 PAKKET_NAAM_MAX = 40
 PAKKET_VRAGEN_MAX = 1000
@@ -358,6 +364,8 @@ def antwoord(
             raise TicketFout("stand", t("Onbekende stand: {stand}.", stand=nieuw_stand))
         _stand_zetten(ticket, nieuw_stand, at)
     bericht = _bericht(ticket, DOMOTITECH, naam, _tekst(tekst), at)
+    # Het antwoord is er: geen puntjes meer (v0.243.0).
+    ticket.pop("bezig", None)
     return ticket, bericht
 
 
@@ -374,6 +382,35 @@ def zet_stand(data: dict[str, Any], ticket_id: Any, stand: str, at: datetime) ->
     return ticket
 
 
+def zet_bezig(data: dict[str, Any], ticket_id: Any, minuten: Any, at: datetime) -> dict[str, Any]:
+    """Coach Assist werkt aan het gesprek of een ticket, `minuten` lang (v0.243.0); 0 haalt het weg. Een gesloten
+    ticket kan niet. `bezig` is {"sinds", "tot"}, en na `tot` geldt het niet meer (`voor_buiten`, `lijst`)."""
+    ticket = zoek(data, ticket_id)
+    try:
+        duur = int(BEZIG_STANDAARD if minuten is None else minuten)
+    except (TypeError, ValueError):
+        raise TicketFout("minuten", t("Minuten moet een getal zijn.")) from None
+    if duur <= 0:
+        ticket.pop("bezig", None)
+        return ticket
+    _niet_gesloten(ticket)
+    ticket["bezig"] = {"sinds": _stempel(at), "tot": _stempel(at + timedelta(minutes=min(duur, BEZIG_MAX)))}
+    return ticket
+
+
+def bezig_geldt(ticket: dict[str, Any], at: datetime) -> bool:
+    """Of Coach Assist nu aan dit ticket of het gesprek werkt: `bezig` staat er, en `tot` is nog niet voorbij."""
+    tot = _moment((ticket.get("bezig") or {}).get("tot"))
+    return tot is not None and not _sinds(at, tot)
+
+
+def _zonder_verlopen(ticket: dict[str, Any], at: datetime) -> dict[str, Any]:
+    """Het ticket zoals het naar buiten gaat: een `bezig` dat voorbij is staat er niet in, ook na een herstart."""
+    if "bezig" in ticket and not bezig_geldt(ticket, at):
+        return {k: v for k, v in ticket.items() if k != "bezig"}
+    return ticket
+
+
 def gelezen(data: dict[str, Any], ticket_id: Any, user_id: str) -> dict[str, Any]:
     """Deze gebruiker zag alles wat er nu in het ticket of het gesprek staat."""
     ticket = zoek(data, ticket_id)
@@ -382,8 +419,9 @@ def gelezen(data: dict[str, Any], ticket_id: Any, user_id: str) -> dict[str, Any
     return ticket
 
 
-def voor_buiten(ticket: dict[str, Any]) -> dict[str, Any]:
-    """Wat er over de websocket gaat: van het gesprek de laatste `GESPREK_MAX` berichten."""
+def voor_buiten(ticket: dict[str, Any], at: datetime | None = None) -> dict[str, Any]:
+    """Wat er over de websocket gaat: van het gesprek de laatste `GESPREK_MAX` berichten, en geen verlopen `bezig`."""
+    ticket = _zonder_verlopen(ticket, at or datetime.now().astimezone())
     if ticket.get("id") != GESPREK:
         return ticket
     return {**ticket, "berichten": list(ticket.get("berichten") or [])[-GESPREK_MAX:]}
@@ -409,13 +447,13 @@ def lijst(data: dict[str, Any], at: datetime | None = None, oud: bool = False) -
         (tk for tk in data.get("tickets") or [] if oud or not _ouder_dan(gesloten_sinds(tk), nu, UIT_ZICHT)),
         key=lambda tk: (str(tk.get("bijgewerkt") or ""), tk.get("id") or 0), reverse=True,
     )
-    return tickets[:LIJST_MAX]
+    return [_zonder_verlopen(tk, nu) for tk in tickets[:LIJST_MAX]]
 
 
 def overzicht(data: dict[str, Any], at: datetime | None = None, oud: bool = False) -> dict[str, Any]:
     """Het antwoord van `list` en het eerste event van `subscribe`; `pakket` altijd, `None` zonder (v0.225.0)."""
     nu = at or datetime.now().astimezone()
-    return {"contract": CONTRACT, "gesprek": voor_buiten(heel(data)["gesprek"]), "tickets": lijst(data, nu, oud),
+    return {"contract": CONTRACT, "gesprek": voor_buiten(heel(data)["gesprek"], nu), "tickets": lijst(data, nu, oud),
             "pakket": pakket_stand(data, nu)}
 
 

@@ -19870,6 +19870,52 @@ b280, k280 = asyncio.run(ronde280(c280b, dt.datetime(2026, 9, 8, 2, 0, 30)))
 controle("draaide hij, dan draait hij nog als hij weg is", b280.get("rule") == "running" and b280.get("running") and not k280,
          f"{b280.get('rule')} {k280}")
 
+print("=== 281. Coach Assist laat zien dat hij bezig is: de puntjes (v0.243.0) ===")
+# De eigenaar op 25-11-2026: "Laat ook zien dat een bericht in behandeling is met 3 puntjes die bewegen". Op de opslag
+# van proef 264, na de herstart daar.
+ws264(ws139.async_tickets_busy, bewoner264, ticket_id=0)
+controle("een bewoner zet Coach Assist niet op bezig", bewoner264.fouten[-1][1] == "unauthorized", f"{bewoner264.fouten}")
+voor281 = len(bewoner264.berichten)
+gebeurd281 = len(gebeurd264())
+bezig281 = ws264(ws139.async_tickets_busy, beheer264, ticket_id=0)
+sinds281, tot281 = (dt.datetime.fromisoformat(bezig281.get("bezig", {}).get(k, "")) for k in ("sinds", "tot"))
+controle("een beheerder wel: standaard 15 minuten, en subscribe krijgt het meteen",
+         tot281 - sinds281 == dt.timedelta(minutes=15) and len(bewoner264.berichten) == voor281 + 1
+         and bewoner264.berichten[-1]["event"]["ticket"].get("bezig") == bezig281["bezig"], f"{bezig281.get('bezig')}")
+controle("en het staat in de lijst", ws264(ws139.async_tickets_list, bewoner264)["gesprek"].get("bezig") == bezig281["bezig"], "")
+controle("geen gebeurtenis voor de klantenbot: er is geen bericht", len(gebeurd264()) == gebeurd281, f"{gebeurd264()[-1:]}")
+antw281 = ws264(ws139.async_tickets_answer, beheer264, ticket_id=0, tekst="Hij staat op 64%.")
+controle("het antwoord haalt de puntjes weg", "bezig" not in antw281
+         and "bezig" not in ws264(ws139.async_tickets_list, bewoner264)["gesprek"], f"{antw281.get('bezig')}")
+ws264(ws139.async_tickets_busy, beheer264, ticket_id=1, minuten=500)
+lang281 = ws264(ws139.async_tickets_list, bewoner264)["tickets"]
+lang281 = next(tk for tk in lang281 if tk["id"] == 1)["bezig"]
+controle("op een ticket ook, en hoogstens 120 minuten",
+         dt.datetime.fromisoformat(lang281["tot"]) - dt.datetime.fromisoformat(lang281["sinds"]) == dt.timedelta(minutes=120),
+         f"{lang281}")
+nul281 = ws264(ws139.async_tickets_busy, beheer264, ticket_id=1, minuten=0)
+controle("met 0 minuten weg", "bezig" not in nul281, f"{nul281.get('bezig')}")
+# Verlopen, ook na een herstart: wat in de opslag staat en voorbij is, gaat niet naar buiten.
+data281 = tk264.leeg()
+oud281 = dt.datetime(2026, 11, 25, 9, 0, tzinfo=dt.timezone.utc)
+tk264.zet_bezig(data281, 0, 15, oud281)
+controle("verlopen: na tot staat bezig er niet meer in, ook al staat het in de opslag",
+         "bezig" in data281["gesprek"] and "bezig" not in tk264.overzicht(data281, oud281 + dt.timedelta(minutes=16))["gesprek"]
+         and "bezig" in tk264.overzicht(data281, oud281 + dt.timedelta(minutes=14))["gesprek"], "")
+tk264.nieuw(data281, "storing", "De paal", "u-1", "Bewoner", oud281)
+tk264.zet_bezig(data281, 1, None, oud281)
+controle("en in de lijst van tickets net zo",
+         "bezig" not in tk264.lijst(data281, oud281 + dt.timedelta(minutes=20))[0]
+         and "bezig" in tk264.lijst(data281, oud281 + dt.timedelta(minutes=5))[0], "")
+tk264.zet_stand(data281, 1, "klaar", oud281)
+try:
+    tk264.zet_bezig(data281, 1, 15, oud281)
+    dicht281 = None
+except tk264.TicketFout as fout:
+    dicht281 = fout.code
+controle("een gesloten ticket kan niet op bezig", dicht281 == "ticket_gesloten", f"{dicht281}")
+controle("het contract blijft 1", tk264.CONTRACT == 1, "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

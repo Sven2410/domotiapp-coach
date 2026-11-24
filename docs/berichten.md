@@ -341,3 +341,27 @@ dat. Elke andere melding ging naar de startpagina van Home Assistant.
 Proef 273, en de proef "elke melding opent de plek" in test_rapport.mjs. Of tikken en de knoppen werken in de app,
 kan alleen op een echte telefoon.
 
+
+## Coach Assist is bezig: drie bewegende puntjes (v0.243.0)
+
+De eigenaar op 25-11-2026: "Laat ook zien dat een bericht in behandeling is met 3 puntjes die bewegen etc anap je? Zo
+weet de klant dat je aan het nadenken bent etc". Het doorgeven van een vraag gaat binnen een minuut, het uitzoeken in de
+metingen kost twee tot tien minuten, en in die tijd zag de klant niets.
+
+- **Het veld `bezig`** op het gesprek (id 0) en op een ticket: `{"sinds", "tot"}`, met tijdzone. Toegevoegd binnen
+  `CONTRACT` 1.
+- **Zetten:** `domotiapp_coach/tickets/busy` met `ticket_id` en `minuten` (standaard 15, hoogstens 120; 0 haalt het
+  weg). Alleen een beheerder, zoals `answer`. Het ticket gaat meteen naar `subscribe`. Er komt geen gebeurtenis
+  `domotiapp_coach_ticket` (er is geen bericht) en geen pushmelding. Een gesloten ticket kan niet (`ticket_gesloten`).
+- **Weg:** bij elk antwoord van Coach Assist (`antwoord` in tickets.py), en met `minuten` 0.
+- **Verlopen:** na `tot` geldt het niet meer, ook zonder antwoord en na een herstart. Het blijft in de opslag staan,
+  maar `voor_buiten` en `lijst` laten een verlopen `bezig` weg. Zo blijven de puntjes nooit hangen.
+- **Het paneel** (`bezigNu` en `gesprekHtml` in tickets-sheet.js): onderaan het gesprek of ticket een bubbel aan de kant
+  van Coach Assist, met zijn naam en logo en drie puntjes die om de beurt opveren. Met `prefers-reduced-motion` staan
+  ze stil. Voor een schermlezer `role="status"` met "Coach Assist is bezig". `tot` is een echt moment, dus naast
+  `Date.now()` en niet naast de klok van het huis. Verloopt hij terwijl het venster open is, dan tekent het venster
+  zichzelf op dat moment opnieuw.
+
+De kaart van Coach Assist in DomotiApp Lovelace leest hetzelfde veld, en `venster/klantenbot.py` zet `busy` zodra er
+een vraag binnenkomt. Proef 281 in test_coach.py en de proef "Coach Assist bezig" in test_rapport.mjs. Niet op een
+echt scherm bekeken.

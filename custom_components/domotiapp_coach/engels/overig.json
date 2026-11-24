@@ -147,5 +147,7 @@
   "Hoogstens {n} foto's per bericht.": "At most {n} photos per message.",
   "Het gesprek heeft geen stand.": "The conversation has no state.",
   "Foto": "Photo",
-  "Coach Assist heeft je vraag beantwoord": "Coach Assist answered your question"
+  "Coach Assist heeft je vraag beantwoord": "Coach Assist answered your question",
+  "Alleen een beheerder zet Coach Assist op bezig.": "Only an administrator sets Coach Assist to busy.",
+  "Minuten moet een getal zijn.": "Minutes must be a number."
 }
