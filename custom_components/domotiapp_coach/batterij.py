@@ -992,6 +992,27 @@ def _een_tik(now: datetime, prices: list[dict], tariff: Tariff, forecast: Foreca
 HOUD_W = 1.0
 
 
+def _netladen_zin(koop: float, inkoop: float | None, waarde: float) -> str:
+    """Waarom hij van het net laadt, en niet meer dan dat (v0.244.0).
+
+    Onder de inkoopgrens is een kWh erbij goedkoper dan wat hij straks bespaart. Erboven is het iets anders: een
+    batterij die zelf nul op de meter doet kan in de som niet stilstaan, en dan is een stap laden de enige manier om
+    vast te houden wat erin zit (`_zelf_toegestaan`). In een klantwoning op 24-11-2026 om 22:08 stond er "Stroom kost
+    nu € 0,400 en dat is goedkoper dan wat de batterij je straks bespaart", met een inkoopgrens van € 0,3597 ernaast.
+
+    Die batterij 's nachts laten stilstaan in plaats van een stap te laden is nagerekend en niet gedaan: in het
+    virtuele huis werd batterij-kwartier-zelf er € 0,71 duurder van, batterij-volle-beurt-zelf € 0,34, en
+    batterij-dynamisch-zelf kreeg 74 opdrachten in plaats van 16 (25-11-2026).
+    """
+    if inkoop is None or koop <= inkoop + PRICE_MARGIN:
+        return t("Stroom kost nu {prijs} en dat is goedkoper dan wat de batterij je straks bespaart.", prijs=_euro(koop))
+    return t(
+        "Stroom kost nu {prijs}, en wat er in de batterij zit is straks meer waard ({waarde} per kWh). Hij laadt een "
+        "beetje van het net in plaats van het huis nu uit de batterij te voeden.",
+        prijs=_euro(koop), waarde=_euro(waarde),
+    )
+
+
 def _rustig_vermogen(
     uren: list[Uur], b: Batterij, ontladen: bool = False, piek: bool = True, drempel: float = 0.0,
     houden_tot: datetime | None = None,
@@ -1701,8 +1722,7 @@ def plan_batterij(
                 power_w=vermogen,
                 # Bij vasthouden geen prijszin (v0.219.0): dan koopt hij nu niets.
                 reason=hoe if _kw(vermogen) == _kw(0.0) and b.vol_voor is None else (
-                    t("Stroom kost nu {prijs} en dat is goedkoper dan wat de batterij je straks bespaart.", prijs=_euro(koop))
-                    + " " + hoe
+                    _netladen_zin(koop, inkoop, erbij) + " " + hoe
                 ) if b.vol_voor is None else t(
                     "Vandaag hoort de batterij een keer helemaal vol, voor het balanceren van de cellen. "
                     "Dit zijn daar de goedkoopste uren voor: hij laadt van het net op {kw}.",

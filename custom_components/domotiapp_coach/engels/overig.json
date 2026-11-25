@@ -149,5 +149,6 @@
   "Foto": "Photo",
   "Coach Assist heeft je vraag beantwoord": "Coach Assist answered your question",
   "Alleen een beheerder zet Coach Assist op bezig.": "Only an administrator sets Coach Assist to busy.",
-  "Minuten moet een getal zijn.": "Minutes must be a number."
+  "Minuten moet een getal zijn.": "Minutes must be a number.",
+  "Stroom kost nu {prijs}, en wat er in de batterij zit is straks meer waard ({waarde} per kWh). Hij laadt een beetje van het net in plaats van het huis nu uit de batterij te voeden.": "Power now costs {prijs}, and what is in the battery is worth more later ({waarde} per kWh). It charges a little from the grid instead of powering the house from the battery now."
 }

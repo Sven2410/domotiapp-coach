@@ -2216,6 +2216,38 @@ controle("minder dan zeven dagen: niets", zon_voorzichtig(DAGEN64[:6]) is None, 
 controle("een woning waar de verwachting klopt: niets", zon_voorzichtig(
     [[d, v, round(v * r, 2)] for (d, v, _), r in zip(DAGEN64, [1.0, 1.05, 0.95, 1.1, 1.0, 0.98, 1.02, 1.1, 0.97, 1.0])]) is None, "")
 
+print("=== 65. netladen boven de inkoopgrens: de zin zegt wat het is (v0.244.0) ===")
+# Een klantwoning op 24-11-2026: een batterij die zelf nul doet, 73% om 22:08, de nacht van € 0,361 tot € 0,400 en
+# overdag zon met teruglevering tot € 0,50. De kaart zei "goedkoper dan wat de batterij je straks bespaart", met een
+# inkoopgrens van € 0,3597 ernaast. Nagebouwd met de prijzen en de zon van de werkbon, en een huis van 0,35 kWh per uur.
+D65 = dt.datetime(2026, 11, 24)
+P65 = [0.30] * 22 + [0.400, 0.393] + [0.388, 0.383, 0.378, 0.374, 0.372, 0.361, 0.379, 0.390, 0.410, 0.445, 0.387, 0.353,
+                                      0.304, 0.330, 0.417, 0.468, 0.486, 0.490, 0.493, 0.450, 0.420, 0.400, 0.380, 0.370]
+T65 = list(P65)
+for uur65, terug65 in {33: 0.478, 34: 0.415, 35: 0.377, 36: 0.323, 37: 0.352, 38: 0.448, 39: 0.504, 40: 0.49,
+                       41: 0.51, 42: 0.53}.items():
+    T65[uur65] = terug65
+PRIJZEN65 = [{"start": D65 + dt.timedelta(hours=h), "end": D65 + dt.timedelta(hours=h + 1), "price": P65[h],
+              "feed_in": T65[h]} for h in range(48)]
+ZON65 = {D65 + dt.timedelta(days=1, hours=h): k for h, k in
+         {8: 0.4, 9: 1.47, 10: 2.60, 11: 3.4, 12: 3.8, 13: 3.6, 14: 2.9, 15: 1.8, 16: 0.2}.items()}
+F65 = Forecast(solar_kwh=ZON65, house_kwh={h: 0.35 for h in range(24)}, solar_factor=None, solar_day=D65.date())
+B65 = Batterij(soc=73.0, capacity_kwh=14.0, max_charge_w=2500.0, max_discharge_w=2500.0, soc_min=5.0, soc_max=95.0,
+               rte=0.755, zelf_nul=True, vorige_stand=NUL)
+b65 = plan_batterij(dt.datetime(2026, 11, 24, 23, 8), PRIJZEN65, Tariff(), F65, B65)
+print(f"  {b65.stand} {b65.power_w:.0f} W, inkoop {b65.inkoop_tot}, waarde {b65.waarde}: {b65.reason}")
+controle("de nacht: hij laadt van het net, boven zijn inkoopgrens",
+         b65.stand == NETLADEN and b65.inkoop_tot is not None and 0.393 > b65.inkoop_tot + 0.01, f"{b65.stand} {b65.inkoop_tot}")
+controle("en de zin zegt niet dat het goedkoper is, wel dat wat erin zit straks meer waard is",
+         "goedkoper dan wat de batterij" not in b65.reason
+         and b65.reason.startswith("Stroom kost nu € 0,393, en wat er in de batterij zit is straks meer waard"), b65.reason)
+# Onder de inkoopgrens blijft het zoals het was.
+goedkoop65 = [dict(r, price=0.20) if r["start"].hour in (3, 4) and r["start"].day == 25 else r for r in PRIJZEN65]
+b65g = plan_batterij(dt.datetime(2026, 11, 25, 3, 8), goedkoop65, Tariff(), F65, dataclasses.replace(B65, soc=40.0))
+controle("onder de inkoopgrens: goedkoper dan wat de batterij straks bespaart",
+         b65g.stand == NETLADEN and b65g.reason.startswith("Stroom kost nu € 0,200 en dat is goedkoper dan wat de batterij"),
+         f"{b65g.stand} {b65g.inkoop_tot} {b65g.reason}")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
