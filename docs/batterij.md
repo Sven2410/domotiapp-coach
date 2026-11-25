@@ -2742,3 +2742,32 @@ richting. Of de regelaar daar beter kan, staat open.
 
 Andere vensters in de coach zijn nagekeken: `_meter_zeker` vraagt 8 minuten dekking van een venster van 10, en
 `_geduld` in de regelaar hield al een punt van vóór het venster vast. Die hebben dit niet.
+
+## Netladen boven de inkoopgrens: de zin zegt wat het is (v0.244.0)
+
+In een klantwoning op 24-11-2026 om 22:08 (een batterij die zelf nul op de meter doet, 73%) zei de kaart "Stroom
+kost nu € 0,400 en dat is goedkoper dan wat de batterij je straks bespaart. Hij laadt van het net op 0,5 kW, rustig
+verdeeld tot 23:00", met een inkoopgrens (`inkoop_tot`) van € 0,3597 ernaast. Het plan laadde elk uur van de nacht
+0,36 kWh, ook in het duurste.
+
+**Nagerekend** met `plan_batterij` op de prijzen en de zon van die nacht:
+- 0,36 kWh is precies één stap van het rooster. `_zelf_toegestaan` kent bij `zelf_nul` geen stilstaan: een nachtuur
+  heeft dan alleen het huis voeden of minstens een stap laden. Het huis voeden levert € 0,33 per kWh in de cel op,
+  terwijl die kWh straks € 0,415 waard is; een stap laden kost € 0,44 per kWh in de cel. Dat laatste is het kleinere
+  verlies, dus is een stap laden de vorm waarin de som vasthoudt.
+- `inkoop_tot` is de waarde van één kWh extra bovenop dat plan, en die loont terecht niet. Het zijn twee verschillende
+  vragen; de zin "goedkoper dan" klopte alleen niet.
+- Het is de ruil met de zon: zonder zon morgen, of met teruglevering op € 0,05, laadt hij 's nachts niets. Komt de zon,
+  dan scheelt het netladen € 0,43 tot € 0,47; komt hij niet, dan kost het € 0,18 tot € 0,21.
+
+**De zin** (`_netladen_zin`): ligt de prijs boven de inkoopgrens, dan "Stroom kost nu € 0,393, en wat er in de batterij
+zit is straks meer waard (€ 0,415 per kWh). Hij laadt een beetje van het net in plaats van het huis nu uit de batterij
+te voeden." Eronder blijft "goedkoper dan wat de batterij je straks bespaart".
+
+**Niet gedaan: 's nachts stilstaan.** Met stilstaan erbij (de coach neemt een batterij met een stuurgetal over op
+0 W) laadt die nacht alleen om 04:00 en 05:00, € 0,07 tot € 0,10 beter. Maar in het virtuele huis werd
+batterij-kwartier-zelf er € 0,71 duurder van, batterij-volle-beurt-zelf € 0,34, batterij-kwartier-voorloper € 0,36
+goedkoper, en batterij-dynamisch-zelf kreeg 74 opdrachten in plaats van 16. Dat is geen verbetering die vaststaat; het
+staat op de werkbon.
+
+Proef 65 in test_batterij.py.
