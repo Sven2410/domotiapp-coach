@@ -2244,3 +2244,34 @@ nog eens, en een auto die steeds even terugkomt geeft hoogstens drie keer extra.
 ronde wat `_tick` bewaart. Daarvoor verloor een herstart daar alles sinds het laatste moment dat de coach zelf iets
 wegschreef, en kwam "komt niet op" na een herstart nog eens.
 
+
+## De sensorwacht: één melding per storing, een tweede pas na drie dagen (v0.248.0)
+
+In een klantwoning haperde het internet op 17 en 18-11-2026. De integratie van de vriezer en de koelkast viel op
+17-11 21 keer weg en op 18-11 tot half drie al 25 keer. Elke keer dat dat tien minuten duurde kwam er een nieuwe
+kritieke melding op de telefoon, op 18-11 drie in 70 minuten, en tussendoor "doet het weer" in de geschiedenis. Bij
+elke terugkomst stonden de vriezer en de koelkast gewoon op temperatuur. Elke melding klopte, maar de vierde in een
+middag vertelt de bewoner niets nieuws.
+
+De eigenaar op 26-11-2026: "1 melding is goed, pas na 3 dagen 2e". Dus per sensor:
+
+- **Eén melding op de telefoon** per storing. Valt dezelfde sensor binnen drie dagen (`STIL_OPNIEUW`) opnieuw stil,
+  dan komt dat alleen in de geschiedenis, nog steeds als kritiek, en "doet het weer" ook. Zit er in dezelfde bundel
+  een sensor bij die de afgelopen drie dagen niet in een melding stond, dan gaat hij wel naar de telefoon.
+- **Een tweede na drie dagen**, als hij al die tijd niets meldde: "... meldt al 3 dagen niets." Blijft hij daarna
+  stil, dan weer na drie dagen.
+- **Een storing die alleen in de geschiedenis komt, staat niet als waarschuwing in het log.** De wachter op de
+  mini-pc maakt van elke waarschuwing een alarm.
+- **Een herstart vergeet het niet.** Wanneer een sensor voor het laatst op de telefoon stond, staat in
+  `GeheugenStore` (`sensor_gebeld`). Een sensor die al gemeld was voor deze versie telt vanaf het moment in
+  `sensor_quiet`.
+
+Een nieuwe storing binnen drie dagen na de vorige melding komt dus ook alleen in de geschiedenis, ook als de
+sensor ertussen een dag goed was. Dat is de regel van de eigenaar letterlijk. Blijft die nieuwe storing duren, dan
+gaat hij drie dagen na de vorige melding toch naar de telefoon.
+
+De integratie die niet opkomt (`_async_integraties`) had al één melding per storing en verandert niet. Komt hij
+drie dagen niet op, dan zijn zijn sensoren ook drie dagen stil, en dan meldt de sensorwacht het een tweede keer.
+
+Proef 283 in test_coach.py: vijf keer twaalf minuten weg met een herstart ertussen, drie dagen stil met een
+herstart, terug, een week later weer weg, en een sensor die al gemeld was voor deze versie.
