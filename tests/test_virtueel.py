@@ -2520,6 +2520,30 @@ if (vl := v("batterij-volle-beurt-zelf")):
     controle("volle-beurt-zelf: de modus gaat niet heen en weer", len(vl.bat_modi) <= 3, f"{vl.bat_modi}")
     controle("volle-beurt-zelf: de beurt is af voor de dure avond", top >= 99.0, f"{top:.1f}")
 
+# De wekelijkse volle beurt met laden uit het net uit (v0.246.0). De eigen woning: van 04-10 tot 23-11-2026 niet
+# een keer vol, want het mocht alleen met zon. Zonder het stoppen van het uitsmeren bij `vol_voor` laadde hij om
+# 20:30 op 93,6% met 47 W en kwam hij niet rond.
+for naam in ("batterij-volle-beurt-zonder-net", "batterij-volle-beurt-zonder-net-herstart"):
+    if (vl := v(naam)):
+        vol = vl.bat_stand.get("full_at")
+        print(f"  {naam}: vol om {vol}, {vl.bat_afname_kwh:.1f} kWh van het net, meldingen {[m for _, m in vl.meldingen]}")
+        controle(f"{naam}: voor middernacht vol, en dat staat in de opslag",
+                 bool(vol) and vol < "2026-11-23T00:00" and vl.bat_stand.get("limit_restore") is None, f"{vol}")
+        controle(f"{naam}: van het net, maar niet in de avondpiek",
+                 any(r[4] == "netladen" and r[2] > 100 for r in vl.bat_verloop)
+                 and not [r for r in vl.bat_verloop if r[4] == "netladen" and r[2] > 1 and 18 <= r[0].hour < 20],
+                 f"{[r[0] for r in vl.bat_verloop if r[4] == 'netladen' and 18 <= r[0].hour < 20][:3]}")
+        controle(f"{naam}: geen melding dat het niet lukt", not [m for _, m in vl.meldingen if "volle beurt" in m],
+                 f"{[m for _, m in vl.meldingen]}")
+if (vl := v("batterij-volle-beurt-zonder-net-zaterdag")):
+    controle("volle beurt zonder net, de zaterdag: niets van het net",
+             not [r for r in vl.bat_verloop if r[4] == "netladen"] and not vl.bat_stand.get("full_at"),
+             f"{[r[0] for r in vl.bat_verloop if r[4] == 'netladen'][:3]}")
+if (vl := v("batterij-volle-beurt-te-traag")):
+    gemeld = [(t, m) for t, m in vl.meldingen if "volle beurt" in m]
+    controle("te traag voor de volle beurt: één melding op de dag zelf, ook na de herstart niet nog eens",
+             len(gemeld) == 1 and gemeld[0][0].day == 22, f"{gemeld}")
+
 # De klantwoning op 30-09-2026, in kwartieren, met een Anker die zelf nul doet
 # (v0.102.3). Met v0.102.2 in dit scenario: 44 keer de modus om, elk kwartier terug
 # en een minuut later weer over, 160 opdrachten, en in tien kwartieren laden én

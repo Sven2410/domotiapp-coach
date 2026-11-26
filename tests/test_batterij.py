@@ -2248,6 +2248,57 @@ controle("onder de inkoopgrens: goedkoper dan wat de batterij straks bespaart",
          b65g.stand == NETLADEN and b65g.reason.startswith("Stroom kost nu € 0,200 en dat is goedkoper dan wat de batterij"),
          f"{b65g.stand} {b65g.inkoop_tot} {b65g.reason}")
 
+print("=== 66. de wekelijkse volle beurt mag van het net, ook met laden uit het net uit (v0.246.0) ===")
+# De eigen woning, zondag 22-11-2026: een batterij die zelf nul doet, vast contract, laden uit het net uit, om
+# middernacht op 5%, en in november een paar procent zon. De beurt kwam er nooit: hoogste stand 16% om 14:13.
+D66 = dt.datetime(2026, 11, 22)
+M66 = D66 + dt.timedelta(days=1)
+ZON66 = {10: 0.1, 11: 0.2, 12: 0.25, 13: 0.2, 14: 0.1}
+F66 = verwachting(ZON66, huis=0.45, dag=D66)
+VAST66 = Tariff(buy=0.24, feed_in=0.05)
+
+
+def thuis66(**kw):
+    basis = dict(soc=5.0, capacity_kwh=14.4, max_charge_w=2400.0, max_discharge_w=2400.0, soc_min=5.0, soc_max=100.0,
+                 rte=0.82, zelf_nul=True, net_laden=False, vol_voor=M66, vorige_stand=NUL)
+    basis.update(kw)
+    return Batterij(**basis)
+
+
+blok66 = {"start": D66.replace(hour=14), "end": D66.replace(hour=15), "price": 0.24}
+controle("van het net mag op de dag van de beurt, met het vinkje uit en boven de grens",
+         bat._mag_netladen(thuis66(), blok66) and bat._mag_netladen(thuis66(net_laden_onder=0.10), blok66), "")
+controle("na de beurt, of zonder beurt, niet",
+         not bat._mag_netladen(thuis66(), dict(blok66, start=M66.replace(hour=1), end=M66.replace(hour=2)))
+         and not bat._mag_netladen(thuis66(vol_voor=None), blok66), "")
+controle("en een beurt die te weinig oplevert blijft weg (`net_laden_vanaf`)",
+         not bat._mag_netladen(thuis66(net_laden_vanaf=D66.replace(hour=16)), blok66), "")
+b66 = plan_batterij(D66.replace(hour=0, minute=5), [], VAST66, F66, thuis66())
+net66 = [u for u in b66.uren if u.end <= M66 and u.net_kwh > 0.01]
+print(f"  00:05 {b66.stand} {b66.rule}: {b66.reason}")
+print(f"  van het net: {[(u.start.strftime('%H:%M'), round(u.net_kwh, 2)) for u in net66]}")
+controle("het plan komt voor middernacht vol, van het net",
+         max(u.soc for u in b66.uren if u.end <= M66) >= 98.0 and sum(u.net_kwh for u in net66) > 10.0,
+         f"{max(u.soc for u in b66.uren if u.end <= M66):.0f}% {sum(u.net_kwh for u in net66):.1f} kWh")
+controle("en niets van het net in de avondpiek (vast contract)",
+         not [u for u in net66 if 18 <= u.start.hour < 20], f"{[u.start for u in net66]}")
+b66z = plan_batterij(D66.replace(hour=0, minute=5), [], VAST66, F66, thuis66(vol_voor=None))
+controle("op een andere dag niets van het net", not [u for u in b66z.uren if u.net_kwh > 0.01] and b66z.stand != NETLADEN,
+         f"{b66z.stand}")
+# Lukt het nog? Op vol laadvermogen: 2,4 kW maal de wortel van 0,82 is 2,17 kWh per uur in de cellen.
+controle("vol_lukt_nog: om 10:00 op 5% kan het nog", bat.vol_lukt_nog(D66.replace(hour=10), thuis66(), True), "")
+controle("om 22:00 op 50% niet meer (6,9 kWh, twee uur)",
+         not bat.vol_lukt_nog(D66.replace(hour=22), thuis66(soc=50.0), True), "")
+# Op 30% moet er 9,9 kWh in (tot 99%). Om 17:00: zeven uur, vijf zonder de piek, 10,9 kWh: kan nog. Om 19:00: vijf
+# uur, vier zonder de piek, 8,7 kWh: niet meer. Bij een dynamisch contract telt de piek wel mee: 10,9, kan nog.
+controle("met de avondpiek dicht telt die niet mee",
+         bat.vol_lukt_nog(D66.replace(hour=17), thuis66(soc=30.0), True)
+         and not bat.vol_lukt_nog(D66.replace(hour=19), thuis66(soc=30.0), True)
+         and bat.vol_lukt_nog(D66.replace(hour=19), thuis66(soc=30.0), False), "")
+controle("zonder beurt, of al vol: niets te melden",
+         bat.vol_lukt_nog(D66.replace(hour=23), thuis66(vol_voor=None), True)
+         and bat.vol_lukt_nog(D66.replace(hour=23), thuis66(soc=99.5), True), "")
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)

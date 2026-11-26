@@ -190,7 +190,7 @@ function thuisbatterij(device) {
     ${getal("data-vk-accu", "wear_cycles", t("Laadcycli volgens de leverancier"), 'min="1" max="100000" step="1"', "")}
     <p class="sub" data-vk-rij="afschrijving_uitkomst" hidden></p>`)}
     ${keuzes ? blok(t("Balanceren"), `
-    ${vink("data-vk-accu", "weekly_full", t("Een keer per week helemaal vol."), t("Tot 100%, voor het balanceren van de cellen. De coach kiest op die dag het goedkoopste moment, en slaat de beurt over als de batterij die week al vol was."))}
+    ${vink("data-vk-accu", "weekly_full", t("Een keer per week helemaal vol."), t("Tot 100%, voor het balanceren van de cellen. De coach kiest op die dag het goedkoopste moment, ook van het net als laden uit het net uit staat, en slaat de beurt over als de batterij die week al vol was."))}
     <div class="row" data-vk-rij="weekly_full_day">
       <label for="vk-dag">${t("Op")}</label>
       <select id="vk-dag" data-vk-accu="weekly_full_day">

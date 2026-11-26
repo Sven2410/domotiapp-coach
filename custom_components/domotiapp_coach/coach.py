@@ -103,6 +103,7 @@ from .batterij import (
     rendement_uit_stappen,
     rendement_uit_tellers,
     verdiend,
+    vol_lukt_nog,
     vol_voor,
     zon_in_accu,
     ZON_DAGEN_BEWAAR,
@@ -117,6 +118,7 @@ from . import berichten, prijsopbouw, taal, tarifas
 from .taal import getal, t, tn
 from .planner import (
     echte_uren,
+    piek_dicht,
     _dag_om,
     DAGNAMEN,
     MODI_ZONDER_SOM,
@@ -9696,6 +9698,8 @@ class ChargerCoach:
                 sessie.pop("vreemd", None)
         self.state[device_id]["applied"] = stuurt
         self.state[device_id]["foreign"] = sessie.get("vreemd") is not None
+        if stuurt and not schema:
+            await self._async_volle_beurt_wacht(now, device, sessie, b, piek_dicht(prijzen))
 
         if schema:
             await self._async_growatt(now, settings, device, b, besluit, stuurt, sessie)
@@ -9846,6 +9850,27 @@ class ChargerCoach:
         erin = sum(m[1] for m in venster) / len(venster)
         naar_net = -sum(m[2] for m in venster) / len(venster)
         return erin < NEEMT_NIET_W and (in_vak or naar_net > NEEMT_NIET_NET_W)
+
+    async def _async_volle_beurt_wacht(self, now: datetime, device: dict[str, Any], sessie: dict[str, Any],
+                                       b: Batterij, dicht: bool) -> None:
+        """Eén melding als de wekelijkse volle beurt vandaag niet meer lukt (v0.246.0, `vol_lukt_nog`).
+
+        Sinds v0.246.0 mag de beurt van het net, ook met laden uit het net uit; lukt hij dan toch niet (een
+        batterij die niet opneemt, een krappe groep, hij was weg), dan hoort de bewoner het één keer, op de dag
+        zelf. Wat er gemeld is gaat mee over een herstart (`vol_mislukt` in het geheugen).
+        """
+        if b.vol_voor is None or vol_lukt_nog(now, b, dicht):
+            return
+        dag = b.vol_voor.date().isoformat()
+        if sessie.get("vol_mislukt") == dag:
+            return
+        sessie["vol_mislukt"] = dag
+        await self._async_tell(
+            t("{naam} wordt vandaag niet meer helemaal vol voor de wekelijkse volle beurt: hij staat op {pct}% en "
+              "de tijd is te kort. Volgende week probeert de coach het opnieuw.",
+              naam=device.get("name") or t("De batterij"), pct=f"{b.soc:.0f}"),
+            plek=self._plek(device),
+        )
 
     async def _async_neemt_niet_op(self, now: datetime, settings: dict[str, Any], device: dict[str, Any],
                                    sessie: dict[str, Any], besluit: Besluit, b: Batterij) -> None:
@@ -18398,6 +18423,8 @@ class ChargerCoach:
         for sleutel in self._BATTERIJ_VLAGGEN:
             if data.get(sleutel):
                 sessie[sleutel] = True
+        if isinstance(data.get("vol_mislukt"), str):
+            sessie["vol_mislukt"] = data["vol_mislukt"]
         sinds = _uit_geheugen(data.get("volgt_niet"))
         if sinds is not None:
             sessie["volgt_niet"] = (sinds, bool(data.get("volgt_niet_opnieuw")))
@@ -18435,6 +18462,8 @@ class ChargerCoach:
         for sleutel in self._BATTERIJ_VLAGGEN:
             if sessie.get(sleutel):
                 data[sleutel] = True
+        if sessie.get("vol_mislukt"):
+            data["vol_mislukt"] = sessie["vol_mislukt"]
         if sessie.get("volgt_niet"):
             data["volgt_niet"] = _naar_geheugen(sessie["volgt_niet"][0])
             data["volgt_niet_opnieuw"] = bool(sessie["volgt_niet"][1])
