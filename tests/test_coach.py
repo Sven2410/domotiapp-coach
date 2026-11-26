@@ -19870,6 +19870,50 @@ b280, k280 = asyncio.run(ronde280(c280b, dt.datetime(2026, 9, 8, 2, 0, 30)))
 controle("draaide hij, dan draait hij nog als hij weg is", b280.get("rule") == "running" and b280.get("running") and not k280,
          f"{b280.get('rule')} {k280}")
 
+print("=== 282. een seconde unknown van Home Connect: geen melding en geen start over een machine die draait (v0.245.0) ===")
+# Een klantwoning, 26-11-2026 15:07:03 unavailable, 15:07:04 unknown, 15:07:05 weer run. Op de beurt van proef 280.
+hass280.states.zet("sensor.vaatwasser_status", "run")
+b282, _ = asyncio.run(ronde280(c280b, dt.datetime(2026, 9, 8, 2, 5, 30)))
+eind282 = b282.get("ends_at")
+for nu282, staat282 in ((dt.datetime(2026, 9, 8, 2, 6, 30), "unknown"),
+                        (dt.datetime(2026, 9, 8, 2, 7, 30), "unavailable"),
+                        (dt.datetime(2026, 9, 8, 2, 8, 30), "unknown")):
+    hass280.states.zet("sensor.vaatwasser_status", staat282)
+    hass280.states.zet("select.vaatwasser_programma", staat282)
+    b282, k282 = asyncio.run(ronde280(c280b, nu282))
+    controle(f"{nu282:%H:%M} {staat282}: hij draait nog, met hetzelfde programma, en er wordt niet gedrukt",
+             b282.get("rule") == "running" and b282.get("running") and b282.get("program") == "eco_50" and not k282,
+             f"{b282.get('rule')} {b282.get('program')} {k282}")
+controle("geen kritieke melding 'geen programma' en geen 'is klaar'",
+         not [m for m, _ in gemeld280 if "geen programma" in m or "is klaar" in m], f"{gemeld280}")
+hass280.states.zet("sensor.vaatwasser_status", "run")
+hass280.states.zet("select.vaatwasser_programma", "unavailable")
+b282, k282 = asyncio.run(ronde280(c280b, dt.datetime(2026, 9, 8, 2, 9, 30)))
+controle("terug: de beurt loopt door met dezelfde eindtijd", b282.get("rule") == "running" and b282.get("ends_at") == eind282
+         and c280b._programma["dev-vaatwasser"]["gestart"] is not None, f"{b282.get('ends_at')} {eind282}")
+# Zonder beurt is een keuzelijst op `unknown` gewoon geen keuze: niet het laatste programma, en wel de melding.
+inst282 = _copy267.deepcopy(inst56)
+hass282, _s282, c282 = bouw(_copy267.deepcopy(huis56), inst282)
+gemeld282 = []
+
+
+async def tell282(bericht, kritiek=False, telefoon=True, **_):
+    gemeld282.append((bericht, kritiek))
+c282._async_tell = tell282
+asyncio.run(c282._async_geheugen_laden())
+asyncio.run(ronde280(c282, dt.datetime(2026, 9, 7, 18, 30)))
+hass282.states.zet("select.vaatwasser_programma", "unknown")
+b282, _ = asyncio.run(ronde280(c282, dt.datetime(2026, 9, 7, 18, 35)))
+controle("klaar voor gebruik, keuzelijst unknown: geen laatste programma", b282.get("program") == "" and b282.get("rule") == "no-program",
+         f"{b282.get('rule')} {b282.get('program')}")
+b282, k282 = asyncio.run(ronde280(c282, dt.datetime(2026, 9, 7, 19, 40)))
+controle("en na een uur wel de melding 'geen programma'",
+         [m for m, k in gemeld282 if "geen programma" in m and k] != [] and not k282, f"{gemeld282}")
+bron282 = (BRONMAP / "coach.py").read_text(encoding="utf-8")
+controle("unknown telt als weg in de status, en geen start zolang er een beurt loopt",
+         "offline = bool(entities.get(\"status\")) and ruw in WEG_STANDEN" in bron282
+         and "if sessie[\"gestart\"] is not None:\n            return\n\n        if handmatig:" in bron282, "")
+
 print("=== 281. Coach Assist laat zien dat hij bezig is: de puntjes (v0.243.0) ===")
 # De eigenaar op 25-11-2026: "Laat ook zien dat een bericht in behandeling is met 3 puntjes die bewegen". Op de opslag
 # van proef 264, na de herstart daar.

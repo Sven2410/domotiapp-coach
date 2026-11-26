@@ -670,3 +670,30 @@ een herstart terwijl hij weg is (één druk, één verslag), `vaatwasser-keuze-w
 om 02:02 de melding, om 02:31 draait hij) en `vaatwasser-keuze-weg-onbekend` (om 20:00 één melding, ook na een
 herstart om 21:00 niet nog eens). Het virtuele huis houdt nu ook de ERROR-regels van de coach bij (`log_fouten`).
 Niet in het echt beproefd.
+
+## Een seconde `unknown`: net terug is nog niet terug (v0.245.0)
+
+In de eigen woning op 26-11-2026 viel Home Connect om 15:07:03 een seconde weg. Bij het terugkomen zette Home Assistant
+de status, het programma, de deur en de resterende tijd eerst op `unknown`, en een seconde later (15:07:05) kwamen de
+echte waarden terug. De ronde van 15:07:04 viel precies in die seconde. v0.242.0 ving alleen `unavailable` op, dus de
+coach zag een vaatwasser die niet draaide en geen programma had, terwijl hij al 23 minuten Express 60 °C waste: een
+kritieke melding "is vrijgegeven, maar laat geen programma zien" en een besluit "start nu". De startknop was
+`unavailable`, dus er werd niet gedrukt, maar het had gekund.
+
+- **De status**: `unknown` telt als weg, net als `unavailable` en leeg (`WEG_STANDEN`). Zag de coach hem draaien, dan
+  draait hij nog. Na een herstart begint de status ook op `unknown`; de eerste ronde is dan de eerste waarin hij echt
+  iets zegt, zoals bij `unavailable`.
+- **Het programma**: het laatst bekende ook bij `unknown`, maar alleen als de status ook weg is of er een beurt loopt.
+  Een keuzelijst zonder keuze staat op `unknown`, en daar hoort het laatste programma niet bij: dan blijft het "kies
+  een programma", met na een uur de melding.
+- **Een beurt die loopt**: nooit de melding "geen programma" en nooit een druk op start, wat de status ook even zegt.
+  Een machine die draait heeft een programma gekozen.
+
+De andere plekken die alleen naar `unavailable` kijken gaan over iets anders: of een hele integratie geladen is (dan
+betekent `unknown` juist dat hij er is), en de startknop, die bij Home Assistant op `unknown` staat zolang er nooit
+op gedrukt is.
+
+Proef 282 in test_coach.py (een beurt die draait: `unknown`, `unavailable`, `unknown`, dan terug met dezelfde
+eindtijd; en zonder beurt een keuzelijst op `unknown`: geen laatste programma, wel de melding), en in het virtuele huis
+`vaatwasser-onbekend-midden` (om 22:00 een minuut weg, dan twee minuten `unknown`: hij blijft draaien, één druk, één
+verslag). Niet in het echt beproefd.

@@ -626,6 +626,10 @@ class Vaatwasser:
     druk_fout: int = 0
     # De keuzelijst van het programma en de startknop zijn weg, de status niet (21 tot 24-11-2026).
     keuze_weg: bool = False
+    # Net terug, en nog niet ingevuld (v0.245.0): tot dit moment zegt elke entiteit van de machine `unknown`, zoals
+    # Home Connect het een seconde doet na het terugkomen (26-11-2026, 15:07:04). Hier een paar minuten, zodat een
+    # ronde erin valt.
+    onbekend_tot: dt.datetime | None = None
 
     # toestand
     status: str = "ready"
@@ -2302,6 +2306,9 @@ class Wereld:
                 weg.append("vw_actief")
             for naam in weg:
                 z(E[naam], "unavailable")
+        if self.vaatwasser is not None and self.vaatwasser.onbekend_tot is not None and nu < self.vaatwasser.onbekend_tot:
+            for naam in ("vw_status", "vw_programma", "vw_actief", "vw_rest", "vw_deur", "vw_afstand", "vw_start", "vw_teller"):
+                z(E[naam], "unknown")
         if self.boiler is not None:
             z(E["boiler_switch"], "on" if self.boiler.aan else "off")
             z(E["boiler_vermogen"], w(f"{self.boiler_w:.0f}", "W"))
@@ -2549,6 +2556,10 @@ class Wereld:
             # De vaatwasser is `arg` minuten van het netwerk (v0.242.0).
             self.vaatwasser.offline_tot = self.nu + dt.timedelta(minutes=int(arg))
             return f"de vaatwasser is {arg} minuten van het netwerk"
+        if actie == "vaatwasser_onbekend":
+            # Net terug: `arg` minuten zegt alles van de machine `unknown` (v0.245.0).
+            self.vaatwasser.onbekend_tot = self.nu + dt.timedelta(minutes=int(arg))
+            return f"de vaatwasser is terug, en zegt {arg} minuten alleen unknown"
         if actie == "vaatwasser_druk_fout":
             self.vaatwasser.druk_fout = int(arg)
             return f"de volgende {arg} keer drukken op start gaat mis: de verbinding gaat dicht"

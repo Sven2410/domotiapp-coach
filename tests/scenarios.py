@@ -892,6 +892,12 @@ vaatwasser_offline_midden_herstart = vaatwasser_offline_midden.kopie(
     gebeurtenissen=[("19:00", "vaatwasser_nu_starten", None), ("22:00", "vaatwasser_offline", 50),
                     ("22:20", "herstart", None)],
 )
+# 26-11-2026: Home Connect viel een seconde weg, en zei bij het terugkomen eerst een seconde `unknown`. Midden in een beurt.
+vaatwasser_onbekend_midden = vaatwasser_offline_midden.kopie(
+    naam="vaatwasser-onbekend-midden", uitleg="nu starten om 19:00, om 22:00 een minuut weg en dan twee minuten unknown: hij draait door, geen melding 'geen programma', geen tweede start",
+    gebeurtenissen=[("19:00", "vaatwasser_nu_starten", None), ("22:00", "vaatwasser_offline", 1),
+                    ("22:01", "vaatwasser_onbekend", 2)],
+)
 # 23-11-2026: de keuzelijst en de startknop kwamen na een beurt niet terug. Zag de coach het programma eerder,
 # dan plant hij daarmee, en zegt hij op het moment van starten dat de machine aan moet.
 vaatwasser_keuze_weg = vaatwasser_avond.kopie(
@@ -2178,7 +2184,7 @@ ALLE = [
     alfen_drie_zon, alfen_fasen_zon, alfen_fasen_wisselend, alfen_fasen_helder, alfen_drie_dyn, alfen_fasen_dyn,
     alfen_een_fase, alfen_een_fase_vers, alfen_houdt_tegen, alfen_houdt_tegen_herstart, alfen_auto_slaapt,
     vaatwasser_offline_start, vaatwasser_offline_start_lokaal, vaatwasser_offline_midden,
-    vaatwasser_offline_midden_herstart, vaatwasser_keuze_weg, vaatwasser_keuze_weg_onbekend,
+    vaatwasser_offline_midden_herstart, vaatwasser_onbekend_midden, vaatwasser_keuze_weg, vaatwasser_keuze_weg_onbekend,
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,
     vast_grote_auto, vast_zonder_voorspelling, vast_sensoren, vast_voorspelling_mis,
     vast_geen_klaar_tijd, vast_krap, vast_onhaalbaar,

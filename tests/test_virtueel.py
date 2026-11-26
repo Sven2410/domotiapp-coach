@@ -1302,6 +1302,12 @@ for naam in ("vaatwasser-offline-midden", "vaatwasser-offline-midden-herstart"):
         controle(f"{naam}: het verslag komt pas als hij echt klaar is, niet als hij wegvalt",
                  klaar_om and vl.vw_beurten and vl.vw_beurten[0][1] is not None and klaar_om[0] >= vl.vw_beurten[0][1],
                  f"{klaar_om} {vl.vw_beurten}")
+if (vl := v("vaatwasser-onbekend-midden")):
+    controle("een seconde unknown na het terugkomen: geen melding 'geen programma', één druk, één beurt, één verslag",
+             not _vw_m(vl, "laat geen programma zien") and len(vl.vw_gedrukt) == 1 and len(vl.vw_beurten) == 1
+             and len(_vw_m(vl, "is klaar")) == 1, f"{vl.vw_gedrukt} {[m for _, m in vl.meldingen]}")
+    controle("en tijdens het unknown blijft het besluit 'draait'",
+             not [r for t, r in vl.vw_regels if t.hour == 22 and t.minute < 5 and r != "running"], f"{vl.vw_regels}")
 if (vl := v("vaatwasser-keuze-weg")):
     regels = [r for _, r in vl.vw_regels]
     controle("keuze weg: plant met het laatst bekende programma, geen 'kies een programma'",

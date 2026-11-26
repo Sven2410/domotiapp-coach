@@ -1735,6 +1735,8 @@ def _programma_alleen_lezen(device: dict[str, Any]) -> bool:
 PROGRAMMA_NAAM = {"vaatwasser": nt("De vaatwasser"), "wasmachine": nt("De wasmachine"), "droger": nt("De droger")}
 
 # Wat Miele zegt als er geen programma gekozen is.
+# Een status of een programma dat even niets zegt: weg, of net terug en nog niet ingevuld (v0.245.0).
+WEG_STANDEN = frozenset({"unavailable", "unknown", ""})
 GEEN_PROGRAMMA = frozenset({"", "no_program", "unknown", "unavailable", "none"})
 
 
@@ -5848,11 +5850,26 @@ class ChargerCoach:
         # meer terug. Op 23-11 gaf de bewoner hem om 19:54 vrij, en de hele nacht stond er "kies een
         # programma", zonder melding; hij draaide niet. Alleen als het apparaat het programma zelf meldt, en
         # alleen bij `unavailable`: een programma dat de coach niet kent, blijft onbekend.
+        # `unknown` telt ook (v0.245.0), maar alleen als de status ook weg is of er een beurt loopt: Home Connect
+        # zet bij het terugkomen alles eerst een seconde op `unknown`. In een klantwoning op 26-11-2026 viel de
+        # ronde van 15:07:04 precies in die seconde, en kwam er een kritieke melding "geen programma" over een
+        # vaatwasser die al 23 minuten draaide. Een keuzelijst zonder keuze staat ook op `unknown`, en daar hoort
+        # het laatste programma niet bij.
         bronnen = [k for k in ("program", "program_select") if entities.get(k)]
+        status_weg = bool(entities.get("status")) and not handmatig and (
+            _text(self.hass, entities.get("status")).strip().lower() in WEG_STANDEN
+        )
         if programma is not None and bronnen:
             if self._programma_laatst.get(device_id) != programma.key:
                 self._programma_laatst[device_id] = programma.key
-        elif bronnen and any(_text(self.hass, entities[k]).strip().lower() == "unavailable" for k in bronnen):
+        elif bronnen and any(
+            _text(self.hass, entities[k]).strip().lower() == "unavailable"
+            or (
+                (status_weg or sessie["gestart"] is not None)
+                and _text(self.hass, entities[k]).strip().lower() in WEG_STANDEN
+            )
+            for k in bronnen
+        ):
             programma = sessie.get("programma") or next(
                 (p for p in tabel if p.key == self._programma_laatst.get(device_id)), None
             )
@@ -5869,8 +5886,9 @@ class ChargerCoach:
             status = self._status_uit_vermogen(sessie, now, watts)
         else:
             ruw = _text(self.hass, entities.get("status")).strip().lower().split(".")[-1]
-            # Even van het netwerk (v0.242.0): de status zegt niets. Geen nieuwe toestand.
-            offline = bool(entities.get("status")) and ruw in ("unavailable", "")
+            # Even van het netwerk (v0.242.0): de status zegt niets. Geen nieuwe toestand. Ook `unknown`
+            # (v0.245.0): zo komt Home Connect terug, en zo begint hij na een herstart.
+            offline = bool(entities.get("status")) and ruw in WEG_STANDEN
             # In de woorden van Home Connect, ook bij Miele (v0.124.0); zie
             # `programma_van` voor dezelfde afspraak bij het programma.
             status = _programma_stand(ruw)
@@ -6086,6 +6104,8 @@ class ChargerCoach:
         if (
             mag and released and not alleen_lezen and not handmatig and programma is None
             and not draait and status not in KLAAR and vrij_sinds is not None
+            # Een machine die draait heeft een programma gekozen, ook als hij het even niet zegt (v0.245.0).
+            and sessie["gestart"] is None
             and "geen-programma" not in sessie["gemeld"]
             and (
                 now - vrij_sinds >= GEEN_PROGRAMMA_MELDEN
@@ -6117,6 +6137,9 @@ class ChargerCoach:
             return
 
         if not (decision.charge and mag) or draait or status in KLAAR:
+            return
+        # Nooit starten terwijl er een beurt loopt (v0.245.0), wat de status ook even zegt.
+        if sessie["gestart"] is not None:
             return
 
         if handmatig:
