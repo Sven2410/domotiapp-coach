@@ -682,8 +682,8 @@ export const APPARATEN = {
   "De batterij mag dan ook naar het net ontladen, als dat meer opbrengt dan het bijladen straks kost. Staat dit uit, dan voedt hij alleen je eigen huis.":
     "The battery may then also discharge to the grid, if that earns more than recharging later costs. If this is off, it only powers your own home.",
   "Een keer per week helemaal vol.": "Completely full once a week.",
-  "Tot 100%, voor het balanceren van de cellen. De coach kiest op die dag het goedkoopste moment, en slaat de beurt over als de batterij die week al vol was.":
-    "To 100%, for balancing the cells. The coach picks the cheapest moment on that day, and skips it if the battery was already full that week.",
+  "Tot 100%, voor het balanceren van de cellen. De coach kiest op die dag het goedkoopste moment, ook van het net als laden uit het net uit staat, en slaat de beurt over als de batterij die week al vol was.":
+    "To 100%, for balancing the cells. The coach picks the cheapest moment on that day, from the grid too if grid charging is off, and skips it if the battery was already full that week.",
   "Op": "On",
   "Moet eerst vrijgegeven worden.": "Must be released first.",
   "Aan: de coach wacht tot je hem vrijgeeft met \"Ingeruimd en dicht\" op de kaart. Uit: klep dicht is genoeg, en de coach start hem zelf op het goedkoopste moment. Na een beurt wacht hij dan tot de klep open en weer dicht is geweest, zodat hij niet opnieuw start met de schone vaat erin.":

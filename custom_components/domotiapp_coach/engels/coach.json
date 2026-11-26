@@ -260,6 +260,7 @@
   "De accustand van {auto} staat op {procent}%.": "The battery level of {auto} is set to {procent}%.",
   "{naam} laadt weer.": "{naam} is charging again.",
   "{naam} neemt niets op, ook niet als hij zou moeten laden.": "{naam} takes in nothing, not even when it should be charging.",
+  "{naam} wordt vandaag niet meer helemaal vol voor de wekelijkse volle beurt: hij staat op {pct}% en de tijd is te kort. Volgende week probeert de coach het opnieuw.": "{naam} will not get completely full today for the weekly full charge: it is at {pct}% and there is not enough time left. The coach will try again next week.",
   "{naam} neemt niets op. Laat hem nakijken: hij staat misschien uit of in storing.": "{naam} takes in nothing. Have it checked: it may be switched off or in a fault.",
   "{naam} laadt zelf van het net, en niet wat de coach wil. De coach probeert het opnieuw.": "{naam} is charging from the grid by itself, not what the coach wants. The coach is trying again.",
   "{naam} ontlaadt zelf, en niet wat de coach wil. De coach probeert het opnieuw.": "{naam} is discharging by itself, not what the coach wants. The coach is trying again.",

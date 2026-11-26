@@ -2771,3 +2771,34 @@ goedkoper, en batterij-dynamisch-zelf kreeg 74 opdrachten in plaats van 16. Dat 
 staat op de werkbon.
 
 Proef 65 in test_batterij.py.
+
+## De wekelijkse volle beurt mag van het net, ook met laden uit het net uit (v0.246.0)
+
+In de eigen woning staat "Laden uit het net" uit (een vast contract: van het net laden levert daar niets op) en
+"Een keer per week helemaal vol" aan, voor de cellen. De coach opende de beurt elke zondag, maar mocht hem alleen met
+zon vullen, en in november geeft het dak daar een paar procent per dag. Op zondag 22-11-2026 kwam de batterij niet
+hoger dan 16% (14:13), en `full_at` stond op 04-10-2026: zeven zondagen geen volle beurt, zonder dat iemand het hoorde.
+De eigenaar op 23-11: "laat hem zondag van het net volladen", en op 26-11 akkoord op de werkbon.
+
+- **Van het net op de dag van de beurt** (`_mag_netladen`): zolang de beurt open staat (`_vol_open`, de blokken vóór
+  `vol_voor`) mag hij van het net laden, ook met het vinkje uit en boven een grens (`grid_charge_below`): de beurt is
+  er voor de cellen, niet voor het geld. Een laadbeurt die te weinig oplevert (`net_laden_vanaf`, v0.160.0) blijft
+  weg zoals altijd. De som pakt de goedkoopste blokken en de zon eerst; bij een vast contract blijft de avondpiek
+  dicht (`_mogelijk`). Op de andere dagen verandert er niets.
+- **Niet uitsmeren voorbij `vol_voor`** (`_rustig_vermogen`): bij een vast contract is elk uur even duur, en het
+  uitsmeren liep door tot de avondpiek van morgen. In het virtuele huis stond de batterij om 20:30 op 93,6%, en laadde
+  hij de laatste 0,6 kWh met 47 W: de beurt kwam niet rond. Nu smeert hij de beurt uit tot middernacht; om 23:26 vol.
+- **Lukt het toch niet**, een batterij die te traag laadt of niet opneemt: één melding op de dag zelf, zodra het op vol
+  laadvermogen niet meer kan (`vol_lukt_nog`, zonder de avondpiek als die dicht is): "Thuisbatterij wordt vandaag
+  niet meer helemaal vol voor de wekelijkse volle beurt: hij staat op 40% en de tijd is te kort. Volgende week
+  probeert de coach het opnieuw." Eén keer per beurt, ook over een herstart (`vol_mislukt` in het geheugen).
+  Alleen als de coach hem stuurt.
+- Bij het vinkje in Voorkeuren staat nu dat de coach die dag ook van het net laadt als laden uit het net uit staat.
+
+Wat het kost: van 5 naar 100% is ongeveer 13,7 kWh in de accu, die daarna gewoon het huis voedt. Wat het echt kost is
+het verlies: bij een rendement van 0,82 ongeveer 2,5 kWh, zo'n € 0,60 per beurt, met wat zon minder.
+
+Proef 66 in test_batterij.py, en in het virtuele huis `batterij-volle-beurt-zonder-net` (een grijze zondag in november,
+vast, een batterij die zelf nul doet: om 23:26 vol, niets van het net in de avondpiek), dezelfde met een herstart om
+15:00 (om 23:56 vol), de zaterdag ervoor (niets van het net) en `batterij-volle-beurt-te-traag` (500 W: om 00:00 één
+melding, na de herstart om 12:00 niet nog eens). Niet in het echt beproefd.

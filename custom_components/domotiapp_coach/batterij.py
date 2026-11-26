@@ -30,6 +30,8 @@ from math import sqrt
 from typing import Callable
 
 from .planner import (
+    EVENING_PEAK_START,
+    EVENING_START,
     PRICE_MARGIN,
     SCHIJF_MINIMUM,
     Forecast,
@@ -411,6 +413,29 @@ def vol_voor(
     return (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+def vol_lukt_nog(now: datetime, b: Batterij, dicht: bool) -> bool:
+    """Of de wekelijkse volle beurt vóór `vol_voor` nog kan, op vol laadvermogen (v0.246.0).
+
+    Alleen wat zeker niet meer kan: de tijd tot `vol_voor` maal het laadvermogen, zonder de
+    avondpiek als die dicht is, tegen wat er nog in moet. Zonder beurt, of zonder wat er voor
+    de som nodig is, kan het nog.
+    """
+    if b.vol_voor is None or b.soc is None or not b.capacity_kwh or b.max_charge_w <= 0:
+        return True
+    tekort = (b.soc_max - VOL_MARGE - b.soc) / 100.0 * b.capacity_kwh
+    if tekort <= 0:
+        return True
+    uren = echte_uren(now, b.vol_voor) if b.vol_voor > now else 0.0
+    if dicht:
+        # De avondpiek van vandaag; die van morgen ligt na `vol_voor`, middernacht.
+        piek_van = datetime.combine(now.date(), EVENING_PEAK_START)
+        piek_tot = datetime.combine(now.date(), EVENING_START)
+        van, tot = max(now, piek_van), min(b.vol_voor, piek_tot)
+        if tot > van:
+            uren -= echte_uren(van, tot)
+    return tekort <= max(0.0, uren) * b.max_charge_w / 1000.0 * eta_in(b)
+
+
 def _netto_huis_kwh(forecast: Forecast, rij: dict, deel: float, van: datetime | None = None) -> float:
     """Wat het huis in dit blok van het net vraagt als er geen batterij was.
 
@@ -489,10 +514,19 @@ def _mag_netladen(b: Batterij, rij: dict) -> bool:
     Met het vinkje aan, en met een grens alleen als de all-in prijs van het blok
     eronder ligt. Een bewoner op 21-10-2026: hij mag wel van het net laden "als de
     prijs bijv. <15 cent is". Zon opslaan gaat hier niet over; dat mag altijd.
+
+    Op de dag van de wekelijkse volle beurt mag het altijd (v0.246.0), ook met het
+    vinkje uit en boven de grens: de beurt is er voor de cellen, niet voor het geld.
+    In de eigen woning stond het vinkje uit, en daar kwam de beurt van 04-10 tot
+    23-11-2026 niet een keer rond: in november gaf het dak een paar procent per dag,
+    en op zondag 22-11 kwam de batterij niet hoger dan 16%. De som pakt de goedkoopste
+    blokken en de zon eerst, en de avondpiek bij een vast contract blijft dicht (`_mogelijk`).
     """
-    if not b.net_laden:
-        return False
     if b.net_laden_vanaf is not None and _echt(rij["start"]) < _echt(b.net_laden_vanaf):
+        return False
+    if _vol_open(b, rij):
+        return True
+    if not b.net_laden:
         return False
     return b.net_laden_onder is None or rij["price"] < b.net_laden_onder
 
@@ -1067,6 +1101,12 @@ def _rustig_vermogen(
     energie, tijd, tot, n = 0.0, 0.0, None, 0
     for uur in uren:
         if abs(uur.price - prijs) > PRICE_MARGIN or dicht(uur):
+            break
+        # De volle beurt moet vóór `vol_voor` af zijn (v0.246.0): niet uitsmeren over de uren erna. Bij een vast
+        # contract is elk uur even duur, en dan liep het uitsmeren door tot de avondpiek van morgen; in het
+        # virtuele huis (`batterij-volle-beurt-zonder-net`) laadde hij om 20:30 op 93,6% de laatste 0,6 kWh met
+        # 47 W, en kwam de beurt niet rond.
+        if not ontladen and b.vol_voor is not None and tijd > 0 and uur.start >= b.vol_voor:
             break
         energie += naar_net(uur)
         tijd += echte_uren(uur.start, uur.end)

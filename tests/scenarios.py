@@ -1521,6 +1521,35 @@ batterij_volle_beurt_zelf = Scenario(
     prijzen=Prijzen(per_dag={"2026-10-25": UREN_25_10, "2026-10-26": UREN_26_10}),
     begin="2026-10-25 09:30:40", duur_uren=12.5, **ZONDER_AUTO,
 )
+# De eigen woning, zondag 22-11-2026 (v0.246.0): de wekelijkse volle beurt met laden uit het net uit. In november
+# geeft het dak een paar procent; de beurt kwam er van 04-10 tot 23-11 niet een keer. Nu mag hij die dag van het net.
+VOL_ZONDER_NET = dict(soc=5.0, capaciteit_kwh=14.4, max_laden_w=2400.0, max_ontladen_w=2400.0, soc_max=95.0,
+                      meter=False, rte_opgegeven=0.82, eigen_nul=True, zelf_nul=True, knop_weg=True,
+                      knop_terug_s=14.0, net_laden=False, wekelijks_vol_dag=6, **ANKER_SENSOR)
+batterij_volle_beurt_zonder_net = Scenario(
+    "batterij-volle-beurt-zonder-net",
+    "vast, een grijze zondag in november met de volle beurt en laden uit het net uit: hij laadt die dag van het net, niet in de avondpiek, en is voor middernacht vol",
+    contract="vast", zon=Zon(piek_kw=0.6, opkomst=8.25, onder=16.75, wolken="bewolkt"),
+    huis=Huis(profiel={u: 450.0 for u in range(24)}),
+    batterij=Batterij(**VOL_ZONDER_NET),
+    begin="2026-11-22 00:00:40", duur_uren=24.5, **ZONDER_AUTO,
+)
+batterij_volle_beurt_zonder_net_herstart = batterij_volle_beurt_zonder_net.kopie(
+    naam="batterij-volle-beurt-zonder-net-herstart",
+    uitleg="hetzelfde, met een herstart van Home Assistant om 15:00, midden in het laden",
+    gebeurtenissen=[("15:00", "herstart", None)],
+)
+batterij_volle_beurt_zonder_net_zaterdag = batterij_volle_beurt_zonder_net.kopie(
+    naam="batterij-volle-beurt-zonder-net-zaterdag",
+    uitleg="de zaterdag ervoor: geen beurt, dus niets van het net",
+    begin="2026-11-21 00:00:40", duur_uren=23.5,
+)
+batterij_volle_beurt_te_traag = batterij_volle_beurt_zonder_net.kopie(
+    naam="batterij-volle-beurt-te-traag",
+    uitleg="dezelfde zondag met een batterij die maar 500 W laadt: één melding dat het vandaag niet meer lukt, ook na een herstart niet nog eens",
+    batterij=Batterij(**{**VOL_ZONDER_NET, "max_laden_w": 500.0}),
+    gebeurtenissen=[("12:00", "herstart", None)],
+)
 batterij_kwartier_zelf = Scenario(
     "batterij-kwartier-zelf",
     "dynamisch in kwartieren, de accu doet zelf nul en 's nachts draait een warmtepomp: de coach laadt goedkoop bij zonder tussendoor te ontladen, en houdt hem het hele laadvenster vast",
@@ -1583,7 +1612,8 @@ batterij_rendement_leren = batterij_winter.kopie(
 
 BATTERIJ = [
     batterij_vast_zon, batterij_zonder_terug, batterij_vast_salderen, batterij_winter, batterij_zomer, batterij_handelen, batterij_handelen_krap, batterij_handelen_krap_zonder,
-    batterij_reserve, batterij_negatief, batterij_volle_beurt, batterij_volle_beurt_zelf, batterij_paal, batterij_paal_stopt, batterij_sprong,
+    batterij_reserve, batterij_negatief, batterij_volle_beurt, batterij_volle_beurt_zelf, batterij_volle_beurt_zonder_net,
+    batterij_volle_beurt_zonder_net_herstart, batterij_volle_beurt_zonder_net_zaterdag, batterij_volle_beurt_te_traag, batterij_paal, batterij_paal_stopt, batterij_sprong,
     batterij_meter_weg, batterij_herstart, batterij_anker_sensor, batterij_uurlast,
     batterij_klapperlast, batterij_wisselende_last, batterij_zonder_rendement,
     batterij_zelf_nul, batterij_zelf_knop_weg, batterij_zelf_knop_traag, batterij_knop_traag_start,
