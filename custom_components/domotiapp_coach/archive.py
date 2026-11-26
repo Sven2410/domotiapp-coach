@@ -389,9 +389,14 @@ class Archive:
             meter.vast = FASE_VAST if entity_id in self._fasen else 0.0
 
         if nieuwe:
-            self._inhalen.update(nieuwe)
-            if self._inhalen_sinds is None:
+            # Een sensor die er later bij komt krijgt zijn eigen dag (v0.247.0). Tot
+            # dan erfde hij de klok van de start, en twee dagen na een herstart
+            # gaf `_async_inhalen` hem meteen op, zonder één poging. In de
+            # klantwoning op 23-11-2026 bij een stekker die er die ochtend bij kwam.
+            if not self._inhalen:
                 self._inhalen_sinds = nu
+                self._inhalen_gemeld = False
+            self._inhalen.update(nieuwe)
             await self._async_inhalen(nu)
 
         # Eén luisteraar voor alles, opnieuw opgehangen. Losse luisteraars per

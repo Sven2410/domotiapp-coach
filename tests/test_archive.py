@@ -513,6 +513,115 @@ controle("en bij een andere sensor de max zoals altijd", uit12["sensor.net"][2:4
 controle("welke sensoren een fase zijn", archive.Archive._fase_sensoren(fasen11) == {"sensor.l1_a", "sensor.l2_w", "sensor.l2_v", "sensor.l3_w"},
          f"{archive.Archive._fase_sensoren(fasen11)}")
 
+print("=== 13. een sensor die later in de coach komt krijgt zijn eigen inhaalslag (v0.247.0) ===")
+# In de klantwoning op 23-11-2026: drie dagen na een herstart kwam er een stekker bij in de
+# coach, en dezelfde seconde stond in het systeemlog "de inhaalslag is opgegeven", zonder één
+# poging. De nieuwe sensor erfde de klok van de start.
+import asyncio  # noqa: E402
+import logging  # noqa: E402
+
+
+class _Hass13:
+    def __init__(self):
+        self.data = {}
+        self.config = types.SimpleNamespace(path=lambda naam: naam)
+        self.states = types.SimpleNamespace(get=lambda e: None)
+
+    async def async_add_executor_job(self, functie, *args):
+        return functie(*args)
+
+
+class _Store13:
+    def __init__(self):
+        self.settings = {"sources": {"grid_import": "sensor.afname"}, "devices": []}
+
+    async def async_load(self):
+        return self.settings
+
+
+class _Log13(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.regels = []
+
+    def emit(self, record):
+        self.regels.append(record.getMessage())
+
+
+def _archief13(recorder_faalt=False):
+    """Een archief zonder schijf: alles leeg, en de recorder geeft één kwartier per sensor."""
+    arch = archive.Archive(_Hass13())
+    arch._zonder_regels = lambda ids: list(ids)
+    arch.geschreven = []
+    arch._schrijf = lambda rijen, opruimen, nu: arch.geschreven.extend(rijen)
+    arch.pogingen = []
+
+    async def uit_recorder(ids, nu):
+        arch.pogingen.append((list(ids), nu))
+        if recorder_faalt:
+            raise RuntimeError("recorder nog niet zover")
+        return [(e, int(nu.timestamp()) - 900, 1.0, 2.0, 1.5, 900.0) for e in ids]
+
+    arch._async_uit_recorder = uit_recorder
+    return arch
+
+
+opslag13 = _Store13()
+oud_store13, oud_nu13 = archive.async_get_store, dtutil.utcnow
+archive.async_get_store = lambda hass: opslag13
+log13 = _Log13()
+archive._LOGGER.addHandler(log13)
+try:
+    start13 = dt.datetime(2026, 11, 20, 17, 5, tzinfo=dt.timezone.utc)
+    klok13 = [start13]
+    dtutil.utcnow = lambda: klok13[0]
+
+    arch13 = _archief13()
+    asyncio.run(arch13._async_volg())
+    controle("bij de start: de sensor van het net ingehaald",
+             [r[0] for r in arch13.geschreven] == ["sensor.afname"] and not arch13._inhalen, f"{arch13.geschreven}")
+
+    # Drie dagen later komt er een stekker bij.
+    klok13[0] = start13 + dt.timedelta(days=2, hours=16, minutes=41)
+    opslag13.settings = {**opslag13.settings, "devices": [{"id": "d1", "entity": "sensor.stekker"}]}
+    asyncio.run(arch13._async_volg())
+    print(f"  pogingen: {[(ids, n.strftime('%d-%m %H:%M')) for ids, n in arch13.pogingen]}")
+    controle("de nieuwe stekker wordt uit de recorder gehaald",
+             [r[0] for r in arch13.geschreven] == ["sensor.afname", "sensor.stekker"], f"{arch13.geschreven}")
+    controle("en er is niets opgegeven", not any("opgegeven" in r for r in log13.regels), f"{log13.regels}")
+    controle("en niets meer in te halen", not arch13._inhalen, f"{arch13._inhalen}")
+
+    # Blijft de recorder falen, dan houdt het na een dag nog steeds op: één waarschuwing, dan klaar.
+    log13.regels.clear()
+    opslag13.settings = {"sources": {"grid_import": "sensor.afname"}, "devices": []}
+    klok13[0] = start13
+    arch13b = _archief13(recorder_faalt=True)
+    asyncio.run(arch13b._async_volg())
+    klok13[0] = start13 + dt.timedelta(hours=20)
+    asyncio.run(arch13b._async_inhalen(klok13[0]))
+    # Een sensor die erbij komt terwijl de eerste nog loopt, telt mee met de klok die al liep.
+    opslag13.settings = {**opslag13.settings, "devices": [{"id": "d1", "entity": "sensor.stekker"}]}
+    asyncio.run(arch13b._async_volg())
+    klok13[0] = start13 + dt.timedelta(hours=24, minutes=1)
+    asyncio.run(arch13b._async_inhalen(klok13[0]))
+    print(f"  log: {log13.regels}")
+    controle("een recorder die steeds faalt: na een dag opgegeven",
+             not arch13b._inhalen and sum("opgegeven" in r for r in log13.regels) == 1, f"{log13.regels}")
+    controle("en de mislukte poging maar één keer gemeld",
+             sum("lukte nog niet" in r for r in log13.regels) == 1, f"{log13.regels}")
+    # En een stekker die daarna komt, begint weer met een eigen dag en een eigen melding.
+    log13.regels.clear()
+    opslag13.settings = {**opslag13.settings, "devices": [{"id": "d1", "entity": "sensor.stekker"},
+                                                         {"id": "d2", "entity": "sensor.droger"}]}
+    asyncio.run(arch13b._async_volg())
+    controle("daarna een nieuwe sensor: weer een poging, niet meteen opgegeven",
+             arch13b._inhalen == {"sensor.droger"} and arch13b.pogingen[-1][0] == ["sensor.droger"]
+             and not any("opgegeven" in r for r in log13.regels)
+             and sum("lukte nog niet" in r for r in log13.regels) == 1, f"{log13.regels} {arch13b._inhalen}")
+finally:
+    archive.async_get_store, dtutil.utcnow = oud_store13, oud_nu13
+    archive._LOGGER.removeHandler(log13)
+
 print()
 print(f"{GOED} goed, {FOUT} fout")
 sys.exit(1 if FOUT else 0)
