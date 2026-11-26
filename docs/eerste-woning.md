@@ -863,3 +863,21 @@ erbij, anders leest "14:42" als vanmiddag.
 
 Proeven: 233 in test_coach.py (de beurt tot 00:13, ná het laden en na een herstart om 08:13), en "een beurt staat op
 de dag dat hij laadde" in test_rapport.mjs.
+
+## Een sensor die er later bij komt, krijgt zijn eigen inhaalslag (v0.247.0)
+
+Komt er een sensor bij in de coach, dan haalt de kwartieropslag zijn vijfminutenblokken van de laatste veertien dagen
+uit de recorder (`_async_inhalen` in archive.py). Lukt dat een dag lang niet, dan houdt hij op (`CATCHUP_GIVE_UP`):
+dan zijn die blokken toch al opgeruimd.
+
+Die dag telde vanaf de start van Home Assistant, niet vanaf het moment dat de sensor erbij kwam. `_inhalen_sinds`
+werd één keer gezet en nooit meer leeggemaakt. In een klantwoning kwam op 23-11-2026, drie dagen na de laatste
+herstart, een stekker in de coach. Dezelfde seconde stond in het systeemlog "de inhaalslag is opgegeven", zonder één
+poging, en de geschiedenis van die stekker begon bij nu.
+
+Nu begint de klok opnieuw als er niets meer in te halen stond, en ook de melding dat het nog niet lukte. Komt er een
+sensor bij terwijl er nog een inhaalslag loopt, dan telt hij mee met de klok die al liep. Een recorder die een dag
+lang niet antwoordt, wordt nog steeds na een dag opgegeven.
+
+Proef 13 in test_archive.py: de start, een stekker 2 dagen en 16 uur later, een recorder die steeds faalt, en daarna
+nog een sensor.
