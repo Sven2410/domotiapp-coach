@@ -19914,6 +19914,121 @@ controle("unknown telt als weg in de status, en geen start zolang er een beurt l
          "offline = bool(entities.get(\"status\")) and ruw in WEG_STANDEN" in bron282
          and "if sessie[\"gestart\"] is not None:\n            return\n\n        if handmatig:" in bron282, "")
 
+print("=== 283. een sensor die steeds wegvalt: één melding, een tweede pas na drie dagen (v0.248.0) ===")
+# De klantwoning op 17 en 18-11-2026: het internet haperde, de vriezer en de koelkast vielen tientallen keren tien
+# minuten weg, en elke keer kwam er een nieuwe kritieke melding. De eigenaar op 26-11-2026: "1 melding is goed, pas na
+# 3 dagen 2e". Dezelfde sensor die binnen drie dagen weer stilvalt: alleen in de geschiedenis. Blijft hij drie dagen
+# stil: nog één op de telefoon.
+T283 = dt.datetime(2026, 11, 17, 14, 0)
+AIRCO283 = {**AIRCO230, "id": "dev-airco283", "controllable": True, "entity": "sensor.airco283_w"}
+inst283 = instellingen(devices=[LAADPAAL, AIRCO283])
+hass283, _, coach283 = bouw({**huis(), "sensor.airco283_w": "1.5"}, inst283)
+asyncio.run(coach283._async_geheugen_laden())
+log283 = Log230()
+telefoon283: list[tuple[str, str]] = []
+
+
+def wacht283(coach, minuten):
+    """Eén ronde van de sensorwacht; wat er naar de telefoon ging komt in `telefoon283`."""
+    hass283.services.verstuurd.clear()
+    asyncio.run(coach._async_sensorwacht(inst283, T283 + dt.timedelta(minutes=minuten)))
+    for d in hass283.services.verstuurd:
+        if d[0] == "notify" and "Airco boven" in d[2]["message"]:
+            telefoon283.append((f"{T283 + dt.timedelta(minutes=minuten):%d-%m %H:%M}", d[2]["message"]))
+
+
+def geschiedenis283():
+    return [(g["kind"], g["message"]) for g in asyncio.run(coachmod.async_get_meldingen(hass283).async_list())]
+
+
+coachmod._LOGGER.addHandler(log283)
+coachmod._LOGGER.setLevel(coachmod.logging.INFO)
+coachmod.logging.disable(coachmod.logging.NOTSET)
+try:
+    wacht283(coach283, 0)
+    # Vijf keer twaalf minuten weg, met twintig minuten ertussen, en een herstart na de tweede.
+    for keer in range(5):
+        begin = 1 + keer * 32
+        hass283.states.zet("sensor.airco283_w", "unavailable")
+        for m in range(begin, begin + 13):
+            wacht283(coach283, m)
+        hass283.states.zet("sensor.airco283_w", "1.5")
+        wacht283(coach283, begin + 13)
+        if keer == 1:
+            coach283._meldingen_onthouden()
+            coach283 = herstart213(hass283)
+            asyncio.run(coach283._async_geheugen_laden())
+            coach283._restore(asyncio.run(coachmod.async_get_store(hass283).async_load()))
+    stil283 = [m for k, m in geschiedenis283() if "meldt al" in m]
+    weer283 = [m for k, m in geschiedenis283() if "doet het weer" in m]
+    waarsch283 = [r for r in log283.rijen if r[0] == "WARNING" and "airco283" in r[1]]
+    print(f"  telefoon: {telefoon283}")
+    print(f"  geschiedenis: {len(stil283)} keer stil, {len(weer283)} keer terug; waarschuwingen {waarsch283}")
+    controle("vijf keer twaalf minuten weg: één melding op de telefoon, ook over een herstart heen",
+             len(telefoon283) == 1 and "meldt al 10 minuten niets" in telefoon283[0][1], f"{telefoon283}")
+    controle("en alle vijf in de geschiedenis, kritiek, met vijf keer doet het weer",
+             len(stil283) == 5 and len(weer283) == 5
+             and all(k == "kritiek" for k, m in geschiedenis283() if "meldt al" in m), f"{geschiedenis283()}")
+    controle("en één waarschuwing in het log, de rest info", len(waarsch283) == 1, f"{waarsch283}")
+
+    # Daarna blijft hij weg, en twee dagen later nog een herstart.
+    telefoon283.clear()
+    hass283.states.zet("sensor.airco283_w", "unavailable")
+    for m in range(200, 220):
+        wacht283(coach283, m)
+    coach283._meldingen_onthouden()
+    coach283 = herstart213(hass283)
+    asyncio.run(coach283._async_geheugen_laden())
+    coach283._restore(asyncio.run(coachmod.async_get_store(hass283).async_load()))
+    for uur in range(4, 72, 4):
+        wacht283(coach283, uur * 60)
+        wacht283(coach283, uur * 60 + 1)
+    controle("een dag of twee stil binnen de drie dagen: niets op de telefoon", telefoon283 == [], f"{telefoon283}")
+    for m in range(3 * 24 * 60 - 5, 3 * 24 * 60 + 60):
+        wacht283(coach283, m)
+    print(f"  na drie dagen: {telefoon283}")
+    controle("drie dagen na de melding nog steeds stil: één keer op de telefoon, in dagen",
+             len(telefoon283) == 1 and telefoon283[0][0] == "20-11 14:11"
+             and telefoon283[0][1].startswith("Het vermogen van Airco boven meldt al 3 dagen niets."), f"{telefoon283}")
+    for m in range(3 * 24 * 60 + 60, 4 * 24 * 60, 30):
+        wacht283(coach283, m)
+    controle("en daarna niet elke ronde", len(telefoon283) == 1, f"{telefoon283}")
+
+    # Terug na vier dagen, en een week later weer weg: een nieuwe storing, weer op de telefoon.
+    hass283.states.zet("sensor.airco283_w", "1.5")
+    wacht283(coach283, 4 * 24 * 60)
+    controle("terug: alleen in de geschiedenis", len(telefoon283) == 1
+             and len([m for k, m in geschiedenis283() if "doet het weer" in m]) == 6, f"{geschiedenis283()[:2]}")
+    hass283.states.zet("sensor.airco283_w", "unavailable")
+    for m in range(7 * 24 * 60, 7 * 24 * 60 + 12):
+        wacht283(coach283, m)
+    controle("een week later weer weg: weer één op de telefoon", len(telefoon283) == 2, f"{telefoon283}")
+    opslag283 = str(coachmod.async_get_geheugen(hass283)._store._data)
+    controle("het moment van de melding staat in de opslag", "sensor_gebeld" in opslag283, opslag283[:200])
+finally:
+    coachmod.logging.disable(coachmod.logging.WARNING)
+    coachmod._LOGGER.setLevel(coachmod.logging.NOTSET)
+    coachmod._LOGGER.removeHandler(log283)
+
+# Gemeld voor v0.248.0: de tweede telt vanaf het moment in `sensor_quiet`. Bij de klantwoning op 26-11-2026 om 18:54.
+inst283b = {**instellingen(devices=[LAADPAAL, AIRCO283]),
+            "sensor_quiet": [{"entity": "sensor.airco283_w", "at": "2026-11-26T18:54:30"}]}
+hass283b, _, coach283b = bouw({**huis(), "sensor.airco283_w": "unavailable"}, inst283b)
+asyncio.run(coach283b._async_geheugen_laden())
+coach283b._sensor_ooit.add("sensor.airco283_w")
+coach283b._restore(inst283b)
+gebeld283b = []
+for moment in (dt.datetime(2026, 11, 27, 9, 0), dt.datetime(2026, 11, 27, 9, 1), dt.datetime(2026, 11, 29, 18, 50),
+               dt.datetime(2026, 11, 29, 18, 55)):
+    hass283b.services.verstuurd.clear()
+    asyncio.run(coach283b._async_sensorwacht(inst283b, moment))
+    gebeld283b += [(f"{moment:%d-%m %H:%M}", d[2]["message"]) for d in hass283b.services.verstuurd
+                  if d[0] == "notify" and "Airco boven" in d[2]["message"]]
+print(f"  gemeld voor de uitgave: {gebeld283b}")
+controle("al gemeld voor deze versie: geen nieuwe na de herstart, en de tweede drie dagen na het moment in de opslag",
+         [m for m, _b in gebeld283b] == ["29-11 18:55"] and "3 dagen" in gebeld283b[0][1], f"{gebeld283b}")
+controle("de bron noemt de drie dagen", "STIL_OPNIEUW = timedelta(days=3)" in (BRONMAP / "coach.py").read_text())
+
 print("=== 281. Coach Assist laat zien dat hij bezig is: de puntjes (v0.243.0) ===")
 # De eigenaar op 25-11-2026: "Laat ook zien dat een bericht in behandeling is met 3 puntjes die bewegen". Op de opslag
 # van proef 264, na de herstart daar.

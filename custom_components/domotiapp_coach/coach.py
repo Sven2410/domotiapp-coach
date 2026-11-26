@@ -253,6 +253,12 @@ SENSOR_STIL_AUTO = timedelta(minutes=60)
 # een koelkast, een vriezer, een droger en een wasmachine. Zwijgt er een sensor, dan neemt de melding
 # elke sensor mee die al zo lang korter zwijgt.
 SENSOR_BUNDEL = timedelta(minutes=5)
+# Per sensor één melding naar de telefoon per storing, en een tweede pas na drie dagen (v0.248.0). In de
+# klantwoning haperde het internet op 17 en 18-11-2026: de vriezer en de koelkast vielen tientallen keren
+# tien minuten weg, en elke keer kwam er een nieuwe kritieke melding. De eigenaar op 26-11-2026: "1 melding
+# is goed, pas na 3 dagen 2e". Valt een sensor binnen die drie dagen opnieuw stil, dan komt het alleen in
+# de geschiedenis; blijft hij al die tijd stil, dan komt er na drie dagen nog een op de telefoon.
+STIL_OPNIEUW = timedelta(days=3)
 # Een groep zonder meter, gemeten via de apparaten die erop hangen (v0.165.0): vanaf welk deel van
 # de zekering, en hoe lang, voordat de coach het meldt. Een wasmachine die opwarmt duurt minuten,
 # een motor die aanloopt een seconde. Opnieuw pas als hij onder `GROEP_VOL_WEER` is geweest.
@@ -1957,6 +1963,9 @@ class ChargerCoach:
         # mee voor "het internet thuis is weg". Zie `_async_sensoren_stil`.
         self._sensor_ooit: set[str] = set()
         self._sensor_gemeld: set[str] = set()
+        # Per sensor wanneer hij voor het laatst in een melding op de telefoon stond (v0.248.0,
+        # `STIL_OPNIEUW`). In `GeheugenStore`, dus een herstart vergeet het niet.
+        self._sensor_gebeld: dict[str, datetime] = {}
         # Per integratie die niet opkwam sinds wanneer, welke gemeld is, en de volgende controle (v0.166.0).
         self._integratie_stuk: dict[str, datetime] = {}
         self._integratie_gemeld: set[str] = set()
@@ -3591,6 +3600,7 @@ class ChargerCoach:
         }
         auto_weg = auto_sensoren - aan_paal
         stil_nu: list[tuple[str, str, datetime, timedelta]] = []
+        nog_stil: list[tuple[str, str, datetime, timedelta]] = []
         terug: list[str] = []
         nu_wel: list[str] = []
         for entity_id, naam in self._sensoren(settings).items():
@@ -3619,7 +3629,13 @@ class ChargerCoach:
             if sinds is None:
                 self._sensor_stil[entity_id] = now
                 continue
-            if entity_id in self._sensor_gemeld or self._opstart_rust(sinds, now):
+            if entity_id in self._sensor_gemeld:
+                # Al drie dagen stil sinds de melding op de telefoon: nog één (v0.248.0).
+                gebeld = self._sensor_gebeld.get(entity_id)
+                if gebeld is not None and entity_id in self._sensor_ooit and _tussen(gebeld, now) >= STIL_OPNIEUW:
+                    nog_stil.append((entity_id, naam, gebeld, timedelta(0)))
+                continue
+            if self._opstart_rust(sinds, now):
                 continue
             grens = SENSOR_STIL_AUTO if entity_id in auto_sensoren else SENSOR_STIL
             stil_nu.append((entity_id, naam, sinds, grens))
@@ -3643,10 +3659,22 @@ class ChargerCoach:
         if any(now - sinds >= grens for _e, _n, sinds, grens in stil_nu):
             bundel = [rij for rij in stil_nu if now - rij[2] >= rij[3] - SENSOR_BUNDEL]
             await self._async_sensoren_stil(settings, bundel, now)
+        if nog_stil:
+            await self._async_sensoren_stil(settings, nog_stil, now)
 
         # Een gemelde sensor die de coach niet meer gebruikt telt niet meer.
         self._sensor_gemeld &= set(self._sensoren(settings))
         self._sensor_ooit &= set(self._sensoren(settings))
+        # En een melding van meer dan drie dagen terug ook niet, als hij er weer is.
+        vergeten = [
+            entity_id for entity_id, gebeld in self._sensor_gebeld.items()
+            if entity_id not in self._sensoren(settings)
+            or (entity_id not in self._sensor_gemeld and _tussen(gebeld, now) >= STIL_OPNIEUW)
+        ]
+        if vergeten:
+            for entity_id in vergeten:
+                self._sensor_gebeld.pop(entity_id, None)
+            self._meldingen_onthouden()
         if self._sensor_gemeld != self._sensor_gemeld_bewaard:
             try:
                 saved = await async_get_store(self.hass).async_save({"sensor_quiet": [
@@ -3706,12 +3734,24 @@ class ChargerCoach:
         except Exception:  # noqa: BLE001 - zonder register noemt de melding de integratie
             _LOGGER.debug("kon de integraties van de stille sensoren niet opzoeken", exc_info=True)
         minuten = min(int(_tussen(sinds, now).total_seconds() // 60) for _e, _n, sinds, _g in bundel)
+        # Na drie dagen in dagen (v0.248.0).
+        dagen = minuten // (24 * 60)
         # Kritiek alleen als de coach er iets mee moet. Een status die hij alleen
         # meeleest laat hem niets anders doen, en de bewoner kan er niets mee.
         kritiek = any(entity_id not in meelezen for entity_id, _n, _s, _g in bundel)
+        # Naar de telefoon alleen als er een sensor bij is die de afgelopen drie dagen niet in een
+        # melding stond (`STIL_OPNIEUW`, v0.248.0); anders alleen in de geschiedenis.
+        bellen = any(
+            entity_id not in self._sensor_gebeld or _tussen(self._sensor_gebeld[entity_id], now) >= STIL_OPNIEUW
+            for entity_id, _n, _s, _g in bundel
+        )
+        if bellen:
+            for entity_id, _n, _s, _g in bundel:
+                self._sensor_gebeld[entity_id] = now
+            self._meldingen_onthouden()
         # Dan ook geen waarschuwing in het log (v0.190.0): wie het log bewaakt, krijgt er anders
-        # alsnog een alarm op.
-        log = _LOGGER.warning if kritiek else _LOGGER.info
+        # alsnog een alarm op. Een hapering die alleen in de geschiedenis komt ook niet (v0.248.0).
+        log = _LOGGER.warning if kritiek and bellen else _LOGGER.info
         for entity_id, _naam, sinds, _grens in bundel:
             self._sensor_gemeld.add(entity_id)
             # De entiteit-id staat in het log en niet in de melding. De eigenaar op
@@ -3740,14 +3780,18 @@ class ChargerCoach:
                 zolang = t("Zolang weet de coach niet of hij te warm wordt.")
             if entity_id in meelezen:
                 zolang = ""
-            tekst = t(
+            tekst = (t(
+                "{naam} meldt al {dagen} dagen niets. Waarschijnlijk hapert de integratie erachter. {zolang}",
+                naam=namen[0], dagen=dagen, zolang=zolang,
+            ) if dagen >= 2 else t(
                 "{naam} meldt al {minuten} minuten niets. Waarschijnlijk hapert de integratie erachter. {zolang}",
                 naam=namen[0], minuten=minuten, zolang=zolang,
-            ).strip()
+            )).strip()
         else:
+            samen = t("{voor} en {laatste}", voor=", ".join(namen[:-1]), laatste=namen[-1])
             delen = [
-                t("{namen} melden al {minuten} minuten niets.",
-                  namen=t("{voor} en {laatste}", voor=", ".join(namen[:-1]), laatste=namen[-1]), minuten=minuten),
+                t("{namen} melden al {dagen} dagen niets.", namen=samen, dagen=dagen) if dagen >= 2
+                else t("{namen} melden al {minuten} minuten niets.", namen=samen, minuten=minuten),
                 t("Waarschijnlijk is het internet thuis weg.") if len(entries) >= 2
                 else t("Waarschijnlijk hapert de integratie erachter."),
             ]
@@ -3759,7 +3803,7 @@ class ChargerCoach:
                    for e in ids):
                 delen.append(t("De coach rekent zolang zonder."))
             tekst = " ".join(delen)
-        await self._async_tell(tekst, kritiek=kritiek)
+        await self._async_tell(tekst, kritiek=kritiek, telefoon=bellen)
 
     @staticmethod
     def _alleen_uitlezen(settings: dict[str, Any]) -> list[dict[str, Any]]:
@@ -18186,6 +18230,16 @@ class ChargerCoach:
         for row in settings.get("sensor_quiet") or []:
             if isinstance(row, dict) and row.get("entity"):
                 self._sensor_gemeld.add(str(row["entity"]))
+                # Gemeld voor v0.248.0: de tweede melding telt vanaf toen het bewaard werd. Dat moment
+                # schreef de coach in zijn eigen klok, zonder tijdzone.
+                try:
+                    gemeld_op = datetime.fromisoformat(str(row.get("at") or ""))
+                except ValueError:
+                    gemeld_op = None
+                if gemeld_op is not None:
+                    if gemeld_op.tzinfo is not None:
+                        gemeld_op = _moment(gemeld_op)
+                    self._sensor_gebeld.setdefault(str(row["entity"]), gemeld_op)
         self._sensor_gemeld_bewaard = set(self._sensor_gemeld)
 
         grens = dt_util.utcnow() - SESSION_MEMORY
@@ -18502,6 +18556,7 @@ class ChargerCoach:
             "stekker_terug": {k: _naar_geheugen(v) for k, v in sorted(self._stekker_terug.items())},
             "stekker_dicht": _naar_geheugen(self._stekker_dicht),
             "sensor_ooit": sorted(self._sensor_ooit),
+            "sensor_gebeld": {k: _naar_geheugen(v) for k, v in sorted(self._sensor_gebeld.items())},
             "soc_gevraagd": sorted(self._soc_asked),
             "getipt": dict(sorted(self._getipt.items())),
             "gewaarschuwd": {k: _naar_geheugen(v) for k, v in sorted(self._warned.items())},
@@ -18547,6 +18602,7 @@ class ChargerCoach:
         if self._stekker_dicht is None and data.get("stekker_dicht"):
             self._stekker_dicht = _uit_geheugen(data["stekker_dicht"])
         self._sensor_ooit |= {str(k) for k in lijst("sensor_ooit")}
+        self._sensor_gebeld.update(momenten("sensor_gebeld"))
         self._soc_asked |= {str(k) for k in lijst("soc_gevraagd")}
         getipt = data.get("getipt")
         if isinstance(getipt, dict):
