@@ -11047,7 +11047,8 @@ controle("hij herkent een SPH: hij vraagt het schema op, op het apparaat van de 
          any(d[1] == "read_ac_charge_times" and d[2] == {"device_id": "ha-growatt-omvormer"} for d in v192), f"{v192}")
 # Aan het eind van vazio (v0.152.0): ruim 11 kWh op hooguit de helft van 7,8 kW is drie uur.
 # Om 21:30 kent hij de vloer nog niet (0%) en houdt hij wat er na 22:00 in zit vast tot 08:00
-# (v0.155.0); een minuut later ziet hij de vloer op 16% en is er niets meer vast te houden.
+# (v0.155.0); een minuut later kent hij de vloer op 16% en is er niets meer vast te houden. Sinds v0.249.0
+# pas als hij een half uur stil op 16% staat (`GROWATT_VLOER_DUUR`): dat half uur zet de proef hieronder terug.
 controle("zonder het vinkje rekent hij wel: een vak in vazio tot 08:00",
          (st192.get("schedule") or {}).get("grid") is True
          and st192["schedule"]["periods"][-1][1] == "08:00", f"{st192.get('schedule')}")
@@ -11057,8 +11058,12 @@ schaduw192 = [d.get("message") for soort, d in hass192.bus.gebeurtenissen
 print(f"  {schaduw192}")
 controle("en zegt in de geschiedenis wat hij zou schrijven, met de vakken",
          len(schaduw192) == 1 and "-08:00" in schaduw192[0], f"{schaduw192}")
+coach192._batterij["dev-growatt"]["growatt_vloer_kandidaat"]["sinds"] -= coachmod.GROWATT_VLOER_DUUR
 st192, v192 = asyncio.run(ronde192(NU192 + dt.timedelta(minutes=1)))
 controle("een minuut later vraagt hij het schema niet opnieuw op", v192 == [], f"{v192}")
+controle("en na een half uur stil op 16% is dat zijn vloer", inst192_rij.get("growatt_vloer") == 16
+         or any(r.get("growatt_vloer") == 16 for r in store192.instellingen["battery_state"]),
+         f"{store192.instellingen['battery_state']}")
 
 # Het vinkje aan: nu schrijft hij.
 GROWATT192["controllable"] = True
@@ -20028,6 +20033,126 @@ print(f"  gemeld voor de uitgave: {gebeld283b}")
 controle("al gemeld voor deze versie: geen nieuwe na de herstart, en de tweede drie dagen na het moment in de opslag",
          [m for m, _b in gebeld283b] == ["29-11 18:55"] and "3 dagen" in gebeld283b[0][1], f"{gebeld283b}")
 controle("de bron noemt de drie dagen", "STIL_OPNIEUW = timedelta(days=3)" in (BRONMAP / "coach.py").read_text())
+
+print("=== 284. de vloer van een Growatt volgt wat hij doet, ook omhoog, na een half uur (v0.249.0) ===")
+# De klantwoning op 26-11-2026: de coach had als vloer 0% bewaard, en de Growatt stopte met ontladen op 21%. De vloer
+# leerde alleen omlaag, en meteen: een losse 0 van de Growatt werd de vloer, en een hogere leerde hij nooit. Het plan
+# liet de accu die avond leeglopen tot 7%, en in het echt kwam het huis vanaf 21% van het net.
+T284 = dt.datetime(2026, 11, 25, 21, 10)
+GROWATT284 = {**GROWATT192, "entities": dict(GROWATT192["entities"])}
+rij284 = {"device": "dev-growatt", "growatt_uit_w": 6640, "growatt_vloer": 0}
+inst284 = instellingen(devices=[GROWATT284], battery_state=[rij284])
+hass284, store284, coach284 = bouw({**waarden192, "sensor.afname": "3903"}, inst284)
+bewaard284: list[dict] = []
+
+
+async def _bewaren284(settings, device_id, nieuw):
+    bewaard284.append(dict(nieuw))
+    rij284.update(nieuw)
+
+
+coach284._async_batterij_bewaren = _bewaren284
+
+
+def leer284(sessie, minuten, soc, net=3903.0, laden_kw=0.0, schema=None):
+    """Een ronde van het leren op T284 + minuten; geeft de vloer die er dan staat."""
+    hass284.states.zet("sensor.afname", str(net))
+    hass284.states.zet("sensor.growatt_ontladen", {"state": str(laden_kw), "attributes": {"unit_of_measurement": "kW"}})
+    hass284.states.zet("sensor.growatt_soc", {"state": str(soc), "attributes": {"unit_of_measurement": "%"}})
+    if schema is not None:
+        sessie["growatt_geschreven"] = schema
+    asyncio.run(coach284._async_growatt_leren(T284 + dt.timedelta(minutes=minuten), inst284, GROWATT284,
+                                              coachmod.Batterij(soc=soc), sessie, rij284))
+    return rij284.get("growatt_vloer")
+
+
+# 1. Een half uur stil op 21%, het huis op het net: de vloer gaat van 0 naar 21.
+s284 = {}
+na29 = [leer284(s284, m, 21.0 if m % 10 else 20.6) for m in range(0, 30)]
+na30 = leer284(s284, 30, 21.0)
+print(f"  na 29 minuten {na29[-1]}, na 30 {na30}; bewaard {bewaard284}")
+controle("een half uur stil op 21% met het huis op het net: de vloer gaat van 0 naar 21, niet eerder",
+         set(na29) == {0} and na30 == 21 and bewaard284 == [{"growatt_vloer": 21}], f"{na29} {na30} {bewaard284}")
+for m in range(31, 90):
+    leer284(s284, m, 21.0)
+controle("en daarna niet elke ronde opnieuw", len(bewaard284) == 1, f"{bewaard284}")
+
+# 1b. Met 30 W eruit op de vloer, zoals op 25-11-2026 om 21:40: ook stil.
+rij284["growatt_vloer"] = 0
+s284 = {}
+for m in range(0, 31):
+    leer284(s284, m, 21.0, laden_kw=0.03 if m % 2 else 0.0)
+controle("30 W eruit op de vloer is ook stil: na een half uur 21", rij284["growatt_vloer"] == 21, f"{rij284}")
+# 1c. Een half uur dat onderbroken wordt telt niet: twintig minuten stil, tien minuten levert hij, en weer stil.
+rij284["growatt_vloer"] = 0
+s284 = {}
+for m in range(0, 20):
+    leer284(s284, m, 21.0)
+for m in range(20, 30):
+    leer284(s284, m, 21.0, laden_kw=1.2)
+onderbroken284 = [leer284(s284, m, 21.0) for m in range(30, 59)]
+na284c = leer284(s284, 60, 21.0)
+controle("onderbroken: pas een half uur na het tweede stil, niet na het eerste",
+         set(onderbroken284) == {0} and na284c == 21, f"{onderbroken284} {na284c}")
+bewaard284.clear()
+rij284["growatt_vloer"] = 21
+
+# 2. Een losse 0 van de Growatt: geen vloer, ook niet omlaag.
+for m in range(90, 95):
+    leer284(s284, m, 0.0)
+for m in range(95, 140):
+    leer284(s284, m, 45.0 if m < 100 else 21.0)
+controle("een losse 0 van vijf minuten: de vloer blijft 21", rij284["growatt_vloer"] == 21 and bewaard284 == [],
+         f"{rij284} {bewaard284}")
+
+# 3. In een vak van het net, of met een volle accu, of terwijl hij levert: niets.
+rij284["growatt_vloer"] = 0
+bewaard284.clear()
+vak284 = coachmod.GrowattSchema(net=True, houden=True, vakken=[("21:00", "23:59")], stop_soc=40, vermogen_pct=0)
+s284 = {}
+for m in range(0, 60):
+    leer284(s284, m, 40.0, schema=vak284)
+s284 = {}
+for m in range(0, 60):
+    leer284(s284, m, 80.0)
+s284 = {}
+for m in range(0, 60):
+    leer284(s284, m, 35.0, laden_kw=1.2)
+s284 = {}
+for m in range(0, 60):
+    leer284(s284, m, 35.0, net=80.0)
+controle("vasthouden in een vak, een volle accu, een accu die levert of een huis zonder net: geen vloer",
+         bewaard284 == [] and rij284["growatt_vloer"] == 0, f"{bewaard284}")
+
+# 4. Omlaag ook pas na een half uur, en een herstart halverwege begint het half uur opnieuw.
+rij284["growatt_vloer"] = 21
+s284 = {}
+for m in range(0, 20):
+    leer284(s284, m, 15.0)
+s284 = {}  # herstart: de sessie is leeg, de vloer staat in de opslag
+tussen284 = [leer284(s284, m, 15.0) for m in range(20, 50)]
+na284 = leer284(s284, 50, 15.0)
+controle("omlaag ook pas na een half uur, en na een herstart halverwege een nieuw half uur",
+         set(tussen284) == {21} and na284 == 15, f"{tussen284} {na284}")
+
+# 5. Met de goede vloer zegt de coach niet dat de accu niets levert.
+b284 = types.SimpleNamespace(soc=21.0, soc_min=0.0, reserve=None)
+venster284 = {"levert_venster": [(T284 + dt.timedelta(minutes=m), 0.0, 3903.0) for m in range(30)]}
+eind284 = T284 + dt.timedelta(minutes=30)
+nul284 = types.SimpleNamespace(stand=coachmod.NUL)
+oud284 = coach284._levert_niet(eind284, inst284, dict(venster284), nul284, b284, 0.0, 3903.0, False)
+b284.soc_min = 21.0
+goed284 = coach284._levert_niet(eind284, inst284, dict(venster284), nul284, b284, 0.0, 3903.0, False)
+controle("op 21%: met vloer 0 was het 'levert niets', met de geleerde vloer 21 niet", oud284 and not goed284,
+         f"{oud284} {goed284}")
+# En in het half uur dat hij de vloer leert: niet zeggen dat hij niets levert (de klantwoning, 26-11-2026 19:57 UTC).
+b284.soc_min = 0.0
+leert284 = coach284._levert_niet(eind284, inst284, {**venster284, "growatt_vloer_kandidaat": {"soc": 21.0, "sinds": T284}},
+                                 nul284, b284, 0.0, 3903.0, False)
+ander284 = coach284._levert_niet(eind284, inst284, {**venster284, "growatt_vloer_kandidaat": {"soc": 35.0, "sinds": T284}},
+                                 nul284, b284, 0.0, 3903.0, False)
+controle("zolang de stand de vloer aan het worden is: geen 'levert niets', op een andere stand wel",
+         not leert284 and ander284, f"{leert284} {ander284}")
 
 print("=== 281. Coach Assist laat zien dat hij bezig is: de puntjes (v0.243.0) ===")
 # De eigenaar op 25-11-2026: "Laat ook zien dat een bericht in behandeling is met 3 puntjes die bewegen". Op de opslag
