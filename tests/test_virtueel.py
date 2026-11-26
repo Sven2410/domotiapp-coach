@@ -2229,6 +2229,32 @@ controle("een batterij die opneemt krijgt nooit 'neemt niets op'",
          not [n for n, vl in V.items() if n != "growatt-neemt-niets"
               and any("neemt niets op" in (g.get("message") or "") for g in vl.geschiedenis)],
          f"{[n for n, vl in V.items() if n != 'growatt-neemt-niets' and any('neemt niets op' in (g.get('message') or '') for g in vl.geschiedenis)]}")
+if (vl := v("growatt-vloer-omhoog")):
+    # De installateur zet de vloer van 10 naar 20% (v0.249.0). Tot dan bleef de coach op 10 staan.
+    stil_vo = next((nu for nu, _n, w, soc, _s in vl.bat_verloop if soc <= 20.05 and abs(w) < 1.0), None)
+    print(f"  growatt-vloer-omhoog: stil op 20% vanaf {stil_vo}, vloer {vl.bat_stand.get('growatt_vloer')}")
+    controle("growatt-vloer-omhoog: hij stopt op 20%, en de coach leert 20",
+             stil_vo is not None and vl.bat_stand.get("growatt_vloer") == 20, f"{stil_vo} {vl.bat_stand}")
+    controle("growatt-vloer-omhoog: zonder melding dat hij niets levert",
+             not [m for _t, m in vl.meldingen if "levert niets" in m], f"{vl.meldingen}")
+if (vl := v("growatt-vloer-van-nul")):
+    stil_vn = next((nu for nu, _n, w, soc, _s in vl.bat_verloop if soc <= 21.05 and abs(w) < 1.0), None)
+    niets_vn = [(t, m) for t, m in vl.meldingen if "levert niets" in m]
+    print(f"  growatt-vloer-van-nul: stil op 21% vanaf {stil_vn}, vloer {vl.bat_stand.get('growatt_vloer')}, {niets_vn}")
+    controle("growatt-vloer-van-nul: van vloer 0 naar 21, en op die eerste avond geen melding dat hij niets levert",
+             stil_vn is not None and vl.bat_stand.get("growatt_vloer") == 21 and not niets_vn, f"{stil_vn} {niets_vn}")
+# Geen Growatt leert een vloer die hij niet heeft (v0.249.0): een losse waarde of een vak telt niet.
+scheef_vo = []
+for sc_vo in gekozen:
+    vl_vo = V.get(sc_vo.naam)
+    if vl_vo is None or sc_vo.batterij is None or not sc_vo.batterij.growatt:
+        continue
+    vloer_vo = vl_vo.bat_stand.get("growatt_vloer")
+    eind_vo = 20.0 if sc_vo.naam == "growatt-vloer-omhoog" else sc_vo.batterij.soc_min
+    if vloer_vo is not None and vloer_vo != (sc_vo.batterij_stand or {}).get("growatt_vloer") \
+            and abs(float(vloer_vo) - eind_vo) > 1.0:
+        scheef_vo.append((sc_vo.naam, vloer_vo, eind_vo))
+controle("een Growatt leert alleen de vloer die hij heeft", not scheef_vo, f"{scheef_vo}")
 if (vl := v("batterij-volgt-even-niet")):
     controle("batterij-volgt-even-niet: twee minuten is geen storing",
              not any("volgt de coach" in (g.get("message") or "") for g in vl.geschiedenis), "")

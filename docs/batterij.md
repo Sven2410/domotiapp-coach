@@ -1676,7 +1676,7 @@ net als bij het rendement):
   zolang hij dat nog niet zag het hoogste uur uit de statistiek van Home Assistant (v0.161.0);
 * zijn vloer: de accustand waarop hij stil staat terwijl het huis van het net haalt, buiten een vak
   (`growatt_vloer`). Die staat in geen entiteit; in de klantwoning 15%, terwijl het ontlaadschema 10
-  zei.
+  zei. Sinds v0.249.0 pas na een half uur op dezelfde stand, en dan ook omhoog (zie hieronder).
 
 Het kasboek ("Opgeleverd") boekt hij eens per ronde met de sensor van de batterij (`_kasboek`, sinds
 v0.150.0 uit de regelaar gehaald). Vol laden, leegladen en de vakantiestand op de kaart blijven bij een
@@ -2543,7 +2543,8 @@ Nu:
   (`_async_opgave_anders`): bij een Growatt de stukken, de nachten en de telling van die dag (`telt_niet`: die dag
   gaat niet in `growatt_nachten`), en bij elke batterij de stappen van het rendement (`rte_steps`), want die rekenen
   met de inhoud. Tot er weer genoeg is, geldt de opgave. In de geschiedenis staat één regel. De vloer en het hoogste
-  vermogen blijven: die horen bij de omvormer, en een grotere accu levert niet minder.
+  vermogen blijven: die horen bij de omvormer, en een grotere accu levert niet minder. Zet de installateur de vloer
+  anders, dan volgt de coach dat sinds v0.249.0 vanzelf na een half uur.
 - **Van voor deze versie** staat er geen opgave bij. Een Growatt met stukken leert dan één keer opnieuw, want bij welke
   accu ze horen weet de coach niet; een andere batterij houdt haar rendement en krijgt de opgave erbij.
 - **Een stuk dat niet kan telt niet** (`growatt_stuk_kan`): buiten 50 tot 130% van de opgave per procent
@@ -2802,3 +2803,44 @@ Proef 66 in test_batterij.py, en in het virtuele huis `batterij-volle-beurt-zond
 vast, een batterij die zelf nul doet: om 23:26 vol, niets van het net in de avondpiek), dezelfde met een herstart om
 15:00 (om 23:56 vol), de zaterdag ervoor (niets van het net) en `batterij-volle-beurt-te-traag` (500 W: om 00:00 één
 melding, na de herstart om 12:00 niet nog eens). Niet in het echt beproefd.
+
+## De vloer van een Growatt volgt wat hij doet, ook omhoog (v0.249.0)
+
+De vloer van een Growatt staat in geen entiteit. De coach leert hem: de accu staat stil (minder dan `GROWATT_STIL_W`),
+het huis haalt van het net (meer dan `GROWATT_VLOER_NET_W`), de stand is onder de 50%, en het is buiten een vak van
+het net. Tot deze versie werd dat meteen de vloer, en alleen als hij lager was dan de vorige.
+
+In een klantwoning ging dat op twee manieren mis. De Growatt geeft soms één keer een losse 0 en daarna weer de echte
+stand; op 15-11-2026 om 00:44 werd die 0 de vloer. En de installateur had in november aan de Growatt gewerkt, en
+daarna stopte hij op 21%. Een hogere vloer leerde de coach nooit. Op 25 en 26-11-2026:
+
+- het plan liet de accu 's avonds leeglopen tot 7%, maar in het echt stond hij om 21:10 op 21% stil, en kwam het huis
+  tot 22:00 van het net op het dure tarief;
+- het vasthouden voor de nacht zei "op 9%", en het werd 21%;
+- de waarde van wat er in de accu zit, en dus de keuze om 's nachts van het net te laden, rekende met ongeveer 3 kWh
+  die er niet uit kwam;
+- en `_levert_niet` zag 21% als 21 punten boven de vloer, en dus een accu die niets levert terwijl hij kan.
+
+Nu wordt een stand de vloer als hij een half uur (`GROWATT_VLOER_DUUR`) binnen een procent (`GROWATT_VLOER_MARGE`)
+blijft, met al die tijd de voorwaarden van hierboven. Dat geldt omhoog en omlaag. Een losse 0 duurt geen half uur, en
+de waarde erna (boven 50%, of meer dan een procent anders) begint opnieuw. Het half uur staat in de sessie: na een
+herstart begint het opnieuw, en de vloer zelf staat al in de opslag (`battery_state`). Het systeemlog krijgt een
+regel (info) als de vloer verandert.
+
+Stil is voor de vloer minder dan 100 W eruit (`GROWATT_VLOER_STIL_W`), dezelfde grens als `_levert_niet`. Op zijn
+vloer gaf de Growatt in de klantwoning 0 tot 30 W; met de oude grens van 30 W begon het leren dan steeds opnieuw. Een
+vak van het net, ook vasthouden, telt niet: dan staat hij stil omdat de coach dat schreef.
+
+**Eerst de vloer, dan pas "levert niets".** Op 26-11-2026 om 19:57 UTC kreeg de bewoner de kritieke melding dat de
+batterij niets levert terwijl het huis van het net haalt: op 21%, met een vloer van 0, sinds 19:16 stil. Het leren van
+de vloer en `_levert_niet` kijken allebei een half uur. Zolang de accu stil staat op een stand die de vloer aan het
+worden is (`growatt_vloer_kandidaat` in de sessie, binnen `GROWATT_VLOER_MARGE`), zegt `_levert_niet` niets. Is de
+vloer geleerd, dan zit de accu niet meer `LEVERT_NIET_BOVEN` erboven. De keerzijde: een Growatt die onder de 50% echt
+stopt door een storing, wordt na een half uur zijn vloer, en dan komt die melding niet. Boven de 50%, zoals op
+05-11-2026 op 95%, blijft hij zoals hij was.
+
+Proeven: 284 in test_coach.py (van 0 naar 21 na een half uur, ook met 30 W eruit, een half uur dat onderbroken wordt, een losse 0, een vak, een volle
+accu, een accu die levert, omlaag, een herstart halverwege, en `_levert_niet` op 21% en terwijl hij de vloer leert),
+192 (die nu het half uur laat lopen), en in het virtuele huis `growatt-vloer-omhoog` (de coach kent 10%, de
+installateur zet 20%) en `growatt-vloer-van-nul` (de coach kent 0%, hij stopt op 21%: geen melding).
+

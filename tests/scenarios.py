@@ -1870,6 +1870,25 @@ growatt_levert = growatt_levert_niets.kopie(
     uitleg="hetzelfde, met een Growatt die gewoon levert: geen melding",
     batterij=Batterij(**{**GROWATT_SPH, "soc": 95.0}),
 )
+# De installateur zet de vloer van een Growatt hoger (v0.249.0). In een klantwoning had de coach op 26-11-2026 als vloer 0%
+# bewaard, en stopte de Growatt op 21%: de vloer leerde alleen omlaag. Nu volgt hij na een half uur stil, ook omhoog.
+growatt_vloer_omhoog = growatt_bihorario.kopie(
+    naam="growatt-vloer-omhoog",
+    uitleg="dezelfde Growatt, de coach kent zijn vloer op 10%, en om 12:30 zet de installateur hem op 20%",
+    batterij=Batterij(**{**GROWATT_SPH, "soc": 45.0, "soc_min": 10.0}), begin="2026-10-22 12:00", duur_uren=12,
+    huis=Huis(extra=[("17:00", "21:00", 1500.0)]),
+    batterij_stand={"growatt_in_w": 3200, "growatt_uit_w": 6000, "growatt_vloer": 10},
+    gebeurtenissen=[("12:30", "batterij_vloer", 20)],
+)
+# Zoals in de klantwoning op 26-11-2026: de coach kent 0% als vloer, de Growatt stopt op 21%, en het huis haalt ruim
+# 1 kW van het net. Om 19:57 UTC kwam daar de kritieke melding dat hij niets levert. Eerst de vloer, dan pas melden.
+growatt_vloer_van_nul = growatt_vloer_omhoog.kopie(
+    naam="growatt-vloer-van-nul",
+    uitleg="dezelfde Growatt, de coach kent zijn vloer op 0%, en hij stopt op 21%: geen melding dat hij niets levert",
+    batterij=Batterij(**{**GROWATT_SPH, "soc": 45.0, "soc_min": 21.0}),
+    batterij_stand={"growatt_in_w": 3200, "growatt_uit_w": 6000, "growatt_vloer": 0},
+    gebeurtenissen=[],
+)
 # Een Growatt die niets opneemt (v0.228.0), zoals in een klantwoning in de nacht van 16 op 17-11-2026: het netlaadvak
 # liep, de accu stond op 0%, en er ging niets in. De melding kwam daar nooit, want een ronde van Home Assistant duurt
 # net iets langer dan een minuut, en het venster raakte zo nooit vol (v0.235.0).
@@ -2253,7 +2272,7 @@ ALLE = [
     growatt_zon_onzeker_zonder, growatt_zon_onzeker, growatt_zon_te_hoog,
     growatt_ochtend, growatt_ochtend_zonder_grens, growatt_herstart, growatt_weigert, growatt_terug_100,
     batterij_volgt_niet, batterij_volgt_niet_zelf, batterij_volgt_even_niet,
-    growatt_levert_niets, growatt_levert, growatt_neemt_niets,
+    growatt_levert_niets, growatt_levert, growatt_neemt_niets, growatt_vloer_omhoog, growatt_vloer_van_nul,
     anker_ochtend, anker_ochtend_zonder, anker_ochtend_helder,
 ]
 

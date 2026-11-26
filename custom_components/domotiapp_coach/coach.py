@@ -585,6 +585,15 @@ GROWATT_ZON_W = 50.0
 # dan van het net haalt.
 GROWATT_STIL_W = 30.0
 GROWATT_VLOER_NET_W = 150.0
+# Hoe lang hij zo op dezelfde stand (binnen `GROWATT_VLOER_MARGE` procent) moet staan voordat dat zijn vloer is, omhoog
+# en omlaag (v0.249.0). Tot dan leerde hij alleen omlaag, en meteen: een losse 0 van de Growatt werd de vloer, en een
+# vloer die de installateur hoger zette leerde hij nooit. In de klantwoning stond hij op 0 en stopte de Growatt op 21%.
+GROWATT_VLOER_DUUR = timedelta(minutes=30)
+GROWATT_VLOER_MARGE = 1.0
+# Stil is voor de vloer minder dan 100 W eruit, dezelfde grens als `LEVERT_NIET_W`. Op zijn vloer gaf de Growatt in de
+# klantwoning 0 tot 30 W; met `GROWATT_STIL_W` begon het leren dan steeds opnieuw, en zei `_levert_niet` intussen
+# dat hij niets leverde.
+GROWATT_VLOER_STIL_W = 100.0
 # Hoeveel dagen hij in de statistiek terugkijkt naar wat een Growatt eruit gaf, zolang hij
 # dat zelf nog niet zag (v0.161.0); zie `_async_hoogste_ontladen`.
 GROWATT_TERUGKIJK_DAGEN = 30
@@ -9833,8 +9842,14 @@ class ChargerCoach:
         herstart (`_batterij_onthouden`).
         """
         vloer = max(b.soc_min or 0.0, b.reserve or 0.0)
+        # Een Growatt die stil staat op een stand die zijn vloer aan het worden is (v0.249.0,
+        # `GROWATT_VLOER_DUUR`): eerst de vloer leren, dan pas zeggen dat hij niets levert. In de
+        # klantwoning op 26-11-2026 om 19:57 UTC kwam deze melding op 21% met een vloer van 0.
+        kandidaat = sessie.get("growatt_vloer_kandidaat")
+        wordt_vloer = (kandidaat is not None and b.soc is not None
+                       and abs(b.soc - kandidaat["soc"]) <= GROWATT_VLOER_MARGE)
         if (
-            net_w is None or b.soc is None or in_vak or besluit.stand not in (NUL, ONTLADEN, HANDELEN)
+            wordt_vloer or net_w is None or b.soc is None or in_vak or besluit.stand not in (NUL, ONTLADEN, HANDELEN)
             or b.soc < vloer + LEVERT_NIET_BOVEN or (self._paal_laadt(settings) and not sessie.get("helpt"))
         ):
             sessie.pop("levert_venster", None)
@@ -11193,15 +11208,24 @@ class ChargerCoach:
             if hoogste is not None and hoogste > 50.0:
                 nieuw["growatt_uit_w"] = round(hoogste)
         # De vloer: stil, en toch haalt het huis van het net. Buiten een vak van het net,
-        # want daar staat hij ook stil als hij vol is.
+        # want daar staat hij ook stil als hij vol is. Sinds v0.249.0 pas na `GROWATT_VLOER_DUUR` op
+        # dezelfde stand, en dan ook omhoog. Het half uur staat in de sessie: na een herstart begint
+        # het opnieuw, en de vloer zelf staat al in de opslag.
         net_w, _ = self._net_nu(settings)
+        kandidaat = sessie.get("growatt_vloer_kandidaat")
         if (
-            soc is not None and laden_w is not None and abs(laden_w) < GROWATT_STIL_W and net_w is not None
+            soc is not None and laden_w is not None and abs(laden_w) < GROWATT_VLOER_STIL_W and net_w is not None
             and net_w > GROWATT_VLOER_NET_W and soc < 50.0
             and not (geschreven is not None and geschreven.net and self._growatt_in_vak(geschreven, now))
-            and (rij.get("growatt_vloer") is None or soc < float(rij["growatt_vloer"]) - 0.5)
         ):
-            nieuw["growatt_vloer"] = round(soc)
+            if kandidaat is None or abs(soc - kandidaat["soc"]) > GROWATT_VLOER_MARGE:
+                sessie["growatt_vloer_kandidaat"] = {"soc": soc, "sinds": now}
+            elif (_tussen(kandidaat["sinds"], now) >= GROWATT_VLOER_DUUR
+                  and (rij.get("growatt_vloer") is None or round(soc) != round(float(rij["growatt_vloer"])))):
+                _LOGGER.info("%s: de vloer is nu %d%% (was %s)", device_id, round(soc), rij.get("growatt_vloer"))
+                nieuw["growatt_vloer"] = round(soc)
+        else:
+            sessie["growatt_vloer_kandidaat"] = None
         # Zonder panelen is er geen zon, en dat is iets anders dan een omvormer die zwijgt.
         zon = self._zon_w(settings) if zonsensoren(settings) else 0.0
         staat = self.hass.states.get(entities.get("charge_power")) if entities.get("charge_power") else None

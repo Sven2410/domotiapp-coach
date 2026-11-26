@@ -2615,6 +2615,11 @@ class Wereld:
             # Een klare auto: de Equalizer zet de paal even op 0 A, en de Easee springt naar awaiting_start.
             self.paal.wacht_na_klaar = True
             return "de Equalizer zet de paal even op 0 A; de paal zegt nu awaiting_start"
+        if actie == "batterij_vloer":
+            # De installateur zet de vloer van de batterij anders (v0.249.0): in een Growatt staat die in geen entiteit.
+            oud = self.batterij.soc_min
+            self.batterij.soc_min = float(arg)
+            return f"de installateur zet de vloer van de batterij van {oud:.0f} naar {float(arg):.0f}%"
         if actie == "growatt_vreemd":
             # Iemand zet een eigen vak in de Growatt, uit de app (v0.215.0): 01:00-07:00 tot 100%, laden van het net aan.
             bat = self.batterij
