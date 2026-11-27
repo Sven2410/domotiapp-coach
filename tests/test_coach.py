@@ -20154,6 +20154,135 @@ ander284 = coach284._levert_niet(eind284, inst284, {**venster284, "growatt_vloer
 controle("zolang de stand de vloer aan het worden is: geen 'levert niets', op een andere stand wel",
          not leert284 and ander284, f"{leert284} {ander284}")
 
+print("=== 285. een vaatwasser die even weg is: de sensorwacht alleen in de geschiedenis, en één melding als het krap wordt (v0.250.0) ===")
+# Een klantwoning, 16 tot 26-11-2026: elf keer kritiek "de status meldt al 10 minuten niets" over een vaatwasser met slechte
+# wifi, terwijl de coach dat sinds v0.242.0 zelf opvangt. Zie docs/vaatwasser.md.
+T285 = dt.datetime(2026, 9, 7, 18, 30)
+inst285 = _copy267.deepcopy(inst56)
+inst285["ready_devices"] = []
+hass285, _, coach285 = bouw(_copy267.deepcopy(huis56), inst285)
+asyncio.run(coach285._async_geheugen_laden())
+log285 = Log230()
+telefoon285: list[tuple[str, str]] = []
+
+
+def wacht285(coach, minuten):
+    hass285.services.verstuurd.clear()
+    asyncio.run(coach._async_sensorwacht(inst285, T285 + dt.timedelta(minutes=minuten)))
+    telefoon285.extend((f"{T285 + dt.timedelta(minutes=minuten):%H:%M}", d[2]["message"])
+                       for d in hass285.services.verstuurd if d[0] == "notify")
+
+
+def geschiedenis285():
+    return [(g["kind"], g["message"]) for g in asyncio.run(coachmod.async_get_meldingen(hass285).async_list())]
+
+
+opgevangen285 = coachmod.ChargerCoach._sensoren_opgevangen(inst285)
+controle("de status, het programma, de deur, de startknop en het vermogen van een vaatwasser met een startknop vangt hij zelf op",
+         {"sensor.vaatwasser_status", "select.vaatwasser_programma", "binary_sensor.vaatwasser_deur",
+          "button.vaatwasser_start", "sensor.vaatwasser_vermogen"} <= opgevangen285
+         and "sensor.prijs" not in opgevangen285, f"{opgevangen285}")
+handmatig285 = _copy267.deepcopy(inst56)
+handmatig285["devices"][1]["entities"] = {**VAATWASSER["entities"], "start": ""}
+controle("zonder startknop niet: dan zegt het vermogen of hij draait",
+         not coachmod.ChargerCoach._sensoren_opgevangen(handmatig285), "")
+coachmod._LOGGER.addHandler(log285)
+coachmod._LOGGER.setLevel(coachmod.logging.INFO)
+coachmod.logging.disable(coachmod.logging.NOTSET)
+try:
+    wacht285(coach285, 0)
+    hass285.states.zet("sensor.vaatwasser_status", "unavailable")
+    hass285.states.zet("sensor.vaatwasser_vermogen", "unavailable")
+    for m in range(1, 17):
+        wacht285(coach285, m)
+    stil285 = [(k, m) for k, m in geschiedenis285() if "al 10 minuten niets" in m]
+    controle("niet vrijgegeven, een kwartier weg: niets op de telefoon", telefoon285 == [], f"{telefoon285}")
+    controle("wel een gewone regel in de geschiedenis, zonder 'de coach rekent zolang zonder'",
+             len(stil285) == 1 and stil285[0][0] == "melding" and "Vaatwasser" in stil285[0][1]
+             and "rekent zolang" not in stil285[0][1], f"{stil285}")
+    controle("en geen waarschuwing in het log", not [r for r in log285.rijen if r[0] == "WARNING" and "vaatwasser" in r[1]],
+             f"{log285.rijen}")
+    hass285.states.zet("sensor.vaatwasser_status", "ready")
+    hass285.states.zet("sensor.vaatwasser_vermogen", "0")
+    wacht285(coach285, 17)
+    controle("en terug: ook alleen in de geschiedenis", telefoon285 == []
+             and [m for k, m in geschiedenis285() if "het weer" in m] != [], f"{telefoon285}")
+    # De prijs heeft de coach wel nodig, ook als hij samen met de vaatwasser wegvalt.
+    hass285.states.zet("sensor.prijs", "unavailable")
+    hass285.states.zet("sensor.vaatwasser_status", "unavailable")
+    for m in range(20, 36):
+        wacht285(coach285, m)
+    controle("de prijs en de vaatwasser samen weg: kritiek op de telefoon",
+             len(telefoon285) == 1 and [k for k, m in geschiedenis285() if "niets" in m and "prijs" in m][:1] == ["kritiek"]
+             and [r for r in log285.rijen if r[0] == "WARNING" and "sensor.prijs" in r[1]] != [],
+             f"{telefoon285} {geschiedenis285()}")
+finally:
+    coachmod._LOGGER.removeHandler(log285)
+
+# Vrijgegeven, en de hele nacht weg: om 05:00, twee uur voor de klaar-tijd van 07:00, één melding. Met een herstart ervoor
+# (sinds wanneer hij weg is, gaat mee) en een erna (geen tweede).
+inst285b = _copy267.deepcopy(inst56)
+hass285b, _, c285 = bouw(_copy267.deepcopy(huis56), inst285b)
+gemeld285: list[tuple[str, str, bool, bool]] = []
+
+
+def tell285(coach):
+    async def tell(bericht, kritiek=False, telefoon=True, **_):
+        gemeld285.append((f"{coach._nu285:%H:%M}", bericht, kritiek, telefoon))
+    coach._async_tell = tell
+    asyncio.run(coach._async_geheugen_laden())
+    return coach
+
+
+def ronde285(coach, nu):
+    coach._nu285 = nu
+    asyncio.run(ronde280(coach, nu))
+
+
+c285._nu285 = T285
+tell285(c285)
+inst285b["ready_devices"] = ["dev-vaatwasser"]
+ronde285(c285, dt.datetime(2026, 9, 7, 19, 0))
+hass285b.states.zet("sensor.vaatwasser_status", "unavailable")
+for minuten in range(30, 150, 5):
+    ronde285(c285, dt.datetime(2026, 9, 8, 0, 0) + dt.timedelta(minutes=minuten))
+c285 = tell285(herstart213(hass285b))
+hass285b.states.zet("sensor.vaatwasser_status", "unknown")
+for minuten in range(150, 330, 5):
+    ronde285(c285, dt.datetime(2026, 9, 8, 0, 0) + dt.timedelta(minutes=minuten))
+c285 = tell285(herstart213(hass285b))
+for minuten in range(330, 420, 5):
+    ronde285(c285, dt.datetime(2026, 9, 8, 0, 0) + dt.timedelta(minutes=minuten))
+weg285 = [g for g in gemeld285 if "niet bereikbaar" in g[1]]
+print(f"  meldingen: {weg285}")
+controle("vrijgegeven en weg tot twee uur voor de klaar-tijd: één melding om 05:00, sinds 00:30, ook over twee herstarts",
+         weg285 == [("05:00", "Vaatwasser is vrijgegeven, maar al sinds 00:30 niet bereikbaar. De coach start hem zodra hij terug is.",
+                     False, True)], f"{weg285}")
+controle("en geen druk op start zolang hij weg is, en de sensorwacht alleen in de geschiedenis", c285._programma["dev-vaatwasser"]["gedrukt"] is None
+         and not [g for g in gemeld285 if g[2] and "Vaatwasser" in g[1]]
+         and [g[1:] for g in gemeld285 if "al 10 minuten niets" in g[1]] == [
+             ("De status van Vaatwasser meldt al 10 minuten niets. Waarschijnlijk hapert de integratie erachter.", False, False)],
+         f"{gemeld285}")
+# Vlak voor de klaar-tijd acht minuten weg, zoals bij het terugkomen of na een opstart: geen melding.
+inst285c = _copy267.deepcopy(inst56)
+hass285c, _, c285c = bouw(_copy267.deepcopy(huis56), inst285c)
+c285c._nu285 = T285
+tell285(c285c)
+inst285c["ready_devices"] = ["dev-vaatwasser"]
+ronde285(c285c, dt.datetime(2026, 9, 7, 19, 0))
+hass285c.states.zet("sensor.vaatwasser_status", "unavailable")
+for minuten in range(0, 9):
+    ronde285(c285c, dt.datetime(2026, 9, 8, 5, 20) + dt.timedelta(minutes=minuten))
+hass285c.states.zet("sensor.vaatwasser_status", "ready")
+ronde285(c285c, dt.datetime(2026, 9, 8, 5, 29))
+controle("acht minuten weg, twee uur voor de klaar-tijd: geen melding", not [g for g in gemeld285 if g[0] >= "05:20"
+         and "niet bereikbaar" in g[1] and g != weg285[0]] and len([g for g in gemeld285 if "niet bereikbaar" in g[1]]) == 1,
+         f"{gemeld285}")
+bron285 = (BRONMAP / "coach.py").read_text(encoding="utf-8")
+controle("wat de coach zelf opvangt telt als meelezen, en gaat niet naar de telefoon",
+         "uit: set[str] = ChargerCoach._sensoren_opgevangen(settings)" in bron285
+         and "entity_id not in opgevangen and (" in bron285, "")
+
 print("=== 281. Coach Assist laat zien dat hij bezig is: de puntjes (v0.243.0) ===")
 # De eigenaar op 25-11-2026: "Laat ook zien dat een bericht in behandeling is met 3 puntjes die bewegen". Op de opslag
 # van proef 264, na de herstart daar.

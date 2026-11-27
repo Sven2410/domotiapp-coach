@@ -1302,6 +1302,30 @@ for naam in ("vaatwasser-offline-midden", "vaatwasser-offline-midden-herstart"):
         controle(f"{naam}: het verslag komt pas als hij echt klaar is, niet als hij wegvalt",
                  klaar_om and vl.vw_beurten and vl.vw_beurten[0][1] is not None and klaar_om[0] >= vl.vw_beurten[0][1],
                  f"{klaar_om} {vl.vw_beurten}")
+# Wat de coach zelf opvangt, zegt de sensorwacht alleen in de geschiedenis (v0.250.0).
+for naam in ("vaatwasser-offline-bij-start", "vaatwasser-lokaal-offline-bij-start", "vaatwasser-offline-midden",
+             "vaatwasser-offline-midden-herstart", "vaatwasser-offline-nacht", "vaatwasser-offline-nacht-herstart",
+             "vaatwasser-onbekend-midden"):
+    if (vl := v(naam)):
+        kritiek = [r.get("message") for r in vl.geschiedenis if r.get("kind") == "kritiek"]
+        controle(f"{naam}: geen kritieke melding, en niets van de sensorwacht op de telefoon",
+                 not kritiek and not _vw_m(vl, "meldt al") and not _vw_m(vl, "doet het weer"),
+                 f"{kritiek} {[m for _, m in vl.meldingen]}")
+        if naam.startswith("vaatwasser-offline-midden"):
+            controle(f"{naam}: wel een regel in de geschiedenis",
+                     [r for r in vl.geschiedenis if "meldt al 10 minuten niets" in (r.get("message") or "")] != [],
+                     f"{[r.get('message') for r in vl.geschiedenis]}")
+        if "nacht" not in naam:
+            controle(f"{naam}: geen melding 'niet bereikbaar' over een machine die draait of zo terug is",
+                     not _vw_m(vl, "niet bereikbaar"), f"{[m for _, m in vl.meldingen]}")
+for naam in ("vaatwasser-offline-nacht", "vaatwasser-offline-nacht-herstart"):
+    if (vl := v(naam)):
+        weg = [(t, m) for t, m in vl.meldingen if "niet bereikbaar" in m]
+        controle(f"{naam}: twee uur voor de klaar-tijd één melding dat hij sinds 00:30 niet bereikbaar is, ook na een herstart",
+                 len(weg) == 1 and weg[0][0].hour == 5 and weg[0][0].minute <= 1
+                 and weg[0][1] == "Vaatwasser is vrijgegeven, maar al sinds 00:30 niet bereikbaar. "
+                                  "De coach start hem zodra hij terug is.", f"{weg}")
+        controle(f"{naam}: zolang hij weg is drukt de coach niet", not vl.vw_gedrukt, f"{vl.vw_gedrukt}")
 if (vl := v("vaatwasser-onbekend-midden")):
     controle("een seconde unknown na het terugkomen: geen melding 'geen programma', één druk, één beurt, één verslag",
              not _vw_m(vl, "laat geen programma zien") and len(vl.vw_gedrukt) == 1 and len(vl.vw_beurten) == 1

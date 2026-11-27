@@ -697,3 +697,39 @@ Proef 282 in test_coach.py (een beurt die draait: `unknown`, `unavailable`, `unk
 eindtijd; en zonder beurt een keuzelijst op `unknown`: geen laatste programma, wel de melding), en in het virtuele huis
 `vaatwasser-onbekend-midden` (om 22:00 een minuut weg, dan twee minuten `unknown`: hij blijft draaien, één druk, één
 verslag). Niet in het echt beproefd.
+
+## Even weg is geen kritiek: de sensorwacht alleen in de geschiedenis, en één melding als het krap wordt (v0.250.0)
+
+In een klantwoning kwam van 16 tot 26-11-2026 elf keer de kritieke melding "De status van Vaatwasser meldt al 10 minuten
+niets. Waarschijnlijk hapert de integratie erachter." Een vaatwasser met slechte wifi, die van 20 tot 26-11 107 keer
+wegviel, meestal korter dan tien minuten. Op 25-11 om 00:37 terwijl hij Eco 50 draaide (hij was om 02:37 gewoon klaar),
+en op 26-11 om 18:21 terwijl hij niet vrijgegeven was. Op 22-11 ook over het vermogen en de stroom van zijn meetstekker,
+die in dezelfde keuken hing. De bewoner kon er niets mee, en de wachter gaf elke keer een alarm.
+
+Sinds v0.242.0 vangt de coach dit zelf op: draait hij, dan draait hij door tot hij terug is; moet hij starten, dan
+start de coach hem als hij terug is; een start die niet aankomt meldt hij na vijf keer, en geen programma na een uur.
+De sensorwacht (`_async_sensorwacht` in coach.py) wist dat niet.
+
+- **Wat de coach zelf opvangt** (`_sensoren_opgevangen`): elke sensor van een apparaat met een programma, een status
+  en een startknop. De status, het programma, de deur, de startknop, de resterende tijd, het vermogen en de
+  energieteller. Valt zo'n sensor stil, dan komt "meldt al 10 minuten niets" als gewone regel in de geschiedenis:
+  geen kritiek, niet op de telefoon, en INFO in het log in plaats van een waarschuwing. "Doet het weer" ook alleen in
+  de geschiedenis, zoals altijd. Voor elke integratie: Home Connect, Home Connect Local en Miele lopen allemaal via
+  `offline` in `_one_programma`.
+- **Zonder startknop telt het niet.** Daar zegt het vermogen of hij draait, en dan vangt `offline` niets op.
+- **Valt er iets mee weg dat de coach wel nodig heeft** (de prijs, de accustand, de meter), dan beslist dat: kritiek
+  en op de telefoon, zoals het was.
+- **Vrijgegeven en al tien minuten weg, met de klaar-tijd binnen twee uur** (`OFFLINE_MELDEN`, `GEEN_PROGRAMMA_KLAAR`):
+  één gewone melding, "Vaatwasser is vrijgegeven, maar al sinds 00:30 niet bereikbaar. De coach start hem zodra hij
+  terug is." Zonder die melding hoort niemand het als hij de hele nacht weg blijft, en ziet de bewoner pas 's ochtends
+  dat hij niet gedraaid heeft. Eén keer per vrijgave. Sinds wanneer hij weg is (`offline_sinds`) en dat het gemeld is
+  staan met de vrijgave in het geheugen, dus een herstart geeft geen tweede melding en noemt nog de goede tijd. Tien
+  minuten, zodat de seconde `unknown` bij het terugkomen (v0.245.0) en de eerste minuten na een opstart niet tellen.
+  Zonder klaar-tijd geen melding.
+
+Proef 285 in test_coach.py (welke sensoren hij opvangt, en zonder startknop geen; niet vrijgegeven een kwartier weg: niets
+op de telefoon, een gewone regel in de geschiedenis, geen waarschuwing; samen met de prijs: kritiek; vrijgegeven en de
+hele nacht weg: om 05:00 één melding "sinds 00:30", over een herstart ervoor en een erna), en in het virtuele huis
+`vaatwasser-offline-nacht` en `vaatwasser-offline-nacht-herstart` (van 00:30 tot 07:30 weg: om 05:00 de melding, geen
+kritiek, geen druk), met bij alle `vaatwasser-offline-*` en `vaatwasser-onbekend-midden` geen kritieke melding en niets
+van de sensorwacht op de telefoon. Niet in het echt beproefd.
