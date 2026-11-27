@@ -25,7 +25,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 
 from .const import DOMAIN, EVENT_SETTINGS_UPDATED
-from .storage import async_get_store
+from .storage import async_get_store, instellingen_gewijzigd
 from .taal import t
 
 _LOGGER = logging.getLogger(__name__)
@@ -105,7 +105,7 @@ async def async_vrijgave(
     settings = await store.async_save(
         {"ready_devices": sorted(ready_set), "ready_now": sorted(nu_set & ready_set)}
     )
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     return settings
 
 
@@ -170,7 +170,7 @@ async def async_accustand(
     coach = (hass.data.get(DOMAIN) or {}).get("coach")
     if coach is not None and percent is not None:
         coach.accustand_opgegeven(device_id)
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     return settings
 
 def coach_verversen(hass: HomeAssistant) -> None:
@@ -503,7 +503,7 @@ async def async_schema(hass: HomeAssistant, device_id: str, **velden: Any) -> No
     settings = await store.async_load()
     strategy = schema_bijwerken(settings.get("strategy"), device_id, **velden)
     settings = await store.async_save({"strategy": strategy})
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     coach_verversen(hass)
 
 
@@ -704,7 +704,7 @@ async def async_batterij_veld(hass: HomeAssistant, device_id: str, veld: str, wa
             device = {**device, "battery": {**(device.get("battery") or {}), veld: waarde}}
         apparaten.append(device)
     settings = await store.async_save({"devices": apparaten})
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     coach_verversen(hass)
 
 
@@ -763,5 +763,5 @@ async def async_airco_veld(hass: HomeAssistant, device_id: str, veld: str, waard
             device = {**device, "airco": {**(device.get("airco") or {}), veld: waarde}}
         apparaten.append(device)
     settings = await store.async_save({"devices": apparaten})
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     coach_verversen(hass)

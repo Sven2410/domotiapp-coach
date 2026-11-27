@@ -44,7 +44,6 @@ from .const import (
     EVENT_DECISION,
     EVENT_BERICHTEN,
     EVENT_NOTIFICATION,
-    EVENT_SETTINGS_UPDATED,
     LEVEL_ADVISE,
     LEVEL_PROPOSE,
     LEVEL_READ,
@@ -207,7 +206,7 @@ from .planner import (
 from .ontvangers import accu_actie, melding_data, ontvangers, plek_van
 from .storage import (
     async_get_berichten, async_get_beurten, async_get_geheugen, async_get_meldingen, async_get_store,
-    async_get_zon,
+    async_get_zon, instellingen_gewijzigd,
 )
 from .zon import ZON_DAGEN, zon_dag_terug, zon_uit_opwek
 from .kamer import GENOEG as KAMER_GENOEG, geleerd_bekend, leer_erbij, leer_stap, soort_nu
@@ -3483,11 +3482,11 @@ class ChargerCoach:
         rijen.append({"device": device_id, "car": auto_id, "days": dagen})
         settings["car_usage"] = rijen
         try:
-            saved = await async_get_store(self.hass).async_save({"car_usage": rijen})
+            await async_get_store(self.hass).async_save({"car_usage": rijen})
         except Exception:  # noqa: BLE001 - een gemiste dag is geen reden om te stoppen
             _LOGGER.exception("kon het verbruik van de auto niet bewaren")
             return
-        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+        instellingen_gewijzigd(self.hass)
 
     def _offline_onthouden(self, device_id: str) -> None:
         rec = self._offline.get(device_id)
@@ -3689,11 +3688,11 @@ class ChargerCoach:
             self._meldingen_onthouden()
         if self._sensor_gemeld != self._sensor_gemeld_bewaard:
             try:
-                saved = await async_get_store(self.hass).async_save({"sensor_quiet": [
+                await async_get_store(self.hass).async_save({"sensor_quiet": [
                     {"entity": entity_id, "at": now.isoformat()} for entity_id in sorted(self._sensor_gemeld)
                 ]})
                 self._sensor_gemeld_bewaard = set(self._sensor_gemeld)
-                self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+                instellingen_gewijzigd(self.hass)
             except Exception:  # noqa: BLE001 - een melding onthouden is geen reden om te stoppen
                 _LOGGER.exception("kon niet bewaren welke sensoren al gemeld zijn")
 
@@ -4208,11 +4207,11 @@ class ChargerCoach:
             rij[soort] = [*(rij.get(soort) or []), seconden][-OPSTART_LEREN:]
         settings["startup_learned"] = list(rijen.values())
         try:
-            saved = await async_get_store(self.hass).async_save({"startup_learned": settings["startup_learned"]})
+            await async_get_store(self.hass).async_save({"startup_learned": settings["startup_learned"]})
         except Exception:  # noqa: BLE001 - een gemiste meting is geen reden om te stoppen
             _LOGGER.exception("kon niet bewaren hoe lang de integraties na de opstart nodig hadden")
             return
-        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+        instellingen_gewijzigd(self.hass)
 
     async def _async_stil_herladen(
         self, settings: dict[str, Any], entry: Any, entry_id: str, naam: str, entity_ids: list[str], now: datetime
@@ -5226,11 +5225,11 @@ class ChargerCoach:
         nieuwe_dagen = [d for lijst in per_meter.values() for d in lijst[-30:]]
         if veranderd:
             try:
-                saved = await async_get_store(self.hass).async_save(
+                await async_get_store(self.hass).async_save(
                     {"usage_start": nieuw_start, "usage_days": nieuwe_dagen}
                 )
                 settings["usage_start"], settings["usage_days"] = nieuw_start, nieuwe_dagen
-                self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+                instellingen_gewijzigd(self.hass)
             except Exception:  # noqa: BLE001 - een gemiste opslag is geen reden om te stoppen
                 _LOGGER.exception("kon het dagverbruik niet bewaren")
 
@@ -7222,11 +7221,11 @@ class ChargerCoach:
                 and nieuw["ready_now"] == sorted(settings.get("ready_now") or [])):
             return
         try:
-            saved = await async_get_store(self.hass).async_save(nieuw)
+            await async_get_store(self.hass).async_save(nieuw)
             # Ook in de instellingen van deze ronde, zodat de rest van de ronde
             # met de nieuwe stand rekent.
             settings.update(nieuw)
-            self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+            instellingen_gewijzigd(self.hass)
         except Exception:  # noqa: BLE001 - een vrijgave die blijft staan is geen reden om te stoppen
             _LOGGER.exception("kon de vrijgave van %s niet zetten", device_id)
 
@@ -7575,11 +7574,11 @@ class ChargerCoach:
             "runs": min(METING_MAX_N, n + 1), "at": einde.isoformat(),
         })
         try:
-            saved = await async_get_store(self.hass).async_save({"program_measured": rows})
+            await async_get_store(self.hass).async_save({"program_measured": rows})
         except Exception:  # noqa: BLE001 - een gemiste meting is geen reden om te stoppen
             _LOGGER.exception("kon de meting van %s niet bewaren", device_id)
             return
-        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+        instellingen_gewijzigd(self.hass)
 
     async def _async_noteer_programma(
         self, device: dict[str, Any], device_id: str, now: datetime
@@ -7972,8 +7971,8 @@ class ChargerCoach:
             if device.get("id") == device_id:
                 device = {**device, "airco": {**(device.get("airco") or {}), veld: waarde}}
             apparaten.append(device)
-        saved = await store.async_save({"devices": apparaten})
-        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+        await store.async_save({"devices": apparaten})
+        instellingen_gewijzigd(self.hass)
 
     # ------------------------------------------------------------------
     # Wat de kamer doet (v0.207.0)
@@ -8075,11 +8074,11 @@ class ChargerCoach:
                 if isinstance(r, dict) and r.get("device") != device_id]
         rows.append(geleerd)
         try:
-            saved = await async_get_store(self.hass).async_save({"airco_learned": rows})
+            await async_get_store(self.hass).async_save({"airco_learned": rows})
         except Exception:  # noqa: BLE001 - een gemiste meting is geen reden om te stoppen
             _LOGGER.exception("kon het geleerde van %s niet bewaren", device_id)
             return
-        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+        instellingen_gewijzigd(self.hass)
         settings["airco_learned"] = rows
 
     def _airco_geleerd_staat(self, settings: dict[str, Any], device: dict[str, Any]) -> dict[str, Any]:
@@ -8612,11 +8611,11 @@ class ChargerCoach:
         ]
         rows.append(rij)
         try:
-            saved = await async_get_store(self.hass).async_save({"boiler_learned": rows})
+            await async_get_store(self.hass).async_save({"boiler_learned": rows})
         except Exception:  # noqa: BLE001 - een gemiste meting is geen reden om te stoppen
             _LOGGER.exception("kon het geleerde van %s niet bewaren", device_id)
             return samen
-        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+        instellingen_gewijzigd(self.hass)
         # De instellingen van deze ronde zijn nu oud; de rij die er net in
         # geschreven is telt.
         settings["boiler_learned"] = rows
@@ -9175,11 +9174,11 @@ class ChargerCoach:
         ]
         rows.append(rij)
         try:
-            saved = await async_get_store(self.hass).async_save({"battery_state": rows})
+            await async_get_store(self.hass).async_save({"battery_state": rows})
         except Exception:  # noqa: BLE001 - een gemiste opslag is geen reden om te stoppen
             _LOGGER.exception("kon de stand van %s niet bewaren", device_id)
             return
-        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+        instellingen_gewijzigd(self.hass)
         settings["battery_state"] = rows
 
     def _rte_gemeten(
@@ -15427,11 +15426,11 @@ class ChargerCoach:
         if len(rows) == len(settings.get("car_pace") or []):
             return
         try:
-            saved = await async_get_store(self.hass).async_save({"car_pace": rows})
+            await async_get_store(self.hass).async_save({"car_pace": rows})
         except Exception:  # noqa: BLE001 - een tempo te veel is geen reden om te stoppen
             _LOGGER.exception("kon het laadtempo van de auto niet bijwerken")
             return
-        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+        instellingen_gewijzigd(self.hass)
 
     @staticmethod
     def _tempo_bewaard(
@@ -15482,14 +15481,14 @@ class ChargerCoach:
             rows.append({"device": device_id, "car": auto_id, "band": band, **rij,
                          "at": now.isoformat()})
         try:
-            saved = await async_get_store(self.hass).async_save({"car_pace": rows})
+            await async_get_store(self.hass).async_save({"car_pace": rows})
         except Exception:  # noqa: BLE001 - een gemist tempo is geen reden om te stoppen
             _LOGGER.exception("kon het laadtempo van de auto niet bewaren")
             return
         # Zoals `_async_forget`: de andere lezers horen het via de eventbus. De
         # instellingen van deze ronde zelf niet aanraken, want in de proeven is
         # `saved` hetzelfde object en dan wist een clear() alles.
-        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+        instellingen_gewijzigd(self.hass)
 
     @staticmethod
     def _tempo_uit(settings: dict[str, Any], device_id: str, auto_id: str) -> dict[int, float]:
@@ -15624,11 +15623,11 @@ class ChargerCoach:
             oud["eff"] = round((float(oud.get("eff") or meting) * n + meting) / (n + 1), 4)
             oud["n"] = n + 1
         try:
-            saved = await async_get_store(self.hass).async_save({"car_efficiency": rows})
+            await async_get_store(self.hass).async_save({"car_efficiency": rows})
         except Exception:  # noqa: BLE001 - een gemiste meting is geen reden om te stoppen
             _LOGGER.exception("kon het laadrendement niet bewaren")
             return
-        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+        instellingen_gewijzigd(self.hass)
 
     def _typed_soc(
         self,
@@ -17788,11 +17787,11 @@ class ChargerCoach:
         if not wijziging:
             return
         try:
-            saved = await async_get_store(self.hass).async_save(wijziging)
+            await async_get_store(self.hass).async_save(wijziging)
         except Exception:  # noqa: BLE001 - een vergeten percentage is geen reden om te stoppen
             _LOGGER.exception("kon de gegevens van de vorige sessie niet vergeten")
             return
-        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+        instellingen_gewijzigd(self.hass)
 
     def _teller(self, device: dict[str, Any]) -> float | None:
         """De geijkte kWh-teller van dit apparaat, hoe hij ook ingevuld is.
@@ -17872,11 +17871,11 @@ class ChargerCoach:
         if een:
             rij["one"] = int(rij.get("one") or 0) + 1
         try:
-            saved = await async_get_store(self.hass).async_save({"car_phases": rows})
+            await async_get_store(self.hass).async_save({"car_phases": rows})
         except Exception:  # noqa: BLE001 - een gemiste meting is geen reden om te stoppen
             _LOGGER.exception("kon de fasen van de auto niet bewaren")
             return
-        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+        instellingen_gewijzigd(self.hass)
 
     def _fase_uitleg(self, settings: dict[str, Any], device: dict[str, Any], charger: Charger) -> str:
         """Uitleg op de kaart als de paal zelf voor één fase koos (v0.200.0).
@@ -18812,11 +18811,11 @@ class ChargerCoach:
                 rows.append(
                     {"device": device_id, **aan, "at": dt_util.utcnow().isoformat()}
                 )
-            saved = await store.async_save({"sessions": rows})
+            await store.async_save({"sessions": rows})
         except Exception:  # noqa: BLE001 - een knop die werkt gaat voor op onthouden
             _LOGGER.exception("kon de stand van de knoppen niet bewaren")
             return
-        self.hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": saved})
+        instellingen_gewijzigd(self.hass)
 
     @callback
     def async_approve(self, device_id: str) -> None:
