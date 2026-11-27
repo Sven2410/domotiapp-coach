@@ -1058,6 +1058,11 @@ SOC_SETTLE = timedelta(minutes=3)
 # mee als stap; dat is een auto die ondertussen ergens anders geladen heeft.
 SOC_STAP_START = 1.0
 SOC_STAP_MAX = 25.0
+# Zo lang houdt de coach de laatste stand van de accusensor vast, met wat hij zelf mat erbij, als de sensor geen
+# waarde geeft (v0.252.0): een herstart van Home Assistant, waarna de integratie van de auto even nodig heeft. Thuis op
+# 27-11-2026 viel de stand daarbij twee keer één ronde terug naar een opgegeven 13% van een uur oud. Daarna geldt
+# weer wat er zonder sensor geldt, en vraagt de kaart om de stand.
+SOC_STIL_HOUDEN = timedelta(minutes=15)
 # Een accustand die niet meer meebeweegt (v0.176.0). In een klantwoning stond de accustand van een bus
 # op 28-10-2026 de hele dag op 25%, terwijl er 72,9 kWh in ging: de integratie van de auto vroeg om
 # opnieuw inloggen en werkte niets meer bij. De coach plande daarop, herstartte de paal bij "klaar" en
@@ -2223,6 +2228,8 @@ class ChargerCoach:
         # dan zou `_soc_op` nooit meer tot rust komen.
         self._soc_ruw: dict[str, float] = {}
         self._soc_ijk: dict[str, tuple[float, float]] = {}
+        # Sinds wanneer de accusensor geen waarde geeft (v0.252.0, `SOC_STIL_HOUDEN`).
+        self._soc_stil: dict[str, datetime] = {}
         # Per laadpunt: welke opgegeven accustand het is en wat de eigen meting van de paal
         # stond toen de coach hem voor het eerst zag (v0.234.0, `_typed_soc`).
         self._typed_ijk: dict[str, tuple[str | None, float]] = {}
@@ -11995,6 +12002,16 @@ class ChargerCoach:
                 reason=f"{decision.reason} {self._weg_zin(self._weg[device_id], device.get('name') or t('de laadpaal'), car)}",
             )
 
+        # Laadt hij op vol vermogen buiten de som om, dan zegt de tijdlijn dat ook: de klaar-tijdregel
+        # (v0.128.0), en sinds v0.252.0 Snelladen en een klaar-tijd die voorbij is. Anders tekent de
+        # vooruitblik "wacht" boven een paal die laadt, en rekent de batterij op een blok dat niet komt.
+        waarom_vol = None
+        if decision.charge and decision.rule == "boost":
+            waarom_vol = t("Snelladen staat aan, dus op vol vermogen")
+        elif decision.charge and decision.rule == "overdue":
+            waarom_vol = t("de klaar-tijd is voorbij, dus op vol vermogen tot hij vol is")
+        doorladen = decision.charge and (decision.rule.startswith("deadline") or waarom_vol is not None)
+
         # Remembered before anything is sent, so the panel can show what the
         # coach would do even at a level where it does nothing.
         self.state[device_id] = {
@@ -12014,12 +12031,10 @@ class ChargerCoach:
             "plan_ahead": (
                 None
                 if decision.rule in ("disconnected", "offline")
-                or (not window.enabled and charger.modus in MODI_ZONDER_SOM)
+                or (not window.enabled and charger.modus in MODI_ZONDER_SOM and not doorladen)
                 else self._tijdlijn(
                     now, settings, grid, car, charger, window,
-                    # Laadt de klaar-tijdregel, dan zegt de tijdlijn dat ook
-                    # (v0.128.0), en niet "wachten" boven een paal die laadt.
-                    doorladen=decision.charge and decision.rule.startswith("deadline"),
+                    doorladen=doorladen, waarom_vol=waarom_vol,
                 )
             ),
             # De klaar-tijd van het schema, ook zonder plan: de kaart toont de volgende
@@ -14576,7 +14591,7 @@ class ChargerCoach:
             self._fase_nu.pop(device_id, None)
 
         # --- which car ---
-        car = self._car(settings, device, charger)
+        car = self._car(settings, device, charger, now)
 
         # --- when it may run ---
         window = resolve_window(now, self._days(settings, device))
@@ -14750,7 +14765,7 @@ class ChargerCoach:
         return chosen, profile
 
     def _car(
-        self, settings: dict[str, Any], device: dict[str, Any], charger: Charger
+        self, settings: dict[str, Any], device: dict[str, Any], charger: Charger, now: datetime | None = None
     ) -> Car:
         """The car that is plugged in, as far as anybody has said."""
         chosen, profile = self._chosen_car(settings, device)
@@ -14807,11 +14822,26 @@ class ChargerCoach:
             soc = self._soc_bijgeteld(
                 device_id, soc, float(profile.get("capacity_kwh") or 0)
             )
+        if soc is not None:
+            self._soc_stil.pop(device_id, None)
         else:
-            self._soc_ruw.pop(device_id, None)
-            self._soc_opgegeven.pop(device_id, None)
-            soc = self._typed_soc(settings, device, profile)
-            geschat = soc is not None
+            nu = now or _moment()
+            stil = self._soc_stil.setdefault(device_id, nu)
+            ijk = None if vast else self._soc_ijk.get(device_id)
+            if ijk is not None and _tussen(stil, nu) < SOC_STIL_HOUDEN:
+                # De sensor zwijgt even, na een herstart of een integratie die opnieuw verbindt (v0.252.0): dan
+                # blijft de stand wat hij was, met wat de paal sindsdien leverde, zoals bij elke andere ronde. Niet
+                # de opgegeven stand: die is ouder dan de laatste waarde van de sensor, want een nieuwe opgave
+                # vergeet het ijkpunt (`accustand_opgegeven`). En de kale stand blijft staan, zodat het oordeel
+                # "niet vol" niet denkt dat de auto zich net meldde.
+                self._soc_ruw[device_id] = ijk[0]
+                self._soc_opgegeven.pop(device_id, None)
+                soc = self._soc_bijgeteld(device_id, ijk[0], float(profile.get("capacity_kwh") or 0))
+            else:
+                self._soc_ruw.pop(device_id, None)
+                self._soc_opgegeven.pop(device_id, None)
+                soc = None if ijk is not None else self._typed_soc(settings, device, profile)
+                geschat = soc is not None
         if soc is None and not vast:
             soc = self._onthouden_soc(device, profile)
             geschat = soc is not None
@@ -15569,6 +15599,34 @@ class ChargerCoach:
         erbij = max(0.0, eigen - ijk[1]) * self._rend_nu.get(device_id, CHARGE_EFFICIENCY) / capacity * 100.0
         return min(100.0, gemeten + min(erbij, self._soc_stap.get(device_id, SOC_STAP_START)))
 
+    def _soc_ijk_bewaren(self, device_id: str) -> list[float] | None:
+        """Het ijkpunt van `_soc_bijgeteld` voor de opslag: de stand, en de kWh die de paal er sindsdien in deed."""
+        ijk = self._soc_ijk.get(device_id)
+        if ijk is None:
+            return None
+        eigen = float((self._eigen.get(device_id) or {}).get("kwh") or 0.0)
+        return [round(ijk[0], 2), round(max(0.0, eigen - ijk[1]), 4)]
+
+    def _soc_ijk_terug(self, device_id: str, hervat: dict[str, Any]) -> None:
+        """Het ijkpunt en de stap van voor de herstart, als de beurt verder gaat (v0.252.0).
+
+        De eigen meting begint na een herstart bij nul, dus het ijkpunt komt daar zoveel onder te staan als er al
+        bij geteld was. Wat er tijdens de herstart zelf in ging telt niet: liever iets te laag dan te hoog.
+        """
+        try:
+            stand, erbij = (float(x) for x in hervat.get("soc_ijk") or ())
+        except (TypeError, ValueError):
+            stand = erbij = None
+        if stand is not None and erbij is not None and device_id not in self._soc_ijk:
+            eigen = float((self._eigen.get(device_id) or {}).get("kwh") or 0.0)
+            self._soc_ijk[device_id] = (stand, eigen - max(0.0, erbij))
+        try:
+            stap = float(hervat["soc_stap"])
+        except (KeyError, TypeError, ValueError):
+            return
+        if 0.0 < stap <= SOC_STAP_MAX:
+            self._soc_stap.setdefault(device_id, stap)
+
     def _rendement_meten(self, device_id: str, soc: float, eigen: float, capacity: float) -> None:
         """Het laadrendement van de auto aan deze paal, uit zijn eigen sensor.
 
@@ -15682,6 +15740,8 @@ class ChargerCoach:
         """De bewoner gaf net een stand op: vanaf nu telt de eigen meting voor die stand."""
         eigen = float((self._eigen.get(device_id) or {}).get("kwh") or 0.0)
         self._typed_ijk[device_id] = (None, eigen)
+        # En de laatste stand van de sensor telt niet meer als de sensor zwijgt: deze is nieuwer (v0.252.0).
+        self._soc_ijk.pop(device_id, None)
 
     def _typed_staart(self, device_id: str, entry: dict[str, Any], meter: float, since: float) -> float:
         """Wat er na de laatste stap van de teller nog in ging, sinds de opgegeven stand (v0.234.0).
@@ -16076,8 +16136,17 @@ class ChargerCoach:
             # Wat de coach zelf telde sinds de laatste stap van de teller (v0.112.0).
             # Zie `_staart`.
             "staart_kwh": round(self._staart(device_id, sessie), 4),
-            # En de stand van de teller waar die staart op volgt (v0.234.0, `_typed_staart`).
-            "staart_teller": (self._eigen.get(device_id) or {}).get("meter_stand"),
+            # En de stand van de teller waar die staart op volgt (v0.234.0, `_typed_staart`). In de eerste ronde na
+            # een herstart kent de coach de teller nog niet: dan die van de staart van voor de herstart (v0.252.0).
+            "staart_teller": (
+                (self._eigen.get(device_id) or {}).get("meter_stand")
+                if (self._eigen.get(device_id) or {}).get("meter_stand") is not None
+                else sessie.get("staart_teller")
+            ),
+            # De laatste stand van de accusensor en wat de paal er sindsdien in deed, en de stap van die
+            # sensor (v0.252.0, `_soc_bijgeteld`). Anders begint het bijtellen na een herstart opnieuw.
+            "soc_ijk": self._soc_ijk_bewaren(device_id),
+            "soc_stap": self._soc_stap.get(device_id),
             "soc_begin": sessie.get("soc_begin"),
             "laadt_sinds": laadt_sinds.replace(microsecond=0).isoformat() if laadt_sinds else None,
             "plafond": [
@@ -16699,6 +16768,7 @@ class ChargerCoach:
                             self._afgeleid_klaar.add(device_id)
                         if hervat.get("herstart_op") is not None:
                             self._herstart_gedaan[device_id] = hervat["herstart_op"]
+                        self._soc_ijk_terug(device_id, hervat)
         except Exception:  # noqa: BLE001 - zonder geschiedenis begint hij gewoon opnieuw
             _LOGGER.exception("kon de lopende laadbeurten niet lezen")
         # De laatste afgesloten beurt per paal, voor de kaart (v0.106.0). De
@@ -16743,6 +16813,8 @@ class ChargerCoach:
             "ijk_kwh": float(bewaard.get("ijk_kwh") or 0.0),
             "staart_kwh": float(bewaard.get("staart_kwh") or 0.0),
             "staart_teller": bewaard.get("staart_teller"),
+            "soc_ijk": bewaard.get("soc_ijk"),
+            "soc_stap": bewaard.get("soc_stap"),
             "soc_begin": bewaard.get("soc_begin"),
             "laadt_sinds": tijd(bewaard.get("laadt_sinds")),
             "plafond_reeks": reeks,
@@ -16810,6 +16882,10 @@ class ChargerCoach:
         self._modus.pop(device_id, None)
         self._doel.pop(device_id, None)
         self._rend_start.pop(device_id, None)
+        # De laatste stand van de accusensor hoort bij deze beurt (v0.252.0): een volgende auto, of dezelfde na
+        # een rit, begint opnieuw. De stap blijft, want die is van de sensor.
+        self._soc_ijk.pop(device_id, None)
+        self._soc_stil.pop(device_id, None)
         self._paused.discard(device_id)
         self._zon.pop(device_id, None)
         self._holding.pop(device_id, None)
@@ -17211,7 +17287,19 @@ class ChargerCoach:
         # beurt begon is dat het begin van de beurt, want alles ervoor was van
         # een andere. Daarna is het de laatste stap.
         basis = eigen.get("meter_bij", 0.0) if sessie.get("geijkt") else sessie.get("eigen_bij_begin", 0.0)
-        return max(0.0, eigen.get("kwh", 0.0) - basis) + float(sessie.get("staart_hervat") or 0.0)
+        hervat = float(sessie.get("staart_hervat") or 0.0)
+        # Maar alleen als de teller nog op de stand staat waar die staart op volgde (v0.252.0), zoals in
+        # `_typed_staart`. De beurt wordt bewaard vóór de teller in dezelfde ronde stapt; valt de herstart daarna,
+        # dan zit de staart al in de teller. In het virtuele huis zei het verslag zo 18,2 kWh waar 14,7 in ging,
+        # en vulde het geld het verschil bij als gat.
+        teller_toen, teller_nu = sessie.get("staart_teller"), eigen.get("meter_stand")
+        if hervat and teller_toen is not None and teller_nu is not None:
+            try:
+                if abs(float(teller_nu) - float(teller_toen)) > 1e-9:
+                    hervat = 0.0
+            except (TypeError, ValueError):
+                pass
+        return max(0.0, eigen.get("kwh", 0.0) - basis) + hervat
 
     def _beurt_kaart(
         self, device: dict[str, Any], sessie: dict[str, Any], actief: bool
@@ -18057,6 +18145,7 @@ class ChargerCoach:
         charger: Charger,
         window: Window,
         doorladen: bool = False,
+        waarom_vol: str | None = None,
     ) -> dict[str, Any]:
         """De tijdlijn van de planner, klaar om over de websocket te gaan.
 
@@ -18081,6 +18170,7 @@ class ChargerCoach:
                 solar_day=now.date(),
             ),
             doorladen=doorladen,
+            waarom_vol=waarom_vol,
         )
 
         hulp, tot = self._accu_hulp()

@@ -238,7 +238,8 @@ for naam, vl in V.items():
     # driefasige auto 0,4 kWh over de grens heen.
     # Sinds v0.79.0 alleen bij een vast contract: bij dynamisch is de piek een
     # gewoon uur op zijn prijs (de bewoner van de eerste woning, 22-09-2026).
-    if (naam not in ("snelladen", "vast-onhaalbare-klaar-tijd", "eenfase-krappe-zekering", "ford-geen-ruimte")
+    if (naam not in ("snelladen", "snelladen-avond", "accustand-herstart", "vast-onhaalbare-klaar-tijd",
+                     "eenfase-krappe-zekering", "ford-geen-ruimte")
             and vl.scenario.contract.startswith("vast")):
         controle(f"{naam}: niets van het net in de avondpiek",
                  vl.net_kwh_tussen("18:00", "20:00") < 0.6,
@@ -1378,6 +1379,43 @@ if (vl := v("snelladen")):
     controle("snelladen: vanaf negen uur vol vermogen",
              all(r.amps == 16 for r in regels_in(vl, "09:02", "12:00") if r.status != "completed"), "")
     controle("snelladen: ongeacht de zon", vl.uit_net_kwh > 0.5, f"{vl.uit_net_kwh:.2f}")
+
+# Snelladen in de tijdlijn (v0.252.0): de vooruitblik, de eindtijd en de batterij lezen hem, en thuis zeiden ze op
+# 27-11-2026 "wacht tot 20:00" en 23:15 terwijl de Ford op 10,5 kW laadde.
+if (vl := v("snelladen-avond")):
+    boost = [r for r in vl.regels if r.regel == "boost"]
+    controle("snelladen-avond: de tijdlijn laadt in elke ronde met Snelladen",
+             boost and all(r.plan_laadt_nu for r in boost),
+             f"{[(f'{r.tijd:%H:%M}', r.plan_laadt_nu) for r in boost if not r.plan_laadt_nu][:5]}")
+    verschil = [abs((virtueel.dt.datetime.fromisoformat(r.verwacht_klaar) - vl.klaar_op).total_seconds()) / 60
+                for r in boost if r.tijd >= boost[0].tijd + virtueel.dt.timedelta(minutes=5) and r.verwacht_klaar]
+    controle("snelladen-avond: de eindtijd van de tijdlijn is wanneer hij vol is, op twintig minuten na",
+             vl.klaar_op is not None and len(verschil) > len(boost) / 2 and max(verschil) <= 20,
+             f"vol om {vl.klaar_op}, {len(verschil)} van {len(boost)} ronden, grootste verschil "
+             f"{max(verschil, default=0):.0f} min")
+    controle("snelladen-avond: de batterij rekent op de auto zolang hij laadt, en daarna niet meer",
+             any((r.bat_auto_plan_kwh or 0) > 0.1 for r in boost)
+             and all((r.bat_auto_plan_kwh or 0) < 1e-6 for r in vl.regels if r.regel == "complete"),
+             f"{[(f'{r.tijd:%H:%M}', r.bat_auto_plan_kwh) for r in vl.regels if r.regel == 'complete'][:3]}")
+
+# De accustand over een herstart heen (v0.252.0).
+if (vl := v("accustand-herstart")):
+    laden = [r for r in vl.regels if r.status == "charging" and r.soc_coach is not None and r.regel == "boost"]
+    zakt = [(f"{a.tijd:%H:%M:%S}", round(a.soc_coach, 1), round(b.soc_coach, 1))
+            for a, b in zip(laden, laden[1:]) if b.soc_coach < a.soc_coach - 0.2]
+    controle("accustand-herstart: de stand van de coach zakt niet als de sensor even niets geeft", not zakt, f"{zakt}")
+    klaar = next((r for r in vl.regels if r.status == "completed"), None)
+    controle("accustand-herstart: bij klaar van de paal staat de coach op een procent na waar de auto staat",
+             klaar is not None and klaar.soc_coach is not None and klaar.soc_coach >= klaar.soc - 1.5,
+             f"{klaar and (f'{klaar.tijd:%H:%M}', klaar.soc, klaar.soc_coach)}")
+    controle("accustand-herstart: geen kritieke melding en geen herstart van de paal",
+             not [g for g in vl.geschiedenis if g.get("kind") == "kritiek"] and vl.paal_herstarts == 0,
+             f"{[g.get('message') for g in vl.geschiedenis if g.get('kind') == 'kritiek']}")
+    verslag = meldingen(vl, "geladen van")
+    kwh = [float(m.split("\n")[1].split(" kWh")[0].replace(",", ".")) for m in verslag]
+    controle("accustand-herstart: het verslag telt niets dubbel na de herstart",
+             len(kwh) == 1 and vl.geladen_kwh - 0.5 <= kwh[0] <= vl.geladen_kwh + 0.1,
+             f"verslag {kwh}, geladen {vl.geladen_kwh:.2f}")
 
 if (vl := v("kabel-eruit-middenin")):
     controle("kabel eruit: verslag met wat er in ging",

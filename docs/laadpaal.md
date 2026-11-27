@@ -2275,3 +2275,48 @@ drie dagen niet op, dan zijn zijn sensoren ook drie dagen stil, en dan meldt de 
 
 Proef 283 in test_coach.py: vijf keer twaalf minuten weg met een herstart ertussen, drie dagen stil met een
 herstart, terug, een week later weer weg, en een sensor die al gemeld was voor deze versie.
+
+## Snelladen in de tijdlijn, en de accustand over een herstart heen (v0.252.0)
+
+In de eigen woning zette de eigenaar op 27-11-2026 om 16:07 Snelladen aan. De auto laadde tot 17:25 op 16 A,
+ongeveer 10,5 kW. Om 17:24 zei de vooruitblik voor 17:00 tot 18:00 "Laadpaal: wacht, geen zon over, en voor
+20:00 geen net", met een blok om 20:00. De eindtijd (`expected_done`) stond op 23:15. De eigenaar: "dit klopt toch
+niet nu? De auto is aan het laden en de voorspelling zegt wat anders".
+
+**De tijdlijn volgt Snelladen.** `plan_ahead` rekende het plan zonder Snelladen uit, want alleen de
+klaar-tijdregel gaf `doorladen` mee (v0.128.0). De vooruitblik, de eindtijd en het uurplan van de batterij
+(`_auto_laden`) lezen die tijdlijn. Sinds v0.252.0 laadt de tijdlijn ook van nu tot vol als de regel `boost` of
+`overdue` is (de klaar-tijd is voorbij), met de reden per uur (`waarom_vol` in `timeline` en `_doorladen`). In de
+modus zon of continu zonder klaar-tijd is er met Snelladen ook een tijdlijn. De batterij ziet de auto nu laden en
+kan hem helpen als dat aan staat. Dat deed ze bij de klaar-tijdregel al.
+
+**De accustand over een herstart heen.** Om 16:28 en 17:19 herstartte Home Assistant (de uitrol van een nieuwe
+versie). Twee dingen gingen mis:
+
+- In de eerste ronde na de herstart gaf de accusensor nog niets. De coach nam toen de stand die de eigenaar om
+  16:00 had opgegeven: 13%.
+- Het bijtellen tussen twee stappen van de sensor (`_soc_bijgeteld`) stond alleen in het geheugen. De sensor
+  meldt per tien procent. Na de herstart begon de coach weer bij 70, met een stap van één procent. Bij "klaar" van
+  de paal om 17:25:02 stond hij daardoor op 71%. Het besluit was: "De auto laadt niet verder en staat op 71%.
+  Mogelijk staat er een laadgrens in de auto." Negen seconden later meldde de sensor 80.
+
+Sinds v0.252.0:
+
+- **Het ijkpunt reist mee met de bewaarde beurt.** In `_sessie_bewaren` staan nu de laatste stand van de sensor,
+  de kWh die er daarna in gingen en de stap van de sensor. `_soc_ijk_terug` zet ze na de herstart terug. Wat er
+  tijdens de herstart zelf in ging telt niet, want te laag is beter dan te hoog.
+- **Een sensor die even niets geeft**, na een herstart of een integratie die opnieuw verbindt, laat de stand staan
+  zoals hij was, met de eigen meting erbij, hooguit `SOC_STIL_HOUDEN` (een kwartier). De opgegeven stand telt dan
+  niet, want die is ouder dan de laatste waarde van de sensor. Een nieuwe opgave gaat wel voor
+  (`accustand_opgegeven` vergeet het ijkpunt). Na een kwartier geldt weer wat zonder sensor geldt en vraagt de
+  kaart om de stand. Als de kabel eruit gaat, wordt het ijkpunt vergeten.
+
+**Erbij gevonden: een verslag dat dubbel telde na een herstart.** De lopende beurt wordt elke vijf minuten
+bewaard, met wat de coach zelf telde na de laatste stap van de teller (de staart, v0.112.0). Dat bewaren gebeurt
+in de ronde vóór de teller stapt. Valt een onverwachte herstart na zo'n stap, dan zat die staart al in de teller,
+en telde `_staart` hem nog een keer. In het virtuele huis zei het verslag dan 18,2 kWh waar er 14,7 in ging, en
+vulde het geld het verschil aan. `_typed_staart` keek al naar de stand van de teller (`staart_teller`), en `_staart`
+doet dat nu ook. In de eerste ronde na een herstart wordt de tellerstand van de staart meebewaard, ook als de coach
+de teller nog niet gelezen heeft.
+
+Scenario's `snelladen-avond` en `accustand-herstart` in het virtuele huis, en proef 287 in test_coach.py.

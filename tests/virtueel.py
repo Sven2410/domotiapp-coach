@@ -1372,6 +1372,22 @@ class Regel:
     # op te lopen, en in de buurt te komen van wat er werkelijk gebeurt.
     accu_plan_kwh: float | None = None
     bat_auto_plan_kwh: float | None = None
+    # Wat de tijdlijn van de paal zegt over het uur van nu (laadt of niet) en wanneer hij klaar is
+    # (`expected_done`), zoals de vooruitblik en de batterij het lezen (v0.252.0).
+    plan_laadt_nu: bool | None = None
+    verwacht_klaar: str | None = None
+
+
+def _plan_laadt_nu(plan: dict | None, nu: dt.datetime) -> bool | None:
+    """Of het blok van de tijdlijn waar `nu` in valt laadt, of None zonder tijdlijn of blok."""
+    for blok in (plan or {}).get("blocks") or []:
+        try:
+            van, tot = dt.datetime.fromisoformat(blok["start"]), dt.datetime.fromisoformat(blok["end"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if van <= nu < tot:
+            return bool(blok.get("charging")) and float(blok.get("kwh") or 0.0) > 0
+    return None
 
 
 @dataclass
@@ -3130,6 +3146,8 @@ def draai(s: Scenario, toon: bool = False) -> Verloop:
                 over_w=max(0.0, wereld.zon_w - wereld.huis_w),
                 inkoop_w=max(0.0, netto), terug_w=max(0.0, -netto), prijs=prijs,
                 fase_amps=fasen, status=wereld.paal.status(wereld.auto),
+                plan_laadt_nu=_plan_laadt_nu(besluit.get("plan_ahead"), nu),
+                verwacht_klaar=(besluit.get("plan_ahead") or {}).get("expected_done"),
             )
             verloop.regels.append(regel)
             verloop.hoogste_fase = max(verloop.hoogste_fase, *fasen)
