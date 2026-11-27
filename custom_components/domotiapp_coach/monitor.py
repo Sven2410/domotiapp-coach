@@ -113,13 +113,17 @@ class LoadMonitor:
             self._unsubscribe_settings = None
         self._async_cancel_recheck()
 
-    @callback
-    def _async_settings_changed(self, event: Event) -> None:
-        """Adopt new settings and re-point the state subscription."""
-        settings = event.data.get("settings")
-        if not settings:
+    async def _async_settings_changed(self, _event: Event) -> None:
+        """Adopt new settings and re-point the state subscription.
+
+        Sinds v0.251.0 staan de instellingen niet meer in het event (`instellingen_gewijzigd` in storage.py), dus
+        uit de opslag. En de klok begint alleen opnieuw als de melding of de sensoren veranderden: het kasboek
+        van een batterij komt elke vijf minuten, en een belasting die langer moet aanhouden haalde dat dan nooit.
+        """
+        oud = (self._settings.get("notifications", {}).get("load_alert"), self._watched_entities())
+        self._settings = await async_get_store(self.hass).async_load()
+        if (self._settings.get("notifications", {}).get("load_alert"), self._watched_entities()) == oud:
             return
-        self._settings = settings
         # A threshold that just moved says nothing about how long the load has
         # been over the *new* line, so the clock starts again.
         self._above_since = None

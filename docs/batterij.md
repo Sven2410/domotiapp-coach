@@ -2844,3 +2844,37 @@ accu, een accu die levert, omlaag, een herstart halverwege, en `_levert_niet` op
 192 (die nu het half uur laat lopen), en in het virtuele huis `growatt-vloer-omhoog` (de coach kent 10%, de
 installateur zet 20%) en `growatt-vloer-van-nul` (de coach kent 0%, hij stopt op 21%: geen melding).
 
+
+## Het kasboek niet meer over de bus: het event zegt alleen dat er iets veranderde (v0.251.0)
+
+In een klantwoning stond het systeemlog van 24-11 08:03 tot 25-11 07:30 366 keer vol met:
+
+```
+Event data for domotiapp_coach_settings_updated exceed maximum size of 32768 bytes.
+This can cause database performance issues; Event data will not be stored
+```
+
+Elke vijf minuten bewaart de coach het kasboek van de batterij (`_async_batterij_bewaren`, `BATTERIJ_BEWAREN`): drie
+getallen veranderen (`earned_days` van vandaag, `earned_total`, `stock_euro`). Daarna ging
+`domotiapp_coach_settings_updated` over de bus met **alle** instellingen erin, 37,7 kB bij die klant. Boven 32 kB
+weigert de recorder het, met elke keer een waarschuwing. Eronder bewaart hij het wél, elke vijf minuten. Bij een batterij
+met de volle 400 dagen per lijst (`BATTERIJ_DAGEN_MAX`) en een enkel ander apparaat is dat al 28,5 kB (proef 286),
+gerekend 8 MB per dag in de tabel met events. Elke installatie met een batterij komt daar vroeg of laat.
+
+- **Het event draagt niets meer mee** (`instellingen_gewijzigd` in storage.py): `{}`, één helper voor alle ruim dertig
+  plekken in coach.py, websocket.py en entiteit.py. De naam en het moment blijven: wie er van buiten op luistert, hoort
+  nog steeds dat er iets veranderde, en haalt de instellingen op met `settings/get`. De kaarten van lovelace luisteren
+  er niet naar, en het paneel ook niet: dat abonneert zich alleen op besluiten en meldingen.
+- **Wie in de coach luistert, haalt ze uit de opslag**: `async_get_store(hass).async_load()`, uit het geheugen. archive.py
+  en de entiteiten (entiteit.py, sensor.py) deden dat al; alleen de lastbewaking (`_async_settings_changed` in
+  monitor.py) las ze uit het event.
+- **De klok van de lastbewaking loopt door bij het kasboek.** Bij elk event begon ze opnieuw te tellen hoe lang de
+  belasting al boven de drempel zat, en zette ze de herberekening af. Met het kasboek elke vijf minuten haalde een
+  belasting die langer moest aanhouden dat nooit. Nu alleen als de melding zelf (`load_alert`) of de sensoren die ze
+  volgt veranderden.
+- **Het kasboek gaat net als eerst elke vijf minuten naar schijf**, dus een herstart verandert niets: het kasboek van
+  vandaag staat er nog.
+
+Proef 286 in test_coach.py (na het kasboek één event `{}`, de instellingen wel in de opslag en na een herstart nog
+het kasboek van vandaag; nergens meer de instellingen in het event; de lastbewaking met de nieuwe instellingen, de klok
+die doorloopt bij het kasboek en opnieuw begint bij een andere drempel). Niet in het echt beproefd.

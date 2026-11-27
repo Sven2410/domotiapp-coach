@@ -7991,7 +7991,7 @@ controle("Ingeruimd, goedkoopste moment: vrijgegeven, en nu gaat eraf",
          morgen143 == (["dev-vw"], []), f"{morgen143}")
 controle("Vrijgave intrekken: allebei weg", weg143 == ([], []), f"{weg143}")
 controle("elke druk zegt het tegen het paneel en laat de coach meteen kijken",
-         sum(1 for soort, _ in hass143.bus.gebeurtenissen if soort == coachmod.EVENT_SETTINGS_UPDATED) == 3
+         sum(1 for soort, _ in hass143.bus.gebeurtenissen if soort == sys.modules["domotiapp_coach.const"].EVENT_SETTINGS_UPDATED) == 3
          and len(ververst143) == 3, f"{len(ververst143)}")
 b143 = binair143[0]
 b143.hass = hass143
@@ -20282,6 +20282,56 @@ bron285 = (BRONMAP / "coach.py").read_text(encoding="utf-8")
 controle("wat de coach zelf opvangt telt als meelezen, en gaat niet naar de telefoon",
          "uit: set[str] = ChargerCoach._sensoren_opgevangen(settings)" in bron285
          and "entity_id not in opgevangen and (" in bron285, "")
+print("=== 286. de instellingen niet meer over de bus: een klein event, en wie ze wil haalt ze op (v0.251.0) ===")
+# Een klantwoning, 24 en 25-11-2026: elke vijf minuten na het kasboek van de batterij 37,7 kB op de bus, en 366 keer
+# "Event data for domotiapp_coach_settings_updated exceed maximum size of 32768 bytes" in het log.
+import json as _json286
+opslagmod286 = sys.modules["domotiapp_coach.storage"]
+hass286, _, c286 = bouw(huis(), instellingen(devices=[LAADPAAL]))
+store286 = opslagmod286.SettingsStore(hass286)
+hass286.data["domotiapp_coach"]["store"] = store286
+dagen286 = {(dt.date(2025, 10, 23) + dt.timedelta(days=i)).isoformat(): round(0.01 * i, 2) for i in range(400)}
+ACCU286 = {"id": "dev-accu286", "type": "thuisbatterij", "name": "Accu", "brand": "overig", "entities": {}}
+asyncio.run(store286.async_save({**instellingen(devices=[LAADPAAL, ACCU286]), "battery_state": [
+    {"device": "dev-accu286", "earned_days": dict(dagen286), "realized_days": dict(dagen286),
+     "solar_stored_days": dict(dagen286)}]}))
+inst286 = asyncio.run(store286.async_load())
+hass286.bus.gebeurtenissen.clear()
+asyncio.run(c286._async_batterij_bewaren(inst286, "dev-accu286", {"earned_days": {**dagen286, "2026-11-26": 1.23},
+                                                                    "earned_total": 45.6}))
+events286 = [d for soort, d in hass286.bus.gebeurtenissen if soort == sys.modules["domotiapp_coach.const"].EVENT_SETTINGS_UPDATED]
+groot286 = len(_json286.dumps(asyncio.run(store286.async_load())))
+print(f"  instellingen {groot286} bytes, events {[len(_json286.dumps(d)) for d in events286]}")
+controle("na het kasboek één event op de bus, zonder de instellingen", events286 == [{}], f"{events286}")
+controle("en de instellingen staan wel in de opslag",
+         asyncio.run(store286.async_load())["battery_state"][0]["earned_days"]["2026-11-26"] == 1.23, "")
+# Een herstart: een nieuwe opslag op hetzelfde bestand.
+na286 = opslagmod286.SettingsStore(hass286)
+na286._store._data = store286._store._data
+rij286 = asyncio.run(na286.async_load())["battery_state"][0]
+controle("na een herstart staat het kasboek van vandaag er nog", rij286["earned_days"].get("2026-11-26") == 1.23
+         and rij286.get("earned_total") == 45.6, f"{rij286.get('earned_total')}")
+bronnen286 = {f.name: f.read_text(encoding="utf-8") for f in BRONMAP.glob("*.py")}
+controle("nergens meer de instellingen in het event",
+         not [n for n, b in bronnen286.items() if "async_fire(EVENT_SETTINGS_UPDATED, {\"settings\"" in b]
+         and "hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {})" in bronnen286["storage.py"],
+         f"{[n for n, b in bronnen286.items() if 'async_fire(EVENT_SETTINGS_UPDATED, {\"settings\"' in b]}")
+# De lastbewaking haalt ze uit de opslag, en begint haar klok alleen opnieuw als de melding of de sensoren veranderen.
+mon286 = monitormod.LoadMonitor(hass286)
+mon286._settings = asyncio.run(store286.async_load())
+sinds286 = dt.datetime(2026, 11, 26, 7, 0, tzinfo=dt.timezone.utc)
+mon286._above_since = sinds286
+asyncio.run(c286._async_batterij_bewaren(asyncio.run(store286.async_load()), "dev-accu286", {"earned_total": 46.0}))
+asyncio.run(mon286._async_settings_changed(None))
+controle("het kasboek verandert: de bewaking heeft de nieuwe instellingen, en de klok loopt door",
+         mon286._settings["battery_state"][0]["earned_total"] == 46.0 and mon286._above_since == sinds286,
+         f"{mon286._above_since}")
+melding286 = asyncio.run(store286.async_load())["notifications"]
+asyncio.run(store286.async_save({"notifications": {**melding286, "load_alert": {
+    **(melding286.get("load_alert") or {}), "threshold_percent": 61}}}))
+asyncio.run(mon286._async_settings_changed(None))
+controle("een andere drempel: de klok begint opnieuw", mon286._above_since is None
+         and mon286._settings["notifications"]["load_alert"]["threshold_percent"] == 61, f"{mon286._above_since}")
 
 print("=== 281. Coach Assist laat zien dat hij bezig is: de puntjes (v0.243.0) ===")
 # De eigenaar op 25-11-2026: "Laat ook zien dat een bericht in behandeling is met 3 puntjes die bewegen". Op de opslag

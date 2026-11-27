@@ -29,6 +29,7 @@ from .const import (
     BEURTEN_VERSION,
     DEFAULT_SETTINGS,
     DOMAIN,
+    EVENT_SETTINGS_UPDATED,
     BERICHTEN_KEY,
     BERICHTEN_MAX,
     BERICHTEN_VERSION,
@@ -419,6 +420,17 @@ def async_get_store(hass: HomeAssistant) -> SettingsStore:
     if "store" not in domain_data:
         domain_data["store"] = SettingsStore(hass)
     return domain_data["store"]
+
+
+def instellingen_gewijzigd(hass: HomeAssistant) -> None:
+    """Zeggen dat de instellingen veranderd zijn, zonder de instellingen zelf (v0.251.0).
+
+    Wie het wil weten haalt ze op uit de opslag (`async_get_store(hass).async_load()`, uit het geheugen) of met
+    `settings/get`. Tot v0.251.0 ging alles mee op de bus. In een klantwoning was dat op 25-11-2026 37,7 kB, elke
+    vijf minuten na het kasboek van de batterij: de recorder weigerde het boven 32 kB, met elke keer een
+    waarschuwing in het log, en eronder had hij het elke vijf minuten bewaard.
+    """
+    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {})
 
 
 class MeldingenStore:

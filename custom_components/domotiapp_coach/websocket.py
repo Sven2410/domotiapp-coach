@@ -48,7 +48,7 @@ from .const import (
 )
 from .ontvangers import SOORTEN, huishouden_bijwerken, nieuwe_persoon, zet_eigen_soorten
 from .entiteit import async_accustand
-from .storage import async_get_store, met_soort, schema_bijwerken, voorkeuren_bijwerken
+from .storage import async_get_store, instellingen_gewijzigd, met_soort, schema_bijwerken, voorkeuren_bijwerken
 from .taal import t
 
 
@@ -786,7 +786,7 @@ async def async_set_notifications(
             mensen.append(persoon)
         wijziging["people"] = mensen
     settings = await async_get_store(hass).async_save({"notifications": wijziging})
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     connection.send_result(msg["id"], settings)
 
 
@@ -815,7 +815,7 @@ async def async_set_household(
         settings = await async_get_store(hass).async_load()
         wijziging["people"] = huishouden_bijwerken(settings, wijziging["people"])
     settings = await async_get_store(hass).async_save({"notifications": wijziging})
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     connection.send_result(msg["id"], settings)
 
 
@@ -848,7 +848,7 @@ async def async_set_my_notifications(
         )
         return
     settings = await async_get_store(hass).async_save({"notifications": {"people": mensen}})
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     connection.send_result(msg["id"], settings)
 
 
@@ -869,7 +869,7 @@ async def async_set_settings(
     settings = await async_get_store(hass).async_save(msg["settings"])
     # Other open panels -- a tablet on the wall, a second phone -- pick the new
     # values up from this rather than having to be reloaded by hand.
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     connection.send_result(msg["id"], settings)
 
 
@@ -944,7 +944,7 @@ async def async_set_device_program(
         connection.send_error(msg["id"], "not_found", t("Dat apparaat bestaat niet."))
         return
     settings = await store.async_save({"devices": devices})
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     connection.send_result(msg["id"], settings)
 
 
@@ -1005,7 +1005,7 @@ async def async_clear_measurements(
     settings = await store.async_save(
         {"program_measured": rows, "boiler_learned": geleerd, "battery_state": batterijen, "airco_learned": kamers}
     )
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     connection.send_result(msg["id"], settings)
 
 
@@ -1033,7 +1033,7 @@ async def async_set_strategy(
     the admin-only command.
     """
     settings = await async_get_store(hass).async_save({"strategy": msg["strategy"]})
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     connection.send_result(msg["id"], settings)
 
 
@@ -1090,7 +1090,7 @@ async def async_set_device_schedule(
         days=msg.get("days"),
     )
     settings = await store.async_save({"strategy": strategy})
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     connection.send_result(msg["id"], settings)
 
 
@@ -1171,7 +1171,7 @@ async def async_set_device_preferences(
         connection.send_error(msg["id"], "invalid_format", str(fout))
         return
     settings = await store.async_save({"devices": devices})
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     connection.send_result(msg["id"], settings)
 
 
@@ -1204,7 +1204,7 @@ async def async_set_display(
     if "year_start_month" in msg:
         wijziging["history"] = {"year_start_month": msg["year_start_month"]}
     settings = await async_get_store(hass).async_save(wijziging)
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     connection.send_result(msg["id"], settings)
 
 
@@ -1242,7 +1242,7 @@ async def async_set_active_car(
         cars.append({"device": msg["device_id"], "car": msg["car"]})
 
     settings = await store.async_save({"active_cars": cars})
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     connection.send_result(msg["id"], settings)
 
 
@@ -1427,7 +1427,7 @@ async def async_contract_confirm(
         "values": vingerafdruk(settings.get("contract") or {}),
     }
     settings = await store.async_save({"contract": {"confirmed": bevestigd}})
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     connection.send_result(msg["id"], settings)
 
 
@@ -1464,7 +1464,7 @@ async def async_battery_recalculate(
         settings, msg["device_id"], _date.fromisoformat(msg["from"]), bool(msg.get("apply"))
     )
     if uit.get("toegepast"):
-        hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": await async_get_store(hass).async_load()})
+        instellingen_gewijzigd(hass)
     connection.send_result(msg["id"], uit)
 
 
@@ -1596,7 +1596,7 @@ async def async_reminders_set(
     """De herinnering voor de meterstanden (v0.130.0). De bewoner zet hem zelf, onder Meldingen."""
     wijziging = {k: msg[k] for k in ("meter_date", "meter_repeat") if k in msg}
     settings = await async_get_store(hass).async_save({"reminders": wijziging})
-    hass.bus.async_fire(EVENT_SETTINGS_UPDATED, {"settings": settings})
+    instellingen_gewijzigd(hass)
     connection.send_result(msg["id"], settings)
 
 
