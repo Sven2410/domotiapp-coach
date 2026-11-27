@@ -2568,6 +2568,7 @@ def timeline(
     tariff: Tariff = Tariff(),
     forecast: Forecast = Forecast(),
     doorladen: bool = False,
+    waarom_vol: str | None = None,
 ) -> Plan:
     """De hele tijdlijn tot de auto vol moet zijn.
 
@@ -2581,7 +2582,8 @@ def timeline(
     tot dat hij vol moet zijn."
 
     `doorladen`: de klaar-tijdregel laadt (v0.128.0). Dan volgt de tijdlijn die
-    en niet de goedkoopste uren, zie `_doorladen`.
+    en niet de goedkoopste uren, zie `_doorladen`. Sinds v0.252.0 ook Snelladen en
+    een klaar-tijd die voorbij is, met `waarom_vol` als de reden bij elk uur.
     """
     klaar = window.deadline if window.enabled else None
     # De tijdlijn eindigt waar het plan eindigt: een uur voor de klaar-tijd.
@@ -2615,7 +2617,7 @@ def timeline(
         solar_note=solar_measured_note(forecast),
     )
     if doorladen and kwh is not None:
-        _doorladen(plan, now, prices, tariff, car, amps, structureel, kwh, einde)
+        _doorladen(plan, now, prices, tariff, car, amps, structureel, kwh, einde, waarom_vol)
         return plan
 
     horizon = max((rij["end"] for rij in prices), default=None)
@@ -2813,6 +2815,7 @@ def _doorladen(
     structureel: int,
     kwh: float,
     einde: datetime | None,
+    waarom_vol: str | None = None,
 ) -> None:
     """De tijdlijn als de klaar-tijdregel laadt: vanaf nu op vol vermogen tot vol.
 
@@ -2826,6 +2829,11 @@ def _doorladen(
     Hoe lang het duurt komt uit dezelfde som als de klaar-tijdregel
     (`hours_needed`, met de afbouw bovenin), en de kilowatturen gaan naar rato
     van de tijd over de blokken.
+
+    Sinds v0.252.0 ook met Snelladen aan en na de klaar-tijd (`waarom_vol` zegt
+    dan waarom). Thuis op 27-11-2026 laadde de Ford met Snelladen van 16:07 tot
+    17:25 op 10,5 kW, terwijl de vooruitblik "wacht, voor 20:00 geen net" zei,
+    `expected_done` op 23:15 stond en de batterij op een blok om 20:00 rekende.
     """
     kw_vol = watts_for(structureel, car.phases) / 1000.0
     uren = hours_needed(car, structureel) or (kwh / kw_vol if kw_vol > 0 else 0.0)
@@ -2848,7 +2856,7 @@ def _doorladen(
         elif _echt(rij["start"]) <= _echt(klaar_om) <= _echt(rij["end"]):
             waarom = t("nog {kwh}, vol rond {klok}", kwh=_kwh(kwh_blok), klok=_clock(klaar_om))
         else:
-            waarom = t("op vol vermogen, anders is hij niet op tijd vol")
+            waarom = waarom_vol or t("op vol vermogen, anders is hij niet op tijd vol")
         plan.blocks.append(
             Blok(
                 start=rij["start"],

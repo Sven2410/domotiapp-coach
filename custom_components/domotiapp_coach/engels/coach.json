@@ -323,5 +323,7 @@
   "{naam} geeft geen stroom vrij aan {auto}. De coach probeerde het {keer} keer. De paal houdt de stroom zelf tegen: kijk in de app van de paal of daar iets het laden tegenhoudt, en herstart de paal als dat niet helpt.": "{naam} releases no power to {auto}. The coach tried {keer} times. The charger itself is holding the power back: check the charger's app for anything blocking charging, and restart the charger if that does not help.",
   "De coach probeerde {naam} {keer} keer te starten, maar de start kwam niet aan. Kijk of de machine aan staat en verbinding heeft.": "The coach tried to start {naam} {keer} times, but the start did not arrive. Check that the machine is on and connected.",
   "{naam} is vrijgegeven, maar laat geen programma zien. Zet hem even aan en kies een programma, dan plant de coach hem.": "{naam} is released, but shows no programme. Switch it on and choose a programme, and the coach will plan it.",
-  "{naam} is vrijgegeven, maar al sinds {tijd} niet bereikbaar. De coach start hem zodra hij terug is.": "{naam} is released, but has been unreachable since {tijd}. The coach will start it as soon as it is back."
+  "{naam} is vrijgegeven, maar al sinds {tijd} niet bereikbaar. De coach start hem zodra hij terug is.": "{naam} is released, but has been unreachable since {tijd}. The coach will start it as soon as it is back.",
+  "Snelladen staat aan, dus op vol vermogen": "Fast charge is on, so at full power",
+  "de klaar-tijd is voorbij, dus op vol vermogen tot hij vol is": "the ready time has passed, so at full power until it is full"
 }

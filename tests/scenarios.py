@@ -338,6 +338,28 @@ snelladen = vast_zonnig.kopie(
     naam="snelladen", uitleg="om 09:00 snelladen aan",
     gebeurtenissen=[("09:00", "snelladen", True)],
 )
+# Snelladen aan op een avond met een vast contract (v0.252.0). Thuis op 27-11-2026 laadde de Ford zo van 16:07 tot
+# 17:25 op 10,5 kW, terwijl de tijdlijn het plan zonder Snelladen bleef: de vooruitblik zei "wacht, voor 20:00 geen
+# net", de eindtijd stond op 23:15, en de batterij rekende op een laadblok om 20:00.
+snelladen_avond = Scenario(
+    "snelladen-avond",
+    "vast contract, de bus om 16:00 erin op 13%, om 16:05 Snelladen aan; de accu mag de auto helpen boven 40%",
+    contract="vast", zon=Zon(wolken="bewolkt"), auto=replace(BUS, soc=13.0), batterij=Batterij(soc=95.0, auto_boven=40.0),
+    begin="2026-09-07 15:55", kabel_erin="16:00", duur_uren=8, stap_seconden=15,
+    gebeurtenissen=[("16:05", "snelladen", True)],
+)
+# Dezelfde avond, maar als thuis op 27-11-2026 (v0.252.0): een auto die zijn accustand per tien procent meldt, een
+# opgegeven stand van een uur eerder, en Home Assistant die herstart (de uitrol) terwijl de integratie van de auto
+# daarna even niets geeft. Thuis viel de stand van de coach toen een ronde naar de opgegeven 13%, begon het bijtellen
+# na de 70 opnieuw op één procent, en zei hij bij "klaar" van de paal "laadt niet verder en staat op 71%".
+accustand_herstart = snelladen_avond.kopie(
+    naam="accustand-herstart",
+    uitleg="Snelladen, de accustand per tien procent, 13% opgegeven; om 17:30 een ronde geen accustand, om 19:57 "
+           "een herstart met twee minuten geen accustand",
+    auto=replace(BUS, soc=13.0, soc_stap=10.0, soc_vertraging_min=1, laadgrens=80.0, doel=80.0), batterij=None,
+    gebeurtenissen=[("16:00", "soc_opgeven", 13), ("16:05", "snelladen", True), ("17:30", "sensor_weg", ("soc", 1)),
+                    ("19:57", "herstart", None), ("19:57", "sensor_weg", ("soc", 2))],
+)
 kabel_eruit = vast_zonnig.kopie(
     naam="kabel-eruit-middenin", uitleg="om 13:10 gaat de kabel eruit, om 18:00 weer erin op 60%",
     gebeurtenissen=[("13:10", "kabel_uit", None), ("18:00", "kabel_in", 60)],
@@ -2254,7 +2276,7 @@ ALLE = [
     geen_soc, soc_opgegeven, soc_traag, laadgrens, laadgrens_ingesteld,
     opgegeven_doel, opgegeven_doel_herstart, opgegeven_grens,
     doel_onder_auto, soc_stappen, bijna_vol, auto_slaapt,
-    pauze, pauze_vergeten, snelladen, kabel_eruit, oude_tijden,
+    pauze, pauze_vergeten, snelladen, snelladen_avond, accustand_herstart, kabel_eruit, oude_tijden,
     p1_weg, p1_lang_weg, paal_traag,
     tien_uur, tien_uur_zon, tien_uur_valt_tegen, tien_uur_vast, equalizer, prijzen_weg,
     weekend, weekend_geen_zon, weekend_voorspelling_mis,

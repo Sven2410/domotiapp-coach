@@ -20333,6 +20333,147 @@ asyncio.run(mon286._async_settings_changed(None))
 controle("een andere drempel: de klok begint opnieuw", mon286._above_since is None
          and mon286._settings["notifications"]["load_alert"]["threshold_percent"] == 61, f"{mon286._above_since}")
 
+print("=== 287. Snelladen in de tijdlijn, en de accustand die een herstart overleeft (v0.252.0) ===")
+# Thuis op 27-11-2026: met Snelladen laadde de Ford van 16:07 tot 17:25 op 10,5 kW, terwijl de vooruitblik "wacht,
+# voor 20:00 geen net" zei en de eindtijd 23:15. En na de herstarts van 16:28 en 17:19 (de uitrol) viel de stand van
+# de coach een ronde naar de opgegeven 13%, en begon het bijtellen na de 70 opnieuw op één procent.
+inst287 = instellingen(devices=[PAAL52])
+huis287 = huis(status="charging", stroom=16.0, vermogen=3700.0, teruglevering=0.0, afname=4200.0)
+huis287["sensor.auto_soc"] = "20"
+hass287, _, coach287 = bouw(huis287, inst287)
+asyncio.run(ronde(coach287, inst287, paal=PAAL52, nu=dt.datetime(2026, 11, 27, 16, 0)))
+coach287.async_boost("dev-laadpaal", True)
+b287, _ = asyncio.run(ronde(coach287, inst287, paal=PAAL52, nu=dt.datetime(2026, 11, 27, 16, 10)))
+plan287 = b287.get("plan_ahead") or {}
+blokken287 = plan287.get("blocks") or []
+print(f"  {b287.get('rule')}: klaar {plan287.get('expected_done')}, "
+      f"{[(b['start'][11:16], b['charging'], b['why']) for b in blokken287][:3]}")
+controle("Snelladen: het uur van nu laadt op de tijdlijn, met de reden erbij",
+         b287.get("rule") == "boost" and blokken287 and blokken287[0]["charging"]
+         and blokken287[0]["why"] in ("Snelladen staat aan, dus op vol vermogen",) or "vol rond" in blokken287[0]["why"],
+         f"{blokken287[:1]}")
+controle("en geen blok dat wacht tot hij vol is",
+         all(b["charging"] for b in blokken287 if b["start"] < (plan287.get("expected_done") or "")[:16]),
+         f"{[(b['start'][11:16], b['charging']) for b in blokken287]}")
+eind287 = dt.datetime.fromisoformat(plan287.get("expected_done") or "2000-01-01T00:00")
+controle("en de eindtijd is vandaag, rond wanneer hij op 16 A vol is", dt.datetime(2026, 11, 27, 20, 0) <= eind287 <= dt.datetime(2026, 11, 27, 22, 0),
+         f"{eind287}")
+vooruit287 = coach287.vooruitblik(inst287, dt.datetime(2026, 11, 27, 16, 10))
+paal287 = next((a for a in vooruit287.get("apparaten") or [] if a.get("id") == "dev-laadpaal"), {})
+controle("de vooruitblik zegt dat hij nu laadt",
+         any(b and b.get("wat") == "laadt" and b["start"][11:13] == "16" for b in paal287.get("blokken") or []),
+         f"{(paal287.get('blokken') or [])[:2]}")
+# Zonder klaar-tijd in de modus zon: tot v0.252.0 helemaal geen tijdlijn, ook niet met Snelladen.
+inst287z = instellingen(devices=[dict(PAAL52, charge_mode="zon")])
+inst287z["strategy"]["schedules"][0]["enabled"] = False
+hass287z, _, coach287z = bouw(dict(huis287), inst287z)
+asyncio.run(ronde(coach287z, inst287z, paal=inst287z["devices"][0], nu=dt.datetime(2026, 11, 27, 16, 0)))
+coach287z.async_boost("dev-laadpaal", True)
+b287z, _ = asyncio.run(ronde(coach287z, inst287z, paal=inst287z["devices"][0], nu=dt.datetime(2026, 11, 27, 16, 10)))
+controle("ook in de modus zon zonder klaar-tijd een tijdlijn als Snelladen aan staat",
+         b287z.get("rule") == "boost" and (b287z.get("plan_ahead") or {}).get("blocks"),
+         f"{b287z.get('rule')} {b287z.get('mode')} {b287z.get('plan_ahead')}")
+# De klaar-tijd voorbij (proef 213): de tijdlijn laadt door, en zegt waarom.
+inst287o, hass287o, coach287o = door213()
+asyncio.run(ronde(coach287o, inst287o, dt.datetime(2026, 8, 18, 18, 55)))
+b287o, _ = asyncio.run(ronde(coach287o, inst287o, dt.datetime(2026, 8, 18, 19, 1)))
+blokken287o = (b287o.get("plan_ahead") or {}).get("blocks") or []
+controle("de klaar-tijd voorbij: de tijdlijn laadt nu, met de reden",
+         b287o.get("rule") == "overdue" and blokken287o and blokken287o[0]["charging"],
+         f"{b287o.get('rule')} {blokken287o[:1]}")
+
+# De accustand: een Ford die per tien procent meldt, 13% opgegeven bij teller 100.
+inst287s = instellingen(devices=[PAAL52])
+inst287s["car_soc"] = [{"device": "dev-laadpaal", "car": "car-1", "percent": 13.0, "meter": 100.0}]
+huis287s = dict(huis287)
+huis287s["sensor.auto_soc"] = "60"
+hass287s, _, coach287s = bouw(huis287s, inst287s)
+D287 = "dev-laadpaal"
+
+klok287 = [dt.datetime(2026, 11, 27, 16, 0)]
+# De klok van Home Assistant loopt met de ronden mee: `_hervat_uit` gooit een beurt weg die ouder is dan `HERVAT_MAX`.
+klok106.utcnow = lambda: klok287[0].replace(tzinfo=dt.timezone.utc)
+
+
+def stand287(c, minuut, soc=None):
+    if soc is not None:
+        hass287s.states.zet("sensor.auto_soc", soc)
+    klok287[0] = dt.datetime(2026, 11, 27, 16, 0) + dt.timedelta(minutes=minuut)
+    b, _ = asyncio.run(ronde(c, inst287s, paal=PAAL52, nu=klok287[0]))
+    return b
+
+for m in range(0, 6):
+    stand287(coach287s, m)
+for m in range(6, 21):
+    b = stand287(coach287s, m, "70" if m == 6 else None)
+s1620 = b["soc_now"]
+blip = stand287(coach287s, 21, "unavailable")
+terug = stand287(coach287s, 22, "70")
+print(f"  16:20 {s1620}, 16:21 zonder sensor {blip['soc_now']} (vraagt: {blip['soc_ask']}), 16:22 {terug['soc_now']}")
+controle("een ronde zonder sensor: de stand blijft, niet de opgegeven 13%",
+         blip["soc_now"] >= s1620 and not blip["soc_estimated"], f"{s1620} -> {blip['soc_now']}")
+controle("en de kaart vraagt er niet om", not blip["soc_ask"], f"{blip['soc_ask']}")
+controle("de sensor terug met dezelfde stand: het bijtellen loopt door",
+         terug["soc_now"] >= blip["soc_now"] and terug["soc_now"] > 73.0, f"{blip['soc_now']} -> {terug['soc_now']}")
+# Een herstart, waarna de integratie van de auto twee minuten niets geeft. Bewaard is de beurt van 16:20.
+coach287h = herstart213(hass287s)
+asyncio.run(coach287h._async_beurten_laden())
+asyncio.run(coach287h._async_geheugen_laden())
+h1 = stand287(coach287h, 23, "unavailable")
+h2 = stand287(coach287h, 24)
+h3 = stand287(coach287h, 25, "70")
+h4 = stand287(coach287h, 26)
+print(f"  na de herstart: {h1['soc_now']}, {h2['soc_now']}, sensor terug {h3['soc_now']}, {h4['soc_now']}")
+controle("na een herstart zonder sensor: de stand van voor de herstart, niet de opgegeven 13%",
+         h1["soc_now"] >= s1620 - 0.05 and h2["soc_now"] >= h1["soc_now"], f"{s1620} -> {h1['soc_now']}, {h2['soc_now']}")
+controle("en met de sensor terug telt hij verder met de stap van tien, niet opnieuw vanaf 70 met één procent",
+         h3["soc_now"] >= h2["soc_now"] and h4["soc_now"] > 72.0, f"{h3['soc_now']}, {h4['soc_now']}")
+# Een nieuwe opgave is nieuwer dan de sensor: zwijgt de sensor daarna, dan telt de opgave.
+inst287s["car_soc"] = [{"device": D287, "car": "car-1", "percent": 75.0, "meter": 100.0}]
+coach287h.accustand_opgegeven(D287)
+o1 = stand287(coach287h, 27, "unavailable")
+controle("een nieuwe opgave gaat voor als de sensor zwijgt", 75.0 <= o1["soc_now"] < 76.0 and o1["soc_estimated"],
+         f"{o1['soc_now']}")
+# En een sensor die langer dan een kwartier zwijgt: dan vraagt de kaart weer, en de oude opgave van 13% telt niet.
+inst287s["car_soc"] = [{"device": D287, "car": "car-1", "percent": 13.0, "meter": 100.0}]
+stand287(coach287h, 28, "70")
+for m in range(29, 45):
+    lang = stand287(coach287h, m, "unavailable" if m == 29 else None)
+print(f"  een kwartier zonder sensor: {lang['soc_now']}, vraagt: {lang['soc_ask']}")
+controle("na een kwartier zonder sensor vraagt de kaart weer om de stand", lang["soc_ask"], f"{lang['soc_ask']}")
+controle("en rekent hij niet met de opgegeven 13%", lang["soc_now"] is None or lang["soc_now"] >= 70.0, f"{lang['soc_now']}")
+# De kabel eruit: de laatste stand hoort bij deze beurt, en een volgende auto begint opnieuw.
+stand287(coach287h, 45, "70")
+hass287s.states.zet("sensor.laadpaal_status", "disconnected")
+hass287s.states.zet("sensor.laadpaal_vermogen", "0.0")
+for m in range(46, 49):
+    stand287(coach287h, m)
+controle("de kabel eruit: de laatste stand van de sensor is vergeten", D287 not in coach287h._soc_ijk,
+         f"{coach287h._soc_ijk.get(D287)}")
+klok106.utcnow = echte_klok106
+
+# Het verslag na een herstart: de bewaarde staart telt niet als de teller sindsdien stapte.
+coach287t = coachmod.ChargerCoach(hass287s)
+coach287t._eigen[D287] = {"kwh": 0.2, "meter_bij": 0.0, "meter_stand": 114.185}
+sessie287 = {"geijkt": True, "staart_hervat": 3.6805, "staart_teller": 110.505}
+controle("de teller stapte na het bewaren: de staart zit er al in", abs(coach287t._staart(D287, sessie287) - 0.2) < 1e-9,
+         f"{coach287t._staart(D287, sessie287)}")
+coach287t._eigen[D287]["meter_stand"] = 110.505
+controle("de teller staat nog waar hij stond: de staart telt mee", abs(coach287t._staart(D287, sessie287) - 3.8805) < 1e-9,
+         f"{coach287t._staart(D287, sessie287)}")
+coach287t._eigen[D287]["meter_stand"] = None
+controle("de teller nog niet gelezen: de staart telt mee", abs(coach287t._staart(D287, sessie287) - 3.8805) < 1e-9, "")
+coach287t._eigen[D287]["meter_stand"] = None
+bewaard287 = coach287t._sessie_bewaren(D287, {**sessie287, "begon": None}, dt.datetime(2026, 11, 27, 20, 0))
+controle("en zo bewaard houdt hij de tellerstand van de staart", bewaard287["staart_teller"] == 110.505,
+         f"{bewaard287['staart_teller']}")
+
+bron287 = (BRONMAP / "coach.py").read_text(encoding="utf-8")
+controle("de bron: Snelladen en de klaar-tijd voorbij laden door op de tijdlijn",
+         'doorladen = decision.charge and (decision.rule.startswith("deadline") or waarom_vol is not None)' in bron287, "")
+controle("de bron: het ijkpunt reist mee met de bewaarde beurt",
+         '"soc_ijk": self._soc_ijk_bewaren(device_id)' in bron287 and "self._soc_ijk_terug(device_id, hervat)" in bron287, "")
+
 print("=== 281. Coach Assist laat zien dat hij bezig is: de puntjes (v0.243.0) ===")
 # De eigenaar op 25-11-2026: "Laat ook zien dat een bericht in behandeling is met 3 puntjes die bewegen". Op de opslag
 # van proef 264, na de herstart daar.
