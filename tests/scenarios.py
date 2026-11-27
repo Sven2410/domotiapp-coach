@@ -892,6 +892,17 @@ vaatwasser_offline_midden_herstart = vaatwasser_offline_midden.kopie(
     gebeurtenissen=[("19:00", "vaatwasser_nu_starten", None), ("22:00", "vaatwasser_offline", 50),
                     ("22:20", "herstart", None)],
 )
+# Vrijgegeven, en de hele nacht van het netwerk (v0.250.0): de sensorwacht zegt het alleen in de geschiedenis, en
+# twee uur voor de klaar-tijd komt er één melding dat hij niet bereikbaar is. Naar een klantwoning, 26-11-2026.
+vaatwasser_offline_nacht = vaatwasser_avond.kopie(
+    naam="vaatwasser-offline-nacht", uitleg="om 19:00 vrijgegeven, van 00:30 tot 07:30 weg: geen kritiek, om 05:00 één melding 'niet bereikbaar', en terug plant hij opnieuw",
+    gebeurtenissen=[("19:00", "vaatwasser_vrijgeven", None), ("00:30", "vaatwasser_offline", 420)],
+)
+vaatwasser_offline_nacht_herstart = vaatwasser_offline_nacht.kopie(
+    naam="vaatwasser-offline-nacht-herstart", uitleg="hetzelfde, met een herstart om 05:30: geen tweede melding",
+    gebeurtenissen=[("19:00", "vaatwasser_vrijgeven", None), ("00:30", "vaatwasser_offline", 420),
+                    ("05:30", "herstart", None)],
+)
 # 26-11-2026: Home Connect viel een seconde weg, en zei bij het terugkomen eerst een seconde `unknown`. Midden in een beurt.
 vaatwasser_onbekend_midden = vaatwasser_offline_midden.kopie(
     naam="vaatwasser-onbekend-midden", uitleg="nu starten om 19:00, om 22:00 een minuut weg en dan twee minuten unknown: hij draait door, geen melding 'geen programma', geen tweede start",
@@ -2233,7 +2244,7 @@ ALLE = [
     alfen_drie_zon, alfen_fasen_zon, alfen_fasen_wisselend, alfen_fasen_helder, alfen_drie_dyn, alfen_fasen_dyn,
     alfen_een_fase, alfen_een_fase_vers, alfen_houdt_tegen, alfen_houdt_tegen_herstart, alfen_auto_slaapt,
     vaatwasser_offline_start, vaatwasser_offline_start_lokaal, vaatwasser_offline_midden,
-    vaatwasser_offline_midden_herstart, vaatwasser_onbekend_midden, vaatwasser_keuze_weg, vaatwasser_keuze_weg_onbekend,
+    vaatwasser_offline_midden_herstart, vaatwasser_offline_nacht, vaatwasser_offline_nacht_herstart, vaatwasser_onbekend_midden, vaatwasser_keuze_weg, vaatwasser_keuze_weg_onbekend,
     vast_zonnig, vast_bewolkt, vast_geen_zon, vast_wisselend, vast_salderen, vast_avond,
     vast_grote_auto, vast_zonder_voorspelling, vast_sensoren, vast_voorspelling_mis,
     vast_geen_klaar_tijd, vast_krap, vast_onhaalbaar,

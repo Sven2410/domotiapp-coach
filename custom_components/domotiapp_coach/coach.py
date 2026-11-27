@@ -741,6 +741,9 @@ START_FOUTEN = 5
 # de klaar-tijd binnen `GEEN_PROGRAMMA_KLAAR` komt.
 GEEN_PROGRAMMA_MELDEN = timedelta(hours=1)
 GEEN_PROGRAMMA_KLAAR = timedelta(hours=2)
+# Vrijgegeven en zo lang al niet bereikbaar, met de klaar-tijd binnen `GEEN_PROGRAMMA_KLAAR`: één melding (v0.250.0).
+# Korter is een hapering bij het terugkomen of na een opstart, en die vangt de coach zelf op.
+OFFLINE_MELDEN = timedelta(minutes=10)
 
 # Een apparaat zonder startknop, op een meetstekker (merk "overig"). De coach
 # ziet aan het vermogen of hij draait: boven DRAAI_W is draaien, en klaar is
@@ -3749,9 +3752,13 @@ class ChargerCoach:
         # meeleest laat hem niets anders doen, en de bewoner kan er niets mee.
         kritiek = any(entity_id not in meelezen for entity_id, _n, _s, _g in bundel)
         # Naar de telefoon alleen als er een sensor bij is die de afgelopen drie dagen niet in een
-        # melding stond (`STIL_OPNIEUW`, v0.248.0); anders alleen in de geschiedenis.
+        # melding stond (`STIL_OPNIEUW`, v0.248.0); anders alleen in de geschiedenis. En niet als de
+        # coach het voor elke sensor in de bundel zelf opvangt (v0.250.0).
+        opgevangen = self._sensoren_opgevangen(settings)
         bellen = any(
-            entity_id not in self._sensor_gebeld or _tussen(self._sensor_gebeld[entity_id], now) >= STIL_OPNIEUW
+            entity_id not in opgevangen and (
+                entity_id not in self._sensor_gebeld or _tussen(self._sensor_gebeld[entity_id], now) >= STIL_OPNIEUW
+            )
             for entity_id, _n, _s, _g in bundel
         )
         if bellen:
@@ -3844,8 +3851,9 @@ class ChargerCoach:
 
         De coach doet er niets mee, dus een sensor die zwijgt is geen kritieke melding. De temperatuur
         van zo'n apparaat telt wel, als er een melding of een ventilator aan hangt (`_temp_nodig`).
+        Sinds v0.250.0 ook wat de coach zelf opvangt (`_sensoren_opgevangen`).
         """
-        uit: set[str] = set()
+        uit: set[str] = ChargerCoach._sensoren_opgevangen(settings)
         for device in ChargerCoach._alleen_uitlezen(settings):
             entities = device.get("entities") or {}
             if device.get("entity"):
@@ -3854,6 +3862,28 @@ class ChargerCoach:
                 if isinstance(waarde, str) and waarde and not (
                     sleutel == "temperature" and _temp_nodig(settings, device)
                 ):
+                    uit.add(waarde)
+        return uit
+
+    @staticmethod
+    def _sensoren_opgevangen(settings: dict[str, Any]) -> set[str]:
+        """De sensoren van een apparaat met een programma, een status en een startknop (v0.250.0).
+
+        Is zo'n apparaat even van het netwerk, dan vangt de coach dat zelf op (`offline` in `_one_programma`,
+        v0.242.0): draait hij, dan draait hij door; moet hij starten, dan start hij als hij terug is; en wat
+        de bewoner moet weten heeft een eigen melding (`START_FOUTEN`, `GEEN_PROGRAMMA_MELDEN`,
+        `OFFLINE_MELDEN`). De sensorwacht zet het dan alleen in de geschiedenis. In een klantwoning kwam
+        "de status meldt al 10 minuten niets" van 16 tot 26-11-2026 elf keer als kritiek op de telefoon,
+        over een vaatwasser met slechte wifi; en op 22-11 ook over het vermogen en de stroom van zijn
+        meetstekker, die de coach alleen gebruikt om te tellen.
+        """
+        uit: set[str] = set()
+        for device in settings.get("devices") or []:
+            entities = device.get("entities") or {}
+            if device.get("type") not in PROGRAMMA_TYPES or not entities.get("status") or not entities.get("start"):
+                continue
+            for waarde in (device.get("entity"), device.get("energy_entity"), *entities.values()):
+                if isinstance(waarde, str) and waarde:
                     uit.add(waarde)
         return uit
 
@@ -5975,6 +6005,11 @@ class ChargerCoach:
             eerste = False
         else:
             sessie["gezien"] = True
+        # Sinds wanneer hij weg is, voor de melding hieronder (v0.250.0). In het geheugen met de vrijgave.
+        if not offline:
+            sessie["offline_sinds"] = None
+        elif sessie.get("offline_sinds") is None:
+            sessie["offline_sinds"] = now
 
         klep = ""
         if zonder_vrijgave and not alleen_lezen:
@@ -6175,6 +6210,24 @@ class ChargerCoach:
                 kritiek=True, plek=self._plek(device),
             )
 
+        # Vrijgegeven, en al een tijd niet bereikbaar terwijl de klaar-tijd dichtbij komt: één melding (v0.250.0).
+        # De sensorwacht zegt het niet meer (`_sensoren_opgevangen`), en blijft hij de hele nacht weg, dan hoort
+        # de bewoner anders pas 's ochtends dat hij niet gedraaid heeft. Eén keer per vrijgave, ook na een herstart.
+        weg_sinds = sessie.get("offline_sinds")
+        if (
+            mag and released and not alleen_lezen and offline and not draait and sessie["gestart"] is None
+            and weg_sinds is not None and now - weg_sinds >= OFFLINE_MELDEN
+            and "offline" not in sessie["gemeld"]
+            and window.enabled and window.deadline is not None
+            and window.deadline > now and _tussen(now, window.deadline) <= GEEN_PROGRAMMA_KLAAR
+        ):
+            sessie["gemeld"].add("offline")
+            await self._async_tell(
+                t("{naam} is vrijgegeven, maar al sinds {tijd} niet bereikbaar. De coach start hem zodra hij terug is.",
+                  naam=naam, tijd=_wanneer(now, weg_sinds)),
+                plek=self._plek(device),
+            )
+
         # Klaar: verslag, opslag, vrijgave eraf.
         if status in KLAAR or (sessie["gestart"] is not None and not draait and status in ("ready", "inactive", "")):
             if sessie["gestart"] is not None and "klaar" not in sessie["gemeld"]:
@@ -6358,6 +6411,8 @@ class ChargerCoach:
             # Sinds wanneer de coach wil drukken maar de startknop er niet is
             # (Home Connect Local met de deur open), of starten op afstand uit staat.
             "knop_weg": None,
+            # Sinds wanneer hij niet bereikbaar is (v0.250.0, `OFFLINE_MELDEN`).
+            "offline_sinds": None,
             # De vrijgaveknop zoals hij de vorige ronde stond (het tijdstip van
             # de laatste druk), en of er na het besluit een melding moet komen.
             "knop": None,
@@ -18347,7 +18402,7 @@ class ChargerCoach:
                         "accu_kwh", "net_eur")
     _BOILER_MOMENTEN = ("gestart", "gekeken", "nodig_sinds")
     # En van een programma dat vrijgegeven is maar nog niet draait.
-    _PROGRAMMA_MOMENTEN = ("vrijgegeven", "gedrukt", "gevraagd", "knop_weg")
+    _PROGRAMMA_MOMENTEN = ("vrijgegeven", "gedrukt", "gevraagd", "knop_weg", "offline_sinds")
 
     async def _async_geheugen_laden(self) -> None:
         """Wat er voor de herstart onthouden was, terug in de coach."""
